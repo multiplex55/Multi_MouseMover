@@ -1,0 +1,10 @@
+[package]
+name = "Learning_Rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rdev = "0.5.3"
+enigo = "0.3.0"                                        # Ensure the crate version is correct
+serde = { version = "1.0.217", features = ["derive"] }
+toml = "0.8.19"

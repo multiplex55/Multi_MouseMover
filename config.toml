@@ -1,0 +1,16 @@
+# Key bindings map keyboard keys to actions
+[key_bindings]
+KeyW = "move_up"
+KeyA = "move_left"
+KeyS = "move_down"
+KeyD = "move_right"
+KeySpace = "left_click"
+KeyE = "right_click"
+
+# Grid size for grid-based navigation
+[grid_size]
+width = 3
+height = 3
+
+# Smooth jump speed for mouse movements
+smooth_jump_speed = 5.0
