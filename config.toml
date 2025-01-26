@@ -25,6 +25,7 @@ key_bindings = [
         "right_click",
     ],
 ]
+polling_rate = 50
 
 # Grid size for grid-based navigation
 [grid_size]

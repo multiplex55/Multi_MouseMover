@@ -577,3 +577,32 @@ impl KeyBindings {
         self.bindings.get(&key)
     }
 }
+
+/// Manages actions associated with key presses
+pub struct ActionHandler {
+    actions: HashMap<String, Box<dyn Fn() + Send + Sync>>,
+}
+
+impl ActionHandler {
+    /// Create a new ActionHandler
+    pub fn new() -> Self {
+        Self {
+            actions: HashMap::new(),
+        }
+    }
+
+    /// Add an action
+    pub fn add_action<F>(&mut self, name: &str, action: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.actions.insert(name.to_string(), Box::new(action));
+    }
+
+    /// Execute an action by name
+    pub fn execute_action(&self, name: &str) {
+        if let Some(action) = self.actions.get(name) {
+            action();
+        }
+    }
+}
