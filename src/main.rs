@@ -1,5 +1,7 @@
+mod action;
 mod keyboard;
 
+use action::*;
 use keyboard::*;
 use lazy_static::lazy_static;
 use serde::Deserialize;
@@ -16,18 +18,18 @@ static mut HOOK_HANDLE: Option<HHOOK> = None;
 lazy_static! {
     static ref ACTION_HANDLER: ActionHandler = {
         let mut handler = ActionHandler::new();
-        handler.add_action("move_up", || println!("Moving up!"));
-        handler.add_action("move_down", || println!("Moving down!"));
-        handler.add_action("move_left", || println!("Moving left!"));
-        handler.add_action("move_right", || println!("Moving right!"));
+        handler.add_action(Action::MoveUp, || println!("Moving up!"));
+        handler.add_action(Action::MoveDown, || println!("Moving down!"));
+        handler.add_action(Action::MoveLeft, || println!("Moving left!"));
+        handler.add_action(Action::MoveRight, || println!("Moving right!"));
         handler
     };
     static ref KEY_ACTIONS: KeyBindings = {
         let mut bindings = KeyBindings::new();
-        bindings.add_binding(VirtualKey::W, "move_up".to_string());
-        bindings.add_binding(VirtualKey::S, "move_down".to_string());
-        bindings.add_binding(VirtualKey::A, "move_left".to_string());
-        bindings.add_binding(VirtualKey::D, "move_right".to_string());
+        bindings.add_binding(VirtualKey::W, Action::MoveUp);
+        bindings.add_binding(VirtualKey::S, Action::MoveDown);
+        bindings.add_binding(VirtualKey::A, Action::MoveLeft);
+        bindings.add_binding(VirtualKey::D, Action::MoveRight);
         bindings
     };
 }
@@ -74,14 +76,14 @@ fn main() {
     let config = Config::load_from_file("config.toml");
 
     // Initialize key bindings
-    let mut key_bindings = KeyBindings::new();
-    for (key, action) in config.key_bindings {
-        if let Some(virtual_key) = VirtualKey::from_string(&key) {
-            key_bindings.add_binding(virtual_key, action);
-        }
-    }
+    // let mut key_bindings = KeyBindings::new();
+    // for (key, action) in config.key_bindings {
+    //     if let Some(virtual_key) = VirtualKey::from_string(&key) {
+    //         key_bindings.add_binding(virtual_key, action);
+    //     }
+    // }
 
-    println!("Key bindings loaded: {:?}", key_bindings);
+    // println!("Key bindings loaded: {:?}", key_bindings);
 
     unsafe {
         let h_instance = GetModuleHandleW(None).expect("Failed to get module handle");
