@@ -1,11 +1,30 @@
 # Key bindings map keyboard keys to actions
-[key_bindings]
-KeyW = "move_up"
-KeyA = "move_left"
-KeyS = "move_down"
-KeyD = "move_right"
-KeySpace = "left_click"
-KeyE = "right_click"
+key_bindings = [
+    [
+        "W",
+        "move_up",
+    ],
+    [
+        "A",
+        "move_left",
+    ],
+    [
+        "S",
+        "move_down",
+    ],
+    [
+        "D",
+        "move_right",
+    ],
+    [
+        "SPACE",
+        "left_click",
+    ],
+    [
+        "E",
+        "right_click",
+    ],
+]
 
 # Grid size for grid-based navigation
 [grid_size]

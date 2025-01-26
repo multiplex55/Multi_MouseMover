@@ -1,97 +1,68 @@
-use enigo::*;
-use rdev::{listen, EventType, Key as RdevKey};
+mod keyboard;
+
+use keyboard::{KeyBindings, VirtualKey};
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::fs;
+use windows::Win32::Foundation::*;
+use windows::Win32::System::LibraryLoader::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+static mut HOOK_HANDLE: Option<HHOOK> = None;
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    key_bindings: HashMap<String, String>,
-    grid_size: GridSize, // Use GridSize struct
-    #[serde(default)] // Provide a default value if the field is missing
-    smooth_jump_speed: f32,
-}
-
-#[derive(Debug, Deserialize)]
-struct GridSize {
-    width: u32,
-    height: u32,
+    key_bindings: Vec<(String, String)>,
 }
 
 impl Config {
-    /// Load the configuration from a TOML file
     fn load_from_file(path: &str) -> Self {
         let config_str = fs::read_to_string(path).expect("Failed to read config file");
         toml::from_str(&config_str).expect("Failed to parse config file")
     }
 }
 
-struct MouseMaster {
-    enigo: Enigo,
-    config: Config,
-    current_mode: String,
-}
-
-impl MouseMaster {
-    fn new(config: Config) -> Self {
-        Self {
-            enigo: Enigo::new(&Settings::default()).unwrap(),
-            config,
-            current_mode: "default".to_string(),
+unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+    if code == HC_ACTION.try_into().unwrap() {
+        let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
+        if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
+            println!("Key pressed: {:?}", virtual_key);
         }
     }
-
-    fn handle_keyboard_input(&mut self, key: RdevKey) {
-        if let Some(action) = self.config.key_bindings.get(&format!("{:?}", key)) {
-            match action.as_str() {
-                "move_up" => self.move_mouse(0, -10),
-                "move_down" => self.move_mouse(0, 10),
-                "move_left" => self.move_mouse(-10, 0),
-                "move_right" => self.move_mouse(10, 0),
-                "left_click" => self
-                    .enigo
-                    .button(enigo::Button::Left, enigo::Direction::Press)
-                    .unwrap(),
-                "right_click" => self
-                    .enigo
-                    .button(enigo::Button::Right, enigo::Direction::Press)
-                    .unwrap(),
-                _ => eprintln!("Unknown action: {}", action),
-            }
-        }
-    }
-
-    fn move_mouse(&mut self, dx: i32, dy: i32) {
-        let (current_x, current_y) = self.enigo.location().unwrap();
-        self.enigo
-            .move_mouse(current_x + dx, current_y + dy, enigo::Coordinate::Abs);
-    }
-
-    fn display_grid(&self) {
-        println!(
-            "Displaying grid of size {}x{}",
-            self.config.grid_size.width, self.config.grid_size.height
-        );
-    }
-
-    fn switch_mode(&mut self, mode: &str) {
-        self.current_mode = mode.to_string();
-        println!("Switched to mode: {}", mode);
-    }
+    CallNextHookEx(None, code, w_param, l_param)
 }
 
 fn main() {
-    // Load the configuration file
+    // Load configuration
     let config = Config::load_from_file("config.toml");
-    let mut mouse_master = MouseMaster::new(config);
 
-    println!("MouseMaster is running. Press CTRL+C to exit.");
-
-    if let Err(error) = listen(move |event| {
-        if let EventType::KeyPress(key) = event.event_type {
-            mouse_master.handle_keyboard_input(key);
+    // Initialize key bindings
+    let mut key_bindings = KeyBindings::new();
+    for (key, action) in config.key_bindings {
+        if let Some(virtual_key) = VirtualKey::from_string(&key) {
+            key_bindings.add_binding(virtual_key, action);
         }
-    }) {
-        eprintln!("Error: {:?}", error);
+    }
+
+    println!("Key bindings loaded: {:?}", key_bindings);
+
+    unsafe {
+        let h_instance = GetModuleHandleW(None).expect("Failed to get module handle");
+        HOOK_HANDLE = SetWindowsHookExW(
+            WH_KEYBOARD_LL,
+            Some(keyboard_hook),
+            Some(h_instance.into()),
+            0,
+        )
+        .ok();
+    }
+
+    let mut msg = MSG::default();
+    unsafe { while GetMessageW(&mut msg, None, 0, 0).as_bool() {} }
+
+    unsafe {
+        if let Some(hook) = HOOK_HANDLE {
+            UnhookWindowsHookEx(hook).expect("Failed to unhook");
+        }
     }
 }
