@@ -7,7 +7,24 @@ pub enum Action {
     MoveDown,
     MoveLeft,
     MoveRight,
+    LeftClick,
+    RightClick,
     // Add more actions as needed
+}
+
+impl Action {
+    /// Convert a string to an `Action` enum
+    pub fn from_string(action: &str) -> Option<Self> {
+        match action.to_lowercase().as_str() {
+            "move_up" => Some(Self::MoveUp),
+            "move_down" => Some(Self::MoveDown),
+            "move_left" => Some(Self::MoveLeft),
+            "move_right" => Some(Self::MoveRight),
+            "left_click" => Some(Self::LeftClick),
+            "right_click" => Some(Self::RightClick),
+            _ => None,
+        }
+    }
 }
 
 /// Manages actions associated with key presses
