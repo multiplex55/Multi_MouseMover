@@ -59,11 +59,13 @@ impl MouseMaster {
             "Displaying grid of size {}x{}",
             self.config.grid_size.width, self.config.grid_size.height
         );
+        //FUTURE GROWTH
     }
 
     /// Switches to a different mode
     pub fn switch_mode(&mut self, mode: &str) {
         self.current_mode = mode.to_string();
         println!("Switched to mode: {}", mode);
+        //FUTURE GROWTH
     }
 }

@@ -17,34 +17,11 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 static mut HOOK_HANDLE: Option<HHOOK> = None;
 
-// lazy_static! {
-//     static ref ACTION_HANDLER: ActionHandler = {
-//         let mut handler = ActionHandler::new();
-//         // Bind specific actions to their respective functions
-//         handler.add_action(Action::MoveUp, move_up);
-//         handler.add_action(Action::MoveDown, move_down);
-//         handler.add_action(Action::MoveLeft, move_left);
-//         handler.add_action(Action::MoveRight, move_right);
-//         handler.add_action(Action::LeftClick, left_click);
-//         handler.add_action(Action::RightClick, right_click);
-//         handler
-//     };
-
-//     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
-// }
 lazy_static! {
     static ref ACTION_HANDLER: RwLock<ActionHandler> = {
         let config = Config::load_from_file("config.toml");
         let mouse_master = MouseMaster::new(config.clone());
         let handler = ActionHandler::new(mouse_master);
-
-        // // Bind specific actions to their respective functions
-        // handler.add_action(Action::MoveUp, move_up);
-        // handler.add_action(Action::MoveDown, move_down);
-        // handler.add_action(Action::MoveLeft, move_left);
-        // handler.add_action(Action::MoveRight, move_right);
-        // handler.add_action(Action::LeftClick, left_click);
-        // handler.add_action(Action::RightClick, right_click);
 
         RwLock::new(handler)
     };
@@ -107,9 +84,11 @@ fn main() {
     // Load configuration
     let config = Config::load_from_file("config.toml");
     config.initialize_bindings();
-
     println!("Key bindings loaded from config");
-
+    println!(
+        "Loaded grid size: {}x{}",
+        config.grid_size.width, config.grid_size.height
+    );
     unsafe {
         let h_instance = GetModuleHandleW(None).expect("Failed to get module handle");
         HOOK_HANDLE = SetWindowsHookExW(
