@@ -7,6 +7,10 @@ pub enum Action {
     MoveDown,
     MoveLeft,
     MoveRight,
+    MoveUpRight,
+    MoveUpLeft,
+    MoveDownRight,
+    MoveDownLeft,
     LeftClick,
     RightClick,
     // Add more actions as needed
@@ -20,6 +24,10 @@ impl Action {
             "move_down" => Some(Self::MoveDown),
             "move_left" => Some(Self::MoveLeft),
             "move_right" => Some(Self::MoveRight),
+            "move_up_right" => Some(Self::MoveUpRight),
+            "move_up_left" => Some(Self::MoveUpLeft),
+            "move_down_right" => Some(Self::MoveDownRight),
+
             "left_click" => Some(Self::LeftClick),
             "right_click" => Some(Self::RightClick),
             _ => None,
@@ -69,26 +77,31 @@ impl ActionHandler {
             self.active_keys.remove(&key); // Remove key from active set
         }
 
-        // Compute resultant movement
-        let mut dx = 0;
-        let mut dy = 0;
+        // Collect actions to execute
+        let actions_to_execute: Vec<Action> = if self.active_keys.contains(&Action::MoveUp)
+            && self.active_keys.contains(&Action::MoveRight)
+        {
+            vec![Action::MoveUpRight]
+        } else if self.active_keys.contains(&Action::MoveUp)
+            && self.active_keys.contains(&Action::MoveLeft)
+        {
+            vec![Action::MoveUpLeft]
+        } else if self.active_keys.contains(&Action::MoveDown)
+            && self.active_keys.contains(&Action::MoveRight)
+        {
+            vec![Action::MoveDownRight]
+        } else if self.active_keys.contains(&Action::MoveDown)
+            && self.active_keys.contains(&Action::MoveLeft)
+        {
+            vec![Action::MoveDownLeft]
+        } else {
+            // If no combination is active, collect all active individual actions
+            self.active_keys.iter().copied().collect()
+        };
 
-        if self.active_keys.contains(&Action::MoveUp) {
-            dy -= 10; // Move up
-        }
-        if self.active_keys.contains(&Action::MoveDown) {
-            dy += 10; // Move down
-        }
-        if self.active_keys.contains(&Action::MoveLeft) {
-            dx -= 10; // Move left
-        }
-        if self.active_keys.contains(&Action::MoveRight) {
-            dx += 10; // Move right
-        }
-
-        // Apply the calculated movement
-        if dx != 0 || dy != 0 {
-            self.mouse_master.move_mouse(dx, dy);
+        // Execute the collected actions
+        for action in actions_to_execute {
+            self.execute_action(&action);
         }
     }
 }

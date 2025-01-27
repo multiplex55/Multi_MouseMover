@@ -27,6 +27,10 @@ impl MouseMaster {
             Action::MoveRight => self.move_right(),
             Action::LeftClick => self.left_click(),
             Action::RightClick => self.right_click(),
+            Action::MoveUpRight => self.move_up_right(),
+            Action::MoveUpLeft => self.move_up_left(),
+            Action::MoveDownRight => self.move_down_right(),
+            Action::MoveDownLeft => self.move_down_left(),
         }
     }
 
@@ -52,6 +56,30 @@ impl MouseMaster {
     fn move_right(&mut self) {
         self.move_mouse(10, 0);
         println!("Moving right!");
+    }
+
+    /// Moves the mouse up-right
+    fn move_up_right(&mut self) {
+        self.move_mouse(10, -10);
+        println!("Moving up-right!");
+    }
+
+    /// Moves the mouse up-right
+    fn move_up_left(&mut self) {
+        self.move_mouse(-10, -10);
+        println!("Moving up-left");
+    }
+
+    /// Moves the mouse down-left
+    fn move_down_right(&mut self) {
+        self.move_mouse(10, 10);
+        println!("Moving down-right!");
+    }
+
+    /// Moves the mouse down-left
+    fn move_down_left(&mut self) {
+        self.move_mouse(-10, 10);
+        println!("Moving down-left!");
     }
 
     /// Simulates a left mouse click
