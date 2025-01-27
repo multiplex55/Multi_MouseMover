@@ -7,6 +7,7 @@ use action_handler::*;
 use keyboard::*;
 use lazy_static::lazy_static;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fs;
 use std::sync::RwLock;
 use std::thread::sleep;
@@ -26,6 +27,7 @@ lazy_static! {
         RwLock::new(handler)
     };
     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
+    static ref ACTIVE_KEYS: RwLock<HashSet<VirtualKey>> = RwLock::new(HashSet::new());
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -65,17 +67,23 @@ impl Config {
 
 unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     if code == HC_ACTION.try_into().unwrap() {
-        // Check if the key event is a KEYDOWN event
-        if w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN {
+        // Check if the key event is a KEYDOWN or KEYUP event
+        if w_param.0 as u32 == WM_KEYDOWN
+            || w_param.0 as u32 == WM_SYSKEYDOWN
+            || w_param.0 as u32 == WM_KEYUP
+            || w_param.0 as u32 == WM_SYSKEYUP
+        {
             let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
-
             if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
                 let key_actions = KEY_ACTIONS.read().unwrap(); // Acquire read lock
                 let mut action_handler = ACTION_HANDLER.write().unwrap();
 
-                if let Some(action_name) = key_actions.get_action(virtual_key) {
-                    action_handler.execute_action(action_name);
-                    return LRESULT(1); // Prevent the key event from propagating further
+                // Map VirtualKey to Action and call process_active_keys
+                if let Some(action) = key_actions.get_action(virtual_key) {
+                    let is_keydown =
+                        w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
+                    action_handler.process_active_keys(*action, is_keydown);
+                    return LRESULT(1); // Prevent further propagation of the key event
                 }
             }
         }

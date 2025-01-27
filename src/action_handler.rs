@@ -67,7 +67,7 @@ impl MouseMaster {
     }
 
     /// Moves the mouse by the given `dx` and `dy` offsets
-    fn move_mouse(&mut self, dx: i32, dy: i32) {
+    pub fn move_mouse(&mut self, dx: i32, dy: i32) {
         if let Ok((current_x, current_y)) = self.enigo.location() {
             self.enigo
                 .move_mouse(current_x + dx, current_y + dy, Coordinate::Abs)
