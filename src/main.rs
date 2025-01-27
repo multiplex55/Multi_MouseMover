@@ -65,15 +65,18 @@ impl Config {
 
 unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     if code == HC_ACTION.try_into().unwrap() {
-        let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
+        // Check if the key event is a KEYDOWN event
+        if w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN {
+            let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
 
-        if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
-            let key_actions = KEY_ACTIONS.read().unwrap(); // Acquire read lock
-            let mut action_handler = ACTION_HANDLER.write().unwrap();
+            if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
+                let key_actions = KEY_ACTIONS.read().unwrap(); // Acquire read lock
+                let mut action_handler = ACTION_HANDLER.write().unwrap();
 
-            if let Some(action_name) = key_actions.get_action(virtual_key) {
-                action_handler.execute_action(action_name);
-                return LRESULT(1);
+                if let Some(action_name) = key_actions.get_action(virtual_key) {
+                    action_handler.execute_action(action_name);
+                    return LRESULT(1); // Prevent the key event from propagating further
+                }
             }
         }
     }
