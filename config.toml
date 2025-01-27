@@ -27,10 +27,10 @@ key_bindings = [
 ]
 polling_rate = 3
 
-# Grid size for grid-based navigation
-[grid_size]
-width = 3
-height = 3
+# Grid size
+grid_size = { width = 10, height = 10 }
 
-# Smooth jump speed for mouse movements
-smooth_jump_speed = 5.0
+# Mouse movement parameters
+starting_speed = 1     # Initial speed in pixels
+acceleration = 5       # Pixels per acceleration step
+acceleration_rate = 30 # Polling cycles before applying acceleration

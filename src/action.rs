@@ -104,8 +104,13 @@ impl ActionHandler {
         }
 
         // Execute the collected actions
-        for action in actions_to_execute {
-            self.execute_action(&action);
+        if actions_to_execute.is_empty() {
+            // No active actions, reset speed
+            self.mouse_master.reset_speed();
+        } else {
+            for action in actions_to_execute {
+                self.execute_action(&action);
+            }
         }
     }
 }

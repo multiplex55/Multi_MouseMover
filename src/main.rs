@@ -35,6 +35,9 @@ struct Config {
     key_bindings: Vec<(String, String)>,
     polling_rate: u64,
     grid_size: GridSize,
+    starting_speed: i32,    // Initial speed in pixels
+    acceleration: i32,      // Increment value for acceleration
+    acceleration_rate: u32, // Polling cycles before applying acceleration
 }
 
 #[derive(Debug, Deserialize, Clone)]

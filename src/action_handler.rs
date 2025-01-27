@@ -6,6 +6,8 @@ pub struct MouseMaster {
     enigo: Enigo,
     config: Config,
     current_mode: String,
+    current_speed: i32,        // Current movement speed
+    acceleration_counter: u32, // Tracks polling cycles for acceleration
 }
 
 impl MouseMaster {
@@ -13,8 +15,10 @@ impl MouseMaster {
     pub fn new(config: Config) -> Self {
         Self {
             enigo: Enigo::new(&Settings::default()).unwrap(),
-            config,
+            config: config.clone(),
             current_mode: "default".to_string(),
+            current_speed: config.starting_speed,
+            acceleration_counter: 0,
         }
     }
 
@@ -90,19 +94,41 @@ impl MouseMaster {
 
     /// Simulates a right mouse click
     fn right_click(&mut self) {
-        println!("Performing Right Click!");
+        // println!("Performing Right Click!");
         self.enigo.button(Button::Right, Direction::Click).unwrap();
     }
 
-    /// Moves the mouse by the given `dx` and `dy` offsets
+    /// Moves the mouse by the given `dx` and `dy` offsets with acceleration
     pub fn move_mouse(&mut self, dx: i32, dy: i32) {
+        self.acceleration_counter += 1;
+
+        // Apply acceleration if the polling cycles threshold is reached
+        if self.acceleration_counter >= self.config.acceleration_rate {
+            self.current_speed += self.config.acceleration;
+            self.acceleration_counter = 0; // Reset the counter
+        }
+
+        // Calculate the actual movement
+        let actual_dx = dx * self.current_speed;
+        let actual_dy = dy * self.current_speed;
+
         if let Ok((current_x, current_y)) = self.enigo.location() {
             self.enigo
-                .move_mouse(current_x + dx, current_y + dy, Coordinate::Abs)
+                .move_mouse(
+                    current_x + actual_dx,
+                    current_y + actual_dy,
+                    Coordinate::Abs,
+                )
                 .unwrap();
         } else {
             println!("Failed to retrieve mouse location.");
         }
+    }
+
+    /// Resets the speed when the movement stops
+    pub fn reset_speed(&mut self) {
+        self.current_speed = self.config.starting_speed;
+        self.acceleration_counter = 0;
     }
 
     /// Displays a grid on the screen (for future extensions)
