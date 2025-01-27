@@ -77,27 +77,31 @@ impl ActionHandler {
             self.active_keys.remove(&key); // Remove key from active set
         }
 
-        // Collect actions to execute
-        let actions_to_execute: Vec<Action> = if self.active_keys.contains(&Action::MoveUp)
+        // Check for combinations first, fallback to individual keys
+        let mut actions_to_execute = Vec::new();
+
+        if self.active_keys.contains(&Action::MoveUp)
             && self.active_keys.contains(&Action::MoveRight)
         {
-            vec![Action::MoveUpRight]
+            actions_to_execute.push(Action::MoveUpRight);
         } else if self.active_keys.contains(&Action::MoveUp)
             && self.active_keys.contains(&Action::MoveLeft)
         {
-            vec![Action::MoveUpLeft]
+            actions_to_execute.push(Action::MoveUpLeft);
         } else if self.active_keys.contains(&Action::MoveDown)
             && self.active_keys.contains(&Action::MoveRight)
         {
-            vec![Action::MoveDownRight]
+            actions_to_execute.push(Action::MoveDownRight);
         } else if self.active_keys.contains(&Action::MoveDown)
             && self.active_keys.contains(&Action::MoveLeft)
         {
-            vec![Action::MoveDownLeft]
-        } else {
-            // If no combination is active, collect all active individual actions
-            self.active_keys.iter().copied().collect()
-        };
+            actions_to_execute.push(Action::MoveDownLeft);
+        }
+
+        // If no combinations are detected, execute all active single-direction actions
+        if actions_to_execute.is_empty() {
+            actions_to_execute.extend(self.active_keys.iter().copied());
+        }
 
         // Execute the collected actions
         for action in actions_to_execute {
