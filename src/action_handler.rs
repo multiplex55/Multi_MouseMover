@@ -36,7 +36,7 @@ impl MouseMaster {
             Action::MoveRight => self.move_right(),
             Action::LeftClick => self.left_click(),
             Action::RightClick => self.right_click(),
-            Action::MoveUpRight => self.move_up_righdt(),
+            Action::MoveUpRight => self.move_up_right(),
             Action::MoveUpLeft => self.move_up_left(),
             Action::MoveDownRight => self.move_down_right(),
             Action::MoveDownLeft => self.move_down_left(),
