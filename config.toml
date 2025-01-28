@@ -24,6 +24,10 @@ key_bindings = [
         "E",
         "right_click",
     ],
+    [
+        "Escape",
+        "exit"
+    ]
 ]
 polling_rate = 3
 

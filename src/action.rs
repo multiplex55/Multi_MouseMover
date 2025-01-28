@@ -13,7 +13,7 @@ pub enum Action {
     MoveDownLeft,
     LeftClick,
     RightClick,
-    // Add more actions as needed
+    Exit, // Add more actions as needed
 }
 
 impl Action {
@@ -27,9 +27,9 @@ impl Action {
             "move_up_right" => Some(Self::MoveUpRight),
             "move_up_left" => Some(Self::MoveUpLeft),
             "move_down_right" => Some(Self::MoveDownRight),
-
             "left_click" => Some(Self::LeftClick),
             "right_click" => Some(Self::RightClick),
+            "exit" => Some(Self::Exit),
             _ => None,
         }
     }

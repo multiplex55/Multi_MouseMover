@@ -5,18 +5,23 @@ use enigo::*;
 pub struct MouseMaster {
     enigo: Enigo,
     config: Config,
-    current_mode: String,
+    current_mode: ModeState,
     current_speed: i32,        // Current movement speed
     acceleration_counter: u32, // Tracks polling cycles for acceleration
 }
 
+#[derive(PartialEq)]
+pub enum ModeState {
+    idle,
+    active,
+}
 impl MouseMaster {
     /// Creates a new `MouseMaster` instance
     pub fn new(config: Config) -> Self {
         Self {
             enigo: Enigo::new(&Settings::default()).unwrap(),
             config: config.clone(),
-            current_mode: "default".to_string(),
+            current_mode: ModeState::active,
             current_speed: config.starting_speed,
             acceleration_counter: 0,
         }
@@ -31,10 +36,11 @@ impl MouseMaster {
             Action::MoveRight => self.move_right(),
             Action::LeftClick => self.left_click(),
             Action::RightClick => self.right_click(),
-            Action::MoveUpRight => self.move_up_right(),
+            Action::MoveUpRight => self.move_up_righdt(),
             Action::MoveUpLeft => self.move_up_left(),
             Action::MoveDownRight => self.move_down_right(),
             Action::MoveDownLeft => self.move_down_left(),
+            Action::Exit => self.exit(),
         }
     }
 
@@ -131,6 +137,11 @@ impl MouseMaster {
         self.acceleration_counter = 0;
     }
 
+    pub fn exit(&mut self) {
+        println!("Exiting");
+        std::process::exit(0)
+    }
+
     /// Displays a grid on the screen (for future extensions)
     pub fn display_grid(&self) {
         println!(
@@ -142,7 +153,12 @@ impl MouseMaster {
 
     /// Switches to a different mode
     pub fn switch_mode(&mut self, mode: &str) {
-        self.current_mode = mode.to_string();
+        if (self.current_mode == ModeState::active) {
+            self.current_mode = ModeState::idle;
+        } else {
+            self.current_mode = ModeState::active;
+        }
+
         println!("Switched to mode: {}", mode);
         // FUTURE GROWTH
     }
