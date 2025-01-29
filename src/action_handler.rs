@@ -8,6 +8,7 @@ pub struct MouseMaster {
     pub current_mode: ModeState,
     pub current_speed: i32,        // Current movement speed
     pub acceleration_counter: u32, // Tracks polling cycles for acceleration
+    pub top_speed: i32,
 }
 
 #[derive(PartialEq)]
@@ -24,6 +25,7 @@ impl MouseMaster {
             current_mode: ModeState::active,
             current_speed: config.starting_speed,
             acceleration_counter: 0,
+            top_speed: config.top_speed,
         }
     }
 

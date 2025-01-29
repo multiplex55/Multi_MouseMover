@@ -38,6 +38,7 @@ struct Config {
     starting_speed: i32,    // Initial speed in pixels
     acceleration: i32,      // Increment value for acceleration
     acceleration_rate: u32, // Polling cycles before applying acceleration
+    top_speed: i32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -69,26 +70,41 @@ impl Config {
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
-    if code == HC_ACTION.try_into().unwrap() {
-        // Check if the key event is a KEYDOWN or KEYUP event
-        if w_param.0 as u32 == WM_KEYDOWN
+    if code == HC_ACTION.try_into().unwrap()
+        && (w_param.0 as u32 == WM_KEYDOWN
             || w_param.0 as u32 == WM_SYSKEYDOWN
             || w_param.0 as u32 == WM_KEYUP
-            || w_param.0 as u32 == WM_SYSKEYUP
-        {
-            let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
-            if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
-                let key_actions = KEY_ACTIONS.read().unwrap(); // Acquire read lock
-                let mut action_handler = ACTION_HANDLER.write().unwrap();
+            || w_param.0 as u32 == WM_SYSKEYUP)
+    {
+        let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
+        if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
+            let key_actions = KEY_ACTIONS.read().unwrap(); // Acquire read lock
+            let mut action_handler = ACTION_HANDLER.write().unwrap();
+            let mut active_keys = ACTIVE_KEYS.write().unwrap(); // Get write lock
 
-                // Map VirtualKey to Action and call process_active_keys
-                if let Some(action) = key_actions.get_action(virtual_key) {
-                    let is_keydown =
-                        w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
-                    action_handler.process_active_keys(*action, is_keydown);
-                    return LRESULT(1); // Prevent further propagation of the key event
+            let is_keydown = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
+
+            if is_keydown {
+                // ** Add key to ACTIVE_KEYS **
+                active_keys.insert(virtual_key);
+            } else {
+                // ** Remove key from ACTIVE_KEYS only if it's currently in the set **
+                active_keys.remove(&virtual_key);
+            }
+
+            // ** Process all currently active keys **
+            for key in active_keys.iter() {
+                if let Some(action) = key_actions.get_action(*key) {
+                    action_handler.process_active_keys(*action, true);
                 }
             }
+
+            // ** Ensure actions for released keys are properly removed from processing **
+            if let Some(action) = key_actions.get_action(virtual_key) {
+                action_handler.process_active_keys(*action, is_keydown);
+            }
+
+            return LRESULT(1); // Prevent further propagation of the key event
         }
     }
     CallNextHookEx(None, code, w_param, l_param)

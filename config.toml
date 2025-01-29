@@ -44,5 +44,6 @@ grid_size = { width = 10, height = 10 }
 
 # Mouse movement parameters
 starting_speed = 2     # Initial speed in pixels
-acceleration = 5       # Pixels per acceleration step
+acceleration = 2       # Pixels per acceleration step
 acceleration_rate = 50 # Polling cycles before applying acceleration
+top_speed = 10

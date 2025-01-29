@@ -122,6 +122,9 @@ impl ActionHandler {
                         self.mouse_master.config.acceleration_rate / 2; // Reduce but don't reset
                 }
             }
+            if self.mouse_master.current_speed > self.mouse_master.top_speed {
+                speed = self.mouse_master.top_speed;
+            }
 
             // Scale movement by the current speed
             dx *= speed;
