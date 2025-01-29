@@ -1,49 +1,49 @@
 # Key bindings map keyboard keys to actions
 key_bindings = [
     [
-        "W",
-        "move_up",
-    ],
-    [
         "A",
-        "move_left",
-    ],
-    [
-        "S",
-        "move_down",
+        "move_left"
     ],
     [
         "D",
-        "move_right",
-    ],
-    [
-        "SPACE",
-        "left_click",
+        "move_right"
     ],
     [
         "E",
-        "right_click",
+        "right_click"
     ],
     [
         "Escape",
-        "exit",
+        "exit"
     ],
     [
         "LeftShift",
-        "slow_mouse",
+        "slow_mouse"
     ],
     [
         "RightShift",
-        "slow_mouse",
+        "slow_mouse"
     ],
+    [
+        "S",
+        "move_down"
+    ],
+    [
+        "SPACE",
+        "left_click"
+    ],
+    [
+        "W",
+        "move_up"
+    ]
 ]
 polling_rate = 1
 
 # Grid size
-grid_size = { width = 10, height = 10 }
+grid_size = {width = 10, height = 10}
 
 # Mouse movement parameters
-starting_speed = 2     # Initial speed in pixels
-acceleration = 2       # Pixels per acceleration step
-acceleration_rate = 50 # Polling cycles before applying acceleration
-top_speed = 10
+acceleration      = 2  # Pixels per acceleration step
+acceleration_rate = 10 # Polling cycles before applying acceleration
+starting_speed    = 1  # Initial speed in pixels
+top_speed         = 6
