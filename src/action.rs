@@ -71,7 +71,6 @@ impl ActionHandler {
             self.mouse_master.handle_action(*action);
         }
     }
-    /// Track key presses and compute movement based on active keys
     pub fn process_active_keys(&mut self, key: Action, is_keydown: bool) {
         // Add or remove the key from the active set
         if is_keydown {
@@ -94,24 +93,15 @@ impl ActionHandler {
             self.mouse_master.current_speed
         };
 
-        // Determine movement directions
-        let moving_up = self.active_keys.contains(&Action::MoveUp);
-        let moving_down = self.active_keys.contains(&Action::MoveDown);
-        let moving_left = self.active_keys.contains(&Action::MoveLeft);
-        let moving_right = self.active_keys.contains(&Action::MoveRight);
-
-        // Compute movement deltas based on key inputs
-        if moving_up {
-            dy -= 1;
-        }
-        if moving_down {
-            dy += 1;
-        }
-        if moving_left {
-            dx -= 1;
-        }
-        if moving_right {
-            dx += 1;
+        // Iterate over all active keys to calculate movement
+        for &action in &self.active_keys {
+            match action {
+                Action::MoveUp => dy -= 1,
+                Action::MoveDown => dy += 1,
+                Action::MoveLeft => dx -= 1,
+                Action::MoveRight => dx += 1,
+                _ => {}
+            }
         }
 
         // Track if there is movement
@@ -171,15 +161,15 @@ impl ActionHandler {
 
         // DEBUGGING OUTPUT
         println!(
-    "[DEBUG] Keys: {:?} | DX: {} | DY: {} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {} | Non-Movement Actions: {:?}",
-    self.active_keys,
-    dx,
-    dy,
-    self.mouse_master.current_speed,
-    self.mouse_master.acceleration_counter,
-    shift_held,
-    movement_detected,
-    non_movement_actions
-    );
+            "[DEBUG] Keys: {:?} | DX: {} | DY: {} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {} | Non-Movement Actions: {:?}",
+            self.active_keys,
+            dx,
+            dy,
+            self.mouse_master.current_speed,
+            self.mouse_master.acceleration_counter,
+            shift_held,
+            movement_detected,
+            non_movement_actions
+        );
     }
 }
