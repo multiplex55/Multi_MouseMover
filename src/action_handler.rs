@@ -3,11 +3,11 @@ use action::Action;
 use enigo::*;
 
 pub struct MouseMaster {
-    enigo: Enigo,
-    config: Config,
-    current_mode: ModeState,
-    current_speed: i32,        // Current movement speed
-    acceleration_counter: u32, // Tracks polling cycles for acceleration
+    pub enigo: Enigo,
+    pub config: Config,
+    pub current_mode: ModeState,
+    pub current_speed: i32,        // Current movement speed
+    pub acceleration_counter: u32, // Tracks polling cycles for acceleration
 }
 
 #[derive(PartialEq)]
@@ -41,6 +41,9 @@ impl MouseMaster {
             Action::MoveDownRight => self.move_down_right(),
             Action::MoveDownLeft => self.move_down_left(),
             Action::Exit => self.exit(),
+            Action::SlowMouse => {
+                // println!("[DEBUG] SlowMouse triggered - No acceleration");
+            }
         }
     }
 
@@ -104,20 +107,27 @@ impl MouseMaster {
         self.enigo.button(Button::Right, Direction::Click).unwrap();
     }
 
-    /// Moves the mouse by the given `dx` and `dy` offsets with acceleration
+    /// Moves the mouse by the given `dx` and `dy` offsets with immediate response
     pub fn move_mouse(&mut self, dx: i32, dy: i32) {
-        self.acceleration_counter += 1;
-
-        // Apply acceleration if the polling cycles threshold is reached
-        if self.acceleration_counter >= self.config.acceleration_rate {
-            self.current_speed += self.config.acceleration;
-            self.acceleration_counter = 0; // Reset the counter
+        // If no movement, reset speed & acceleration
+        if dx == 0 && dy == 0 {
+            self.reset_speed();
+            return;
         }
 
-        // Calculate the actual movement
+        self.acceleration_counter += 1;
+
+        // Apply acceleration only after enough polling cycles
+        if self.acceleration_counter >= self.config.acceleration_rate {
+            self.current_speed += self.config.acceleration;
+            self.acceleration_counter = 0;
+        }
+
+        // Calculate the actual movement based on the current speed
         let actual_dx = dx * self.current_speed;
         let actual_dy = dy * self.current_speed;
 
+        // Perform the mouse movement
         if let Ok((current_x, current_y)) = self.enigo.location() {
             self.enigo
                 .move_mouse(
@@ -131,7 +141,7 @@ impl MouseMaster {
         }
     }
 
-    /// Resets the speed when the movement stops
+    /// Resets the speed and acceleration counter when motion stops
     pub fn reset_speed(&mut self) {
         self.current_speed = self.config.starting_speed;
         self.acceleration_counter = 0;

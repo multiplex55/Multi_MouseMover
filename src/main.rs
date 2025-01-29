@@ -8,10 +8,10 @@ use keyboard::*;
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::fs;
 use std::sync::RwLock;
 use std::thread::sleep;
 use std::time::Duration;
+use std::{env, fs};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -95,6 +95,9 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
 }
 
 fn main() {
+    // Backtrace for Debug
+    env::set_var("RUST_BACKTRACE", "1");
+
     // Load configuration
     let config = Config::load_from_file("config.toml");
     config.initialize_bindings();

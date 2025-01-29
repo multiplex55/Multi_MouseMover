@@ -13,7 +13,8 @@ pub enum Action {
     MoveDownLeft,
     LeftClick,
     RightClick,
-    Exit, // Add more actions as needed
+    Exit,
+    SlowMouse,
 }
 
 impl Action {
@@ -30,6 +31,7 @@ impl Action {
             "left_click" => Some(Self::LeftClick),
             "right_click" => Some(Self::RightClick),
             "exit" => Some(Self::Exit),
+            "slow_mouse" => Some(Self::SlowMouse),
             _ => None,
         }
     }
@@ -71,46 +73,113 @@ impl ActionHandler {
     }
     /// Track key presses and compute movement based on active keys
     pub fn process_active_keys(&mut self, key: Action, is_keydown: bool) {
+        // Add or remove the key from the active set
         if is_keydown {
-            self.active_keys.insert(key); // Add key to active set
+            self.active_keys.insert(key);
         } else {
-            self.active_keys.remove(&key); // Remove key from active set
+            self.active_keys.remove(&key);
         }
 
-        // Check for combinations first, fallback to individual keys
-        let mut actions_to_execute = Vec::new();
+        // Reset dx and dy for movement tracking
+        let mut dx: i32 = 0;
+        let mut dy: i32 = 0;
 
-        if self.active_keys.contains(&Action::MoveUp)
-            && self.active_keys.contains(&Action::MoveRight)
-        {
-            actions_to_execute.push(Action::MoveUpRight);
-        } else if self.active_keys.contains(&Action::MoveUp)
-            && self.active_keys.contains(&Action::MoveLeft)
-        {
-            actions_to_execute.push(Action::MoveUpLeft);
-        } else if self.active_keys.contains(&Action::MoveDown)
-            && self.active_keys.contains(&Action::MoveRight)
-        {
-            actions_to_execute.push(Action::MoveDownRight);
-        } else if self.active_keys.contains(&Action::MoveDown)
-            && self.active_keys.contains(&Action::MoveLeft)
-        {
-            actions_to_execute.push(Action::MoveDownLeft);
-        }
+        // Check if Shift is held
+        let shift_held = self.active_keys.contains(&Action::SlowMouse);
 
-        // If no combinations are detected, execute all active single-direction actions
-        if actions_to_execute.is_empty() {
-            actions_to_execute.extend(self.active_keys.iter().copied());
-        }
-
-        // Execute the collected actions
-        if actions_to_execute.is_empty() {
-            // No active actions, reset speed
-            self.mouse_master.reset_speed();
+        // Use starting speed if Shift is held, otherwise use current speed
+        let mut speed: i32 = if shift_held {
+            self.mouse_master.config.starting_speed
         } else {
-            for action in actions_to_execute {
-                self.execute_action(&action);
+            self.mouse_master.current_speed
+        };
+
+        // Determine movement directions
+        let moving_up = self.active_keys.contains(&Action::MoveUp);
+        let moving_down = self.active_keys.contains(&Action::MoveDown);
+        let moving_left = self.active_keys.contains(&Action::MoveLeft);
+        let moving_right = self.active_keys.contains(&Action::MoveRight);
+
+        // Compute movement deltas based on key inputs
+        if moving_up {
+            dy -= 1;
+        }
+        if moving_down {
+            dy += 1;
+        }
+        if moving_left {
+            dx -= 1;
+        }
+        if moving_right {
+            dx += 1;
+        }
+
+        // Track if there is movement
+        let movement_detected = dx != 0 || dy != 0;
+
+        if movement_detected {
+            if !shift_held {
+                // Only increase the acceleration counter if movement is sustained and Shift is NOT held
+                self.mouse_master.acceleration_counter += 1;
+
+                // Apply acceleration if enough polling cycles have passed
+                if self.mouse_master.acceleration_counter
+                    >= self.mouse_master.config.acceleration_rate
+                {
+                    speed += self.mouse_master.config.acceleration;
+                    self.mouse_master.current_speed = speed; // Update current speed
+                    self.mouse_master.acceleration_counter =
+                        self.mouse_master.config.acceleration_rate / 2; // Reduce but don't reset
+                }
             }
+
+            // Scale movement by the current speed
+            dx *= speed;
+            dy *= speed;
+
+            // Perform the mouse movement
+            self.mouse_master.move_mouse(dx, dy);
+        } else {
+            // Reset speed and acceleration if no movement keys are active
+            self.mouse_master.reset_speed();
         }
+
+        // Collect non-movement actions to execute
+        let non_movement_actions: Vec<Action> = self
+            .active_keys
+            .iter()
+            .copied()
+            .filter(|action| {
+                !matches!(
+                    action,
+                    Action::MoveUp
+                        | Action::MoveDown
+                        | Action::MoveLeft
+                        | Action::MoveRight
+                        | Action::MoveUpRight
+                        | Action::MoveUpLeft
+                        | Action::MoveDownRight
+                        | Action::MoveDownLeft
+                )
+            })
+            .collect();
+
+        // Execute collected non-movement actions
+        for action in &non_movement_actions {
+            self.execute_action(action);
+        }
+
+        // DEBUGGING OUTPUT
+        println!(
+    "[DEBUG] Keys: {:?} | DX: {} | DY: {} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {} | Non-Movement Actions: {:?}",
+    self.active_keys,
+    dx,
+    dy,
+    self.mouse_master.current_speed,
+    self.mouse_master.acceleration_counter,
+    shift_held,
+    movement_detected,
+    non_movement_actions
+    );
     }
 }

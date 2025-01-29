@@ -26,10 +26,18 @@ key_bindings = [
     ],
     [
         "Escape",
-        "exit"
-    ]
+        "exit",
+    ],
+    [
+        "LeftShift",
+        "slow_mouse",
+    ],
+    [
+        "RightShift",
+        "slow_mouse",
+    ],
 ]
-polling_rate = 3
+polling_rate = 1
 
 # Grid size
 grid_size = { width = 10, height = 10 }
@@ -37,4 +45,4 @@ grid_size = { width = 10, height = 10 }
 # Mouse movement parameters
 starting_speed = 2     # Initial speed in pixels
 acceleration = 5       # Pixels per acceleration step
-acceleration_rate = 20 # Polling cycles before applying acceleration
+acceleration_rate = 50 # Polling cycles before applying acceleration
