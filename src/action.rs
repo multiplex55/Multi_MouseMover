@@ -39,8 +39,8 @@ impl Action {
 
 /// Manages actions associated with key presses
 pub struct ActionHandler {
-    actions: HashMap<Action, Box<dyn Fn() + Send + Sync>>,
-    active_keys: HashSet<Action>, // Tracks currently held actions
+    pub actions: HashMap<Action, Box<dyn Fn() + Send + Sync>>,
+    pub active_keys: HashSet<Action>, // Tracks currently held actions
     pub mouse_master: crate::action_handler::MouseMaster, // Reference to MouseMaster
 }
 

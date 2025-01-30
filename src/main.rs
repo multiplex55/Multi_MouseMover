@@ -14,6 +14,7 @@ use std::time::Duration;
 use std::{env, fs};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 static mut HOOK_HANDLE: Option<HHOOK> = None;
@@ -78,33 +79,31 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
     {
         let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
         if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
-            let key_actions = KEY_ACTIONS.read().unwrap(); // Acquire read lock
+            let key_actions = KEY_ACTIONS.read().unwrap();
             let mut action_handler = ACTION_HANDLER.write().unwrap();
-            let mut active_keys = ACTIVE_KEYS.write().unwrap(); // Get write lock
+            let mut active_keys = ACTIVE_KEYS.write().unwrap();
 
             let is_keydown = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
 
             if is_keydown {
-                // ** Add key to ACTIVE_KEYS **
                 active_keys.insert(virtual_key);
             } else {
-                // ** Remove key from ACTIVE_KEYS only if it's currently in the set **
                 active_keys.remove(&virtual_key);
             }
 
-            // ** Process all currently active keys **
             for key in active_keys.iter() {
                 if let Some(action) = key_actions.get_action(*key) {
                     action_handler.process_active_keys(*action, true);
                 }
             }
 
-            // ** Ensure actions for released keys are properly removed from processing **
-            if let Some(action) = key_actions.get_action(virtual_key) {
-                action_handler.process_active_keys(*action, is_keydown);
+            if !is_keydown {
+                if let Some(action) = key_actions.get_action(virtual_key) {
+                    action_handler.process_active_keys(*action, false);
+                }
             }
 
-            return LRESULT(1); // Prevent further propagation of the key event
+            return LRESULT(1); // Block further propagation
         }
     }
     CallNextHookEx(None, code, w_param, l_param)
