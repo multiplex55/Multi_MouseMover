@@ -18,9 +18,12 @@ pub struct OverlayWindow {
 impl OverlayWindow {
     /// Creates the overlay window
     pub fn new() -> Self {
-        let h_instance = unsafe { GetModuleHandleW(None).unwrap() };
+        println!("🚀 Overlay: Starting Initialization");
 
-        // ✅ Register window class
+        let h_instance = unsafe { GetModuleHandleW(None).unwrap() };
+        println!("✅ Overlay: Got Module Handle");
+
+        // Register window class
         let wc = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: h_instance.into(),
@@ -29,9 +32,13 @@ impl OverlayWindow {
             hbrBackground: HBRUSH(ptr::null_mut()),
             ..Default::default()
         };
-        unsafe { RegisterClassW(&wc) };
 
-        // ✅ Create window
+        println!("🔹 Overlay: Registering Window Class...");
+        unsafe { RegisterClassW(&wc) };
+        println!("✅ Overlay: Window Class Registered");
+
+        // Create window
+        println!("🔹 Overlay: Creating Overlay Window...");
         let hwnd = unsafe {
             CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
@@ -41,26 +48,38 @@ impl OverlayWindow {
                 50,
                 50,
                 100,
-                100, // (x, y, width, height)
+                100,
                 None,
                 None,
-                Some(h_instance.into()), // ✅ Convert `HMODULE` to `HINSTANCE`
+                Some(h_instance.into()),
                 None,
             )
         };
 
-        // ✅ Store HWND as `isize` for thread safety
-        let hwnd_ptr = hwnd.ok().map(|h| h.0 as isize);
+        if hwnd.is_err() {
+            panic!("❌ Overlay: Failed to create overlay window!");
+        }
+        println!("✅ Overlay: Window Created Successfully!");
 
-        // ✅ Set transparency if window is created successfully
+        // Store HWND as `isize`
+        let hwnd_ptr = hwnd.ok().map(|h| h.0 as isize);
+        println!("🔹 Overlay: HWND Stored as isize");
+
+        // Ensure window is visible
         if let Some(h) = hwnd_ptr {
             unsafe {
+                println!("🔹 Overlay: Showing Window...");
+                ShowWindow(HWND(h as *mut _), SW_SHOW);
+                println!("🔹 Overlay: Updating Window...");
+                UpdateWindow(HWND(h as *mut _));
+                println!("🔹 Overlay: Setting Layered Window Attributes...");
                 SetLayeredWindowAttributes(HWND(h as *mut _), COLORREF(0), 255, LWA_ALPHA);
             }
         }
 
+        println!("✅ Overlay: Initialization Completed!");
         Self {
-            hwnd: Arc::new(Mutex::new(hwnd_ptr)), // ✅ Store HWND as `isize`
+            hwnd: Arc::new(Mutex::new(hwnd_ptr)),
             is_green: false,
         }
     }
@@ -109,12 +128,18 @@ fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
 extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     match msg {
         WM_PAINT => {
+            // println!("🖌 Overlay WM_PAINT triggered!");
             OVERLAY.lock().unwrap().repaint();
             LRESULT(0)
         }
         WM_DESTROY => {
+            println!("🛑 Overlay Window Destroyed!");
             unsafe { PostQuitMessage(0) };
             LRESULT(0)
+        }
+        WM_NCHITTEST => {
+            // ✅ Ensure mouse clicks go through the overlay
+            LRESULT(HTTRANSPARENT as isize)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, _wparam, _lparam) },
     }

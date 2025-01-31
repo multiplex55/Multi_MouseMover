@@ -61,12 +61,16 @@ impl Config {
         for (key, action_str) in &self.key_bindings {
             if let Some(virtual_key) = VirtualKey::from_string(key) {
                 if let Some(action) = Action::from_string(action_str) {
+                    println!("✅ Binding key: {:?} -> {:?}", virtual_key, action);
                     key_actions.add_binding(virtual_key, action);
                 } else {
-                    println!("Action '{}' does not exist for key '{}'", action_str, key);
+                    println!(
+                        "❌ Action '{}' does not exist for key '{}'",
+                        action_str, key
+                    );
                 }
             } else {
-                println!("Key '{}' is not recognized", key);
+                println!("❌ Key '{}' is not recognized", key);
             }
         }
     }
@@ -81,6 +85,11 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
     {
         let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
         if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
+            println!(
+                "🔹 Key Event Captured: {:?} | w_param: {}",
+                virtual_key, w_param.0
+            );
+
             let key_actions = KEY_ACTIONS.read().unwrap();
             let mut action_handler = ACTION_HANDLER.write().unwrap();
             let mut active_keys = ACTIVE_KEYS.write().unwrap();
@@ -88,14 +97,14 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             let is_keydown = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
 
             println!(
-                "[DEBUG] Key Event | VirtualKey: {:?} | KeyDown: {}",
+                "[DEBUG] Processing Key Event | VirtualKey: {:?} | KeyDown: {}",
                 virtual_key, is_keydown
             );
 
             // ✅ **Detect Alt + E Pressed Together**
             if virtual_key == VirtualKey::E && is_keydown {
                 let alt_pressed = (kbd.flags & LLKHF_ALTDOWN)
-                    != windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0); // Properly detect Alt key being held
+                    != windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0);
 
                 if alt_pressed {
                     println!("[DEBUG] Alt + E detected: Switching mode...");
@@ -104,33 +113,35 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
                 }
             }
 
-            // Always allow `Escape` to exit
+            // ✅ Always allow `Escape` to exit
             if virtual_key == VirtualKey::Escape && is_keydown {
                 println!("[DEBUG] Escape pressed: Exiting...");
                 action_handler.mouse_master.exit();
                 return LRESULT(1);
             }
 
-            // Ignore keys if in `Idle Mode`
+            // ✅ Ignore keys if in `Idle Mode`
             if action_handler.mouse_master.current_mode == ModeState::Idle {
                 println!("[DEBUG] Idle Mode active: Ignoring key event...");
                 return CallNextHookEx(None, code, w_param, l_param);
             }
 
-            // Normal key processing
+            // ✅ Normal key processing
             if is_keydown {
                 active_keys.insert(virtual_key);
             } else {
                 active_keys.remove(&virtual_key);
             }
 
+            // ✅ Process active keys
             for key in active_keys.iter() {
                 if let Some(action) = key_actions.get_action(*key) {
-                    println!("[DEBUG] Processing key: {:?} -> {:?}", key, action);
+                    println!("[DEBUG] Executing keybind: {:?} -> {:?}", key, action);
                     action_handler.process_active_keys(*action, true);
                 }
             }
 
+            // ✅ Process key release
             if !is_keydown {
                 if let Some(action) = key_actions.get_action(virtual_key) {
                     action_handler.process_active_keys(*action, false);
@@ -140,23 +151,29 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             return LRESULT(1);
         }
     }
+    println!("⚠️ Unhandled key event");
     CallNextHookEx(None, code, w_param, l_param)
 }
 
 fn main() {
-    // Backtrace for Debug
-    env::set_var("RUST_BACKTRACE", "1");
+    println!("🚀 Program Start!");
 
-    // Load configuration
+    // Ensure Rust backtrace is enabled
+    env::set_var("RUST_BACKTRACE", "1");
+    println!("🔹 Backtrace Enabled");
+
     let config = Config::load_from_file("config.toml");
+    println!("✅ Config Loaded");
+
     config.initialize_bindings();
-    println!("Key bindings loaded from config");
-    println!(
-        "Loaded grid size: {}x{}",
-        config.grid_size.width, config.grid_size.height
-    );
+    println!("✅ Key Bindings Initialized");
+
     unsafe {
-        let h_instance = GetModuleHandleW(None).expect("Failed to get module handle");
+        println!("🔹 Attempting to Get Module Handle...");
+        let h_instance = GetModuleHandleW(None).expect("❌ Failed to get module handle!");
+        println!("✅ Module Handle Retrieved");
+
+        println!("🔹 Setting Up Keyboard Hook...");
         HOOK_HANDLE = SetWindowsHookExW(
             WH_KEYBOARD_LL,
             Some(keyboard_hook),
@@ -164,17 +181,28 @@ fn main() {
             0,
         )
         .ok();
+
+        if HOOK_HANDLE.is_none() {
+            panic!("❌ Keyboard Hook Failed to Install!");
+        }
+        println!("✅ Keyboard Hook Installed Successfully!");
     }
 
+    println!("🔹 Attempting Overlay Initialization...");
     if let Ok(mut overlay) = OVERLAY.lock() {
+        println!("✅ Overlay Initialized Successfully");
         overlay.repaint();
+    } else {
+        println!("❌ Overlay Lock Failed!");
     }
 
-    // Polling loop to control rate
+    println!("🔄 Entering Main Event Loop...");
+    
     loop {
         unsafe {
             let mut msg = MSG::default();
             while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                // println!("🔄 Processing Windows Message: {}", msg.message);
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
@@ -182,3 +210,4 @@ fn main() {
         sleep(Duration::from_millis(config.polling_rate));
     }
 }
+
