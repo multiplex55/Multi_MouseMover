@@ -1,3 +1,4 @@
+use crate::overlay::OVERLAY;
 use crate::{action, Config};
 use action::Action;
 use enigo::*;
@@ -6,9 +7,10 @@ pub struct MouseMaster {
     pub enigo: Enigo,
     pub config: Config,
     pub current_mode: ModeState,
-    pub current_speed: i32,        // Current movement speed
-    pub acceleration_counter: u32, // Tracks polling cycles for acceleration
+    pub current_speed: i32,
+    pub acceleration_counter: u32,
     pub top_speed: i32,
+    pub left_click_held: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -27,6 +29,7 @@ impl MouseMaster {
             current_speed: config.starting_speed,
             acceleration_counter: 0,
             top_speed: config.top_speed,
+            left_click_held: false,
         }
     }
 
@@ -110,8 +113,22 @@ impl MouseMaster {
 
     /// Simulates a left mouse click
     fn left_click(&mut self) {
-        println!("Performing Left Click!");
+        println!("[DEBUG] Left Click Pressed!");
+        self.left_click_held = true; // ✅ Update state
+        self.update_overlay(); // ✅ Notify the overlay
         self.enigo.button(Button::Left, Direction::Click).unwrap();
+    }
+
+    /// Detect when left click is released
+    fn release_left_click(&mut self) {
+        println!("[DEBUG] Left Click Released!");
+        self.left_click_held = false; // ✅ Reset state
+        self.update_overlay(); // ✅ Notify the overlay
+    }
+
+    /// Function to update the overlay window
+    fn update_overlay(&self) {
+        OVERLAY.lock().unwrap().update_color(self.left_click_held);
     }
 
     /// Simulates a right mouse click

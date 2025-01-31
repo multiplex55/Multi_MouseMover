@@ -1,11 +1,13 @@
 mod action;
 mod action_handler;
 mod keyboard;
+mod overlay;
 
 use action::*;
 use action_handler::*;
 use keyboard::*;
 use lazy_static::lazy_static;
+use overlay::OVERLAY;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::RwLock;
@@ -162,6 +164,10 @@ fn main() {
             0,
         )
         .ok();
+    }
+
+    if let Ok(mut overlay) = OVERLAY.lock() {
+        overlay.repaint();
     }
 
     // Polling loop to control rate
