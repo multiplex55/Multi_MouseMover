@@ -164,9 +164,9 @@ impl ActionHandler {
             self.execute_action(action);
         }
 
-        // DEBUGGING OUTPUT
         println!(
-            "[DEBUG] Keys: {:?} | DX: {} | DY: {} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {} | Non-Movement Actions: {:?}",
+            "[DEBUG] Mode: {:?} | Active Keys: {:?} | DX: {} | DY: {} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {} | Non-Movement Actions: {:?}",
+            self.mouse_master.current_mode,
             self.active_keys,
             dx,
             dy,

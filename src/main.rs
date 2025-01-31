@@ -85,6 +85,37 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
 
             let is_keydown = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
 
+            println!(
+                "[DEBUG] Key Event | VirtualKey: {:?} | KeyDown: {}",
+                virtual_key, is_keydown
+            );
+
+            // ✅ **Detect Alt + E Pressed Together**
+            if virtual_key == VirtualKey::E && is_keydown {
+                let alt_pressed = (kbd.flags & LLKHF_ALTDOWN)
+                    != windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0); // Properly detect Alt key being held
+
+                if alt_pressed {
+                    println!("[DEBUG] Alt + E detected: Switching mode...");
+                    action_handler.mouse_master.toggle_mode();
+                    return LRESULT(1);
+                }
+            }
+
+            // Always allow `Escape` to exit
+            if virtual_key == VirtualKey::Escape && is_keydown {
+                println!("[DEBUG] Escape pressed: Exiting...");
+                action_handler.mouse_master.exit();
+                return LRESULT(1);
+            }
+
+            // Ignore keys if in `Idle Mode`
+            if action_handler.mouse_master.current_mode == ModeState::Idle {
+                println!("[DEBUG] Idle Mode active: Ignoring key event...");
+                return CallNextHookEx(None, code, w_param, l_param);
+            }
+
+            // Normal key processing
             if is_keydown {
                 active_keys.insert(virtual_key);
             } else {
@@ -93,6 +124,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
 
             for key in active_keys.iter() {
                 if let Some(action) = key_actions.get_action(*key) {
+                    println!("[DEBUG] Processing key: {:?} -> {:?}", key, action);
                     action_handler.process_active_keys(*action, true);
                 }
             }
@@ -103,7 +135,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
                 }
             }
 
-            return LRESULT(1); // Block further propagation
+            return LRESULT(1);
         }
     }
     CallNextHookEx(None, code, w_param, l_param)

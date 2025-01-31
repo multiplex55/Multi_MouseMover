@@ -9,12 +9,12 @@ key_bindings = [
         "move_right"
     ],
     [
-        "E",
-        "right_click"
-    ],
-    [
         "Escape",
         "exit"
+    ],
+    [
+        "L",
+        "right_click"
     ],
     [
         "LeftShift",

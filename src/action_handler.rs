@@ -11,18 +11,19 @@ pub struct MouseMaster {
     pub top_speed: i32,
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum ModeState {
-    idle,
-    active,
+    Idle,   // Default state where no keybinds are processed
+    Active, // Mode where keybinds are processed
 }
+
 impl MouseMaster {
     /// Creates a new `MouseMaster` instance
     pub fn new(config: Config) -> Self {
         Self {
             enigo: Enigo::new(&Settings::default()).unwrap(),
             config: config.clone(),
-            current_mode: ModeState::active,
+            current_mode: ModeState::Active,
             current_speed: config.starting_speed,
             acceleration_counter: 0,
             top_speed: config.top_speed,
@@ -46,6 +47,16 @@ impl MouseMaster {
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
+        }
+    }
+    /// Toggles between `Idle` and `Active` mode
+    pub fn toggle_mode(&mut self) {
+        if self.current_mode == ModeState::Active {
+            self.current_mode = ModeState::Idle;
+            println!("Switched to: Idle Mode");
+        } else {
+            self.current_mode = ModeState::Active;
+            println!("Switched to: Active Mode");
         }
     }
 
@@ -165,10 +176,10 @@ impl MouseMaster {
 
     /// Switches to a different mode
     pub fn switch_mode(&mut self, mode: &str) {
-        if (self.current_mode == ModeState::active) {
-            self.current_mode = ModeState::idle;
+        if (self.current_mode == ModeState::Active) {
+            self.current_mode = ModeState::Idle;
         } else {
-            self.current_mode = ModeState::active;
+            self.current_mode = ModeState::Active;
         }
 
         println!("Switched to mode: {}", mode);
