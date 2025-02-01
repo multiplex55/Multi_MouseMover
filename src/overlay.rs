@@ -51,10 +51,10 @@ impl OverlayWindow {
                 w!("OverlayClass"),
                 w!("OverlayWindow"),
                 WS_POPUP,
-                50,  // Default X position
-                50,  // Default Y position
-                100, // Width
-                100, // Height
+                50, // Default X position
+                50, // Default Y position
+                25, // Width
+                25, // Height
                 None,
                 None,
                 Some(h_instance.into()),
@@ -101,21 +101,20 @@ impl OverlayWindow {
         let hwnd_lock = self.hwnd.lock().unwrap();
         if let Some(h) = *hwnd_lock {
             let hwnd = HWND(h as *mut _);
-            unsafe {
-                let mut point = POINT::default();
-                if unsafe { GetCursorPos(&mut point) }.is_ok() {
-                    let x = point.x + 10; // Offset the overlay to the right of the cursor
-                    let y = point.y + 10; // Offset the overlay below the cursor
+            let mut point = POINT::default();
 
-                    println!("🖱 Overlay Moving to: ({}, {})", x, y);
+            if unsafe { GetCursorPos(&mut point) }.is_ok() {
+                let x = point.x + 5; // Offset to the right
+                let y = point.y + 5; // Offset below
 
+                unsafe {
                     SetWindowPos(
                         hwnd,
                         Some(HWND_TOPMOST),
                         x,
                         y,
-                        100,
-                        100,
+                        5, // Small overlay width
+                        5, // Small overlay height
                         SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
                     );
                 }

@@ -197,17 +197,18 @@ fn main() {
     }
 
     println!("🔄 Entering Main Event Loop...");
-    
+
     loop {
         unsafe {
             let mut msg = MSG::default();
             while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                // println!("🔄 Processing Windows Message: {}", msg.message);
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+                // ✅ Update the overlay position inside the loop
+                OVERLAY.lock().unwrap().move_to_mouse();
+
+                // sleep(Duration::from_millis(config.polling_rate));
             }
         }
-        sleep(Duration::from_millis(config.polling_rate));
     }
 }
-
