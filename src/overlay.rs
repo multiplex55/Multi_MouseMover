@@ -1,6 +1,12 @@
 use std::ptr;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use windows::core::w;
+use windows::Win32::Foundation::POINT;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+};
 use windows::Win32::{
     Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*, UI::WindowsAndMessaging::*,
 };
@@ -78,10 +84,16 @@ impl OverlayWindow {
         }
 
         println!("✅ Overlay: Initialization Completed!");
-        Self {
+        let overlay = Self {
             hwnd: Arc::new(Mutex::new(hwnd_ptr)),
             is_green: false,
-        }
+        };
+
+        // ✅ **Add this line to start tracking the mouse!**
+
+        // overlay.follow_cursor();
+
+        overlay
     }
 
     /// Moves the overlay to follow the mouse cursor
@@ -92,8 +104,8 @@ impl OverlayWindow {
             unsafe {
                 let mut point = POINT::default();
                 if unsafe { GetCursorPos(&mut point) }.is_ok() {
-                    let x = point.x + 20; // Offset the overlay to the right of the cursor
-                    let y = point.y + 20; // Offset the overlay below the cursor
+                    let x = point.x + 10; // Offset the overlay to the right of the cursor
+                    let y = point.y + 10; // Offset the overlay below the cursor
 
                     println!("🖱 Overlay Moving to: ({}, {})", x, y);
 
@@ -109,6 +121,47 @@ impl OverlayWindow {
                 }
             }
         }
+    }
+
+    pub fn follow_cursor(&self) {
+        let hwnd_arc = Arc::clone(&self.hwnd); // Clone Arc for safe access in the thread
+        let is_moving_arc = Arc::new(Mutex::new(false)); // Prevent unnecessary movement updates
+        let is_moving_clone = Arc::clone(&is_moving_arc);
+
+        thread::spawn(move || {
+            loop {
+                let hwnd_lock = hwnd_arc.lock().unwrap();
+                if let Some(h) = *hwnd_lock {
+                    let hwnd = HWND(h as *mut _);
+                    let mut point = POINT::default();
+
+                    if unsafe { GetCursorPos(&mut point) }.is_ok() {
+                        let x = point.x + 10;
+                        let y = point.y + 10;
+
+                        // Only update if the position is different to avoid unnecessary SetWindowPos calls
+                        let mut is_moving = is_moving_clone.lock().unwrap();
+                        if *is_moving == false {
+                            *is_moving = true;
+                            unsafe {
+                                SetWindowPos(
+                                    hwnd,
+                                    Some(HWND_TOPMOST),
+                                    x,
+                                    y,
+                                    20, // Small overlay width
+                                    20, // Small overlay height
+                                    SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
+                                );
+                            }
+                            *is_moving = false;
+                        }
+                    }
+                }
+                drop(hwnd_lock);
+                thread::sleep(Duration::from_millis(200)); // Lower update rate to reduce CPU usage
+            }
+        });
     }
 
     /// Updates the color of the square and moves it
