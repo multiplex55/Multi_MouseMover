@@ -95,7 +95,39 @@ impl OverlayWindow {
 
         overlay
     }
+    /// Updates overlay position and color based on interaction state
+    pub fn update_overlay_status(&mut self, is_left_click_held: bool) {
+        // ✅ Lock HWND only once
+        let hwnd = *self.hwnd.lock().unwrap();
+        if let Some(h) = hwnd {
+            let hwnd = HWND(h as *mut _);
+            let mut point = POINT::default();
 
+            // ✅ Move overlay window to mouse position
+            if unsafe { GetCursorPos(&mut point) }.is_ok() {
+                let x = point.x + 5;
+                let y = point.y + 5;
+
+                unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOPMOST),
+                        x,
+                        y,
+                        5,
+                        5,
+                        SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
+                    );
+                }
+            }
+
+            // ✅ Avoid deadlock by checking `is_green` separately
+            if self.is_green != is_left_click_held {
+                self.is_green = is_left_click_held;
+                self.repaint();
+            }
+        }
+    }
     /// Moves the overlay to follow the mouse cursor
     pub fn move_to_mouse(&self) {
         let hwnd_lock = self.hwnd.lock().unwrap();

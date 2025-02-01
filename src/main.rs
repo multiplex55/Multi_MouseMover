@@ -205,7 +205,14 @@ fn main() {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
                 // ✅ Update the overlay position inside the loop
-                OVERLAY.lock().unwrap().move_to_mouse();
+                let is_left_click_held =
+                    ACTION_HANDLER.read().unwrap().mouse_master.left_click_held;
+                OVERLAY
+                    .lock()
+                    .unwrap()
+                    .update_overlay_status(is_left_click_held);
+
+                sleep(Duration::from_millis(config.polling_rate));
 
                 // sleep(Duration::from_millis(config.polling_rate));
             }
