@@ -11,7 +11,7 @@ lazy_static::lazy_static! {
 }
 
 pub struct OverlayWindow {
-    hwnd: Arc<Mutex<Option<isize>>>, // ✅ Store HWND as `isize` to avoid `Send` issues
+    hwnd: Arc<Mutex<Option<isize>>>, // ✅ Store HWND as `isize`
     is_green: bool,
 }
 
@@ -45,10 +45,10 @@ impl OverlayWindow {
                 w!("OverlayClass"),
                 w!("OverlayWindow"),
                 WS_POPUP,
-                50,
-                50,
-                100,
-                100,
+                50,  // Default X position
+                50,  // Default Y position
+                100, // Width
+                100, // Height
                 None,
                 None,
                 Some(h_instance.into()),
@@ -84,10 +84,38 @@ impl OverlayWindow {
         }
     }
 
-    /// Updates the color of the square
+    /// Moves the overlay to follow the mouse cursor
+    pub fn move_to_mouse(&self) {
+        let hwnd_lock = self.hwnd.lock().unwrap();
+        if let Some(h) = *hwnd_lock {
+            let hwnd = HWND(h as *mut _);
+            unsafe {
+                let mut point = POINT::default();
+                if unsafe { GetCursorPos(&mut point) }.is_ok() {
+                    let x = point.x + 20; // Offset the overlay to the right of the cursor
+                    let y = point.y + 20; // Offset the overlay below the cursor
+
+                    println!("🖱 Overlay Moving to: ({}, {})", x, y);
+
+                    SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOPMOST),
+                        x,
+                        y,
+                        100,
+                        100,
+                        SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Updates the color of the square and moves it
     pub fn update_color(&mut self, is_green: bool) {
         self.is_green = is_green;
         self.repaint();
+        self.move_to_mouse(); // 🟢 Move the overlay when color updates
     }
 
     /// Repaints the square
