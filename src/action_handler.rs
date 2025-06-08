@@ -131,7 +131,9 @@ impl MouseMaster {
 
     /// Function to update the overlay window
     fn update_overlay(&self) {
-        OVERLAY.lock().unwrap().update_color(self.left_click_held);
+        if let Some(ref mut ov) = *OVERLAY.lock().unwrap() {
+            ov.update_color(self.left_click_held);
+        }
     }
 
     /// Simulates a right mouse click

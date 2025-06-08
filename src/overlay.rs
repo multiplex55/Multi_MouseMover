@@ -2,7 +2,7 @@ use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use windows::core::w;
+use windows::core::{w, Error};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
@@ -12,8 +12,17 @@ use windows::Win32::{
 };
 
 lazy_static::lazy_static! {
-    /// Global overlay instance wrapped in `Arc<Mutex<OverlayWindow>>`
-    pub static ref OVERLAY: Arc<Mutex<OverlayWindow>> = Arc::new(Mutex::new(OverlayWindow::new()));
+    /// Global overlay instance wrapped in `Arc<Mutex<Option<OverlayWindow>>>`.
+    ///
+    /// Initialization may fail, in which case the value will be `None` and
+    /// overlay features will be disabled.
+    pub static ref OVERLAY: Arc<Mutex<Option<OverlayWindow>>> = Arc::new(Mutex::new(match OverlayWindow::new() {
+        Ok(ov) => Some(ov),
+        Err(e) => {
+            eprintln!("Failed to initialize overlay: {e}");
+            None
+        }
+    }));
 }
 
 pub struct OverlayWindow {
@@ -23,10 +32,10 @@ pub struct OverlayWindow {
 
 impl OverlayWindow {
     /// Creates the overlay window
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, Error> {
         println!("🚀 Overlay: Starting Initialization");
 
-        let h_instance = unsafe { GetModuleHandleW(None).unwrap() };
+        let h_instance = unsafe { GetModuleHandleW(None)? };
         println!("✅ Overlay: Got Module Handle");
 
         // Register window class
@@ -59,16 +68,12 @@ impl OverlayWindow {
                 None,
                 Some(h_instance.into()),
                 None,
-            )
+            )?
         };
-
-        if hwnd.is_err() {
-            panic!("❌ Overlay: Failed to create overlay window!");
-        }
         println!("✅ Overlay: Window Created Successfully!");
 
         // Store HWND as `isize`
-        let hwnd_ptr = hwnd.ok().map(|h| h.0 as isize);
+        let hwnd_ptr = Some(hwnd.0 as isize);
         println!("🔹 Overlay: HWND Stored as isize");
 
         // Ensure window is visible
@@ -93,7 +98,7 @@ impl OverlayWindow {
 
         // overlay.follow_cursor();
 
-        overlay
+        Ok(overlay)
     }
     pub fn update_overlay_status(&mut self, is_left_click_held: bool) {
         let hwnd = *self.hwnd.lock().unwrap();
@@ -240,7 +245,9 @@ extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: L
     match msg {
         WM_PAINT => {
             // println!("🖌 Overlay WM_PAINT triggered!");
-            OVERLAY.lock().unwrap().repaint();
+            if let Some(ref mut ov) = *OVERLAY.lock().unwrap() {
+                ov.repaint();
+            }
             LRESULT(0)
         }
         WM_DESTROY => {
