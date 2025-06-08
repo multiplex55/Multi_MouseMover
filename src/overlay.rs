@@ -231,7 +231,7 @@ impl OverlayWindow {
 }
 
 /// Helper function to create a `COLORREF`
-fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
+pub fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
     COLORREF(((b as u32) << 16) | ((g as u32) << 8) | (r as u32))
 }
 

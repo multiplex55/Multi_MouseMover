@@ -1,6 +1,5 @@
 use crate::overlay::OVERLAY;
 use crate::{action, Config};
-use crate::jump_overlay;
 use action::Action;
 use enigo::*;
 
@@ -202,7 +201,7 @@ impl MouseMaster {
 
     /// Switches to a different mode
     pub fn switch_mode(&mut self, mode: &str) {
-        if (self.current_mode == ModeState::Active) {
+        if self.current_mode == ModeState::Active {
             self.current_mode = ModeState::Idle;
         } else {
             self.current_mode = ModeState::Active;
