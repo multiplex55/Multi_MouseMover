@@ -9,7 +9,11 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::{Config, keyboard::VirtualKey, overlay::RGB};
 
 lazy_static::lazy_static! {
-    /// Global instance of the jump overlay
+    /// Global instance of the jump overlay.
+    ///
+    /// `JumpOverlay` only interacts with Windows APIs from the thread that
+    /// installs the keyboard hook and runs the message loop.  Because no other
+    /// threads access it, `Send` and `Sync` are unnecessary.
     pub static ref JUMP_OVERLAY: Arc<Mutex<JumpOverlay>> = Arc::new(Mutex::new(JumpOverlay::new()));
 }
 
@@ -20,8 +24,6 @@ pub struct JumpOverlay {
     input: String,
 }
 
-unsafe impl Send for JumpOverlay {}
-unsafe impl Sync for JumpOverlay {}
 
 impl JumpOverlay {
     pub fn new() -> Self {
