@@ -41,7 +41,10 @@ impl JumpOverlay {
                 hbrBackground: HBRUSH(ptr::null_mut()),
                 ..Default::default()
             };
-            RegisterClassW(&wc);
+            let atom = RegisterClassW(&wc);
+            if atom == 0 {
+                println!("RegisterClassW failed: {:?}", GetLastError());
+            }
             let width = GetSystemMetrics(SM_CXSCREEN);
             let height = GetSystemMetrics(SM_CYSCREEN);
             let hwnd = CreateWindowExW(
@@ -58,10 +61,15 @@ impl JumpOverlay {
                 Some(h_instance.into()),
                 None,
             );
-            if let Ok(h) = hwnd {
-                SetLayeredWindowAttributes(h, COLORREF(0), 180, LWA_ALPHA);
-                ShowWindow(h, SW_HIDE);
-                self.hwnd = Some(h);
+            match hwnd {
+                Ok(h) => {
+                    SetLayeredWindowAttributes(h, COLORREF(0), 180, LWA_ALPHA);
+                    ShowWindow(h, SW_HIDE);
+                    self.hwnd = Some(h);
+                }
+                Err(e) => {
+                    println!("CreateWindowExW failed: {:?}", e);
+                }
             }
         }
     }
@@ -100,7 +108,10 @@ impl JumpOverlay {
             }
             unsafe {
                 let mut rect = RECT::default();
-                GetClientRect(hwnd, &mut rect);
+                if !GetClientRect(hwnd, &mut rect).as_bool() {
+                    println!("GetClientRect failed: {:?}", GetLastError());
+                    return;
+                }
                 let width = rect.right - rect.left;
                 let height = rect.bottom - rect.top;
                 let cell_w = width / self.grid_size.0 as i32;
@@ -108,6 +119,11 @@ impl JumpOverlay {
 
                 let pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
                 let old_pen = SelectObject(hdc, pen.into());
+                if old_pen.0 == 0 {
+                    println!("SelectObject failed: {:?}", GetLastError());
+                    DeleteObject(pen.into());
+                    return;
+                }
 
                 // draw vertical lines
                 for x in 0..=self.grid_size.0 {
@@ -205,8 +221,12 @@ impl JumpOverlay {
             if let Some(hwnd) = self.hwnd {
                 unsafe {
                     let hdc = GetDC(Some(hwnd));
-                    self.draw(hdc);
-                    ReleaseDC(Some(hwnd), hdc);
+                    if hdc.0 == 0 {
+                        println!("GetDC failed: {:?}", GetLastError());
+                    } else {
+                        self.draw(hdc);
+                        ReleaseDC(Some(hwnd), hdc);
+                    }
                 }
             }
             if self.input.len() >= self.expected_len() {
