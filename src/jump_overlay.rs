@@ -125,11 +125,13 @@ impl JumpOverlay {
                 }
 
                 // draw labels
+                let row_len = Self::letters_needed(self.grid_size.1);
+                let col_len = Self::letters_needed(self.grid_size.0);
                 for row in 0..self.grid_size.1 {
+                    let row_code = Self::index_to_code(row as usize, row_len);
                     for col in 0..self.grid_size.0 {
-                        let code = format!("{}{}",
-                            (b'A' + row as u8) as char,
-                            (b'A' + col as u8) as char);
+                        let col_code = Self::index_to_code(col as usize, col_len);
+                        let code = format!("{}{}", row_code, col_code);
                         let mut text: Vec<u16> = code
                             .encode_utf16()
                             .chain(std::iter::once(0))
@@ -173,6 +175,15 @@ impl JumpOverlay {
             idx = idx * 26 + ((ch as u8 - b'A') as usize);
         }
         idx
+    }
+
+    fn index_to_code(mut index: usize, len: usize) -> String {
+        let mut chars = vec!['A'; len];
+        for i in (0..len).rev() {
+            chars[i] = (b'A' + (index % 26) as u8) as char;
+            index /= 26;
+        }
+        chars.into_iter().collect()
     }
 
     fn target_position(&self, row: usize, col: usize) -> Option<(i32, i32)> {
