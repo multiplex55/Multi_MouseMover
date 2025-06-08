@@ -95,17 +95,15 @@ impl OverlayWindow {
 
         overlay
     }
-    /// Updates overlay position and color based on interaction state
     pub fn update_overlay_status(&mut self, is_left_click_held: bool) {
-        // ✅ Lock HWND only once
         let hwnd = *self.hwnd.lock().unwrap();
         if let Some(h) = hwnd {
             let hwnd = HWND(h as *mut _);
             let mut point = POINT::default();
 
-            // ✅ Move overlay window to mouse position
+            // ✅ Move overlay to cursor position
             if unsafe { GetCursorPos(&mut point) }.is_ok() {
-                let x = point.x + 5;
+                let x = point.x + 5; // Small offset
                 let y = point.y + 5;
 
                 unsafe {
@@ -114,20 +112,49 @@ impl OverlayWindow {
                         Some(HWND_TOPMOST),
                         x,
                         y,
-                        5,
-                        5,
+                        5, // Small overlay width
+                        5, // Small overlay height
                         SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
                     );
                 }
             }
 
-            // ✅ Avoid deadlock by checking `is_green` separately
+            // ✅ Fix flickering: Only repaint if state actually changes
             if self.is_green != is_left_click_held {
-                self.is_green = is_left_click_held;
+                self.is_green = is_left_click_held; // Green when clicking, Red when released
                 self.repaint();
             }
         }
     }
+
+    /// Repaints the square
+    pub fn repaint(&self) {
+        let hwnd_lock = self.hwnd.lock().unwrap();
+        if let Some(h) = *hwnd_lock {
+            let hwnd = HWND(h as *mut _); // ✅ Convert `isize` back to `HWND`
+            unsafe {
+                let hdc = GetDC(Some(hwnd));
+                let color = if self.is_green {
+                    RGB(0, 255, 0) // Green when left-click is pressed
+                } else {
+                    RGB(255, 0, 0) // Red otherwise
+                };
+                let hbrush = CreateSolidBrush(color);
+
+                let rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 100,
+                    bottom: 100,
+                };
+                FillRect(hdc, &rect, hbrush);
+
+                DeleteObject(hbrush.into());
+                ReleaseDC(Some(hwnd), hdc);
+            }
+        }
+    }
+
     /// Moves the overlay to follow the mouse cursor
     pub fn move_to_mouse(&self) {
         let hwnd_lock = self.hwnd.lock().unwrap();
@@ -200,34 +227,6 @@ impl OverlayWindow {
         self.is_green = is_green;
         self.repaint();
         self.move_to_mouse(); // 🟢 Move the overlay when color updates
-    }
-
-    /// Repaints the square
-    pub fn repaint(&self) {
-        let hwnd_lock = self.hwnd.lock().unwrap();
-        if let Some(h) = *hwnd_lock {
-            let hwnd = HWND(h as *mut _); // ✅ Convert `isize` back to `HWND`
-            unsafe {
-                let hdc = GetDC(Some(hwnd));
-                let color = if self.is_green {
-                    RGB(0, 255, 0) // Green when left-click is pressed
-                } else {
-                    RGB(255, 0, 0) // Red otherwise
-                };
-                let hbrush = CreateSolidBrush(color);
-
-                let rect = RECT {
-                    left: 0,
-                    top: 0,
-                    right: 100,
-                    bottom: 100,
-                };
-                FillRect(hdc, &rect, hbrush);
-
-                DeleteObject(hbrush.into());
-                ReleaseDC(Some(hwnd), hdc);
-            }
-        }
     }
 }
 
