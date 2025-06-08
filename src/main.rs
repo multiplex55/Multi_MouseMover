@@ -12,7 +12,7 @@ use overlay::OVERLAY;
 use jump_overlay::{JUMP_OVERLAY, hide_jump_overlay};
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::sync::RwLock;
+use std::sync::{RwLock, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 use std::{env, fs, error::Error, io};
@@ -50,6 +50,8 @@ lazy_static! {
     };
     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
     static ref ACTIVE_KEYS: RwLock<HashSet<VirtualKey>> = RwLock::new(HashSet::new());
+    /// Stores the installed keyboard hook handle so it can be cleaned up on panic.
+    static ref KEYBOARD_HOOK_HANDLE: Mutex<Option<KeyboardHook>> = Mutex::new(None);
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -256,7 +258,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
     CallNextHookEx(None, code, w_param, l_param)
 }
 
-unsafe fn install_keyboard_hook() -> windows::core::Result<KeyboardHook> {
+unsafe fn install_keyboard_hook() -> windows::core::Result<()> {
     println!("🔹 Attempting to Get Module Handle...");
     let h_instance = GetModuleHandleW(None)?;
     println!("✅ Module Handle Retrieved");
@@ -269,11 +271,23 @@ unsafe fn install_keyboard_hook() -> windows::core::Result<KeyboardHook> {
         0,
     )?;
 
-    Ok(KeyboardHook(hook))
+    // Store the hook guard for cleanup on panic
+    *KEYBOARD_HOOK_HANDLE.lock().unwrap() = Some(KeyboardHook(hook));
+
+    Ok(())
 }
 
 fn main() {
     println!("🚀 Program Start!");
+
+    // Set a panic hook to ensure we clean up resources on unexpected errors
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("Application panicked: {}", info);
+        // Drop the hook guard so the keyboard is unhooked
+        KEYBOARD_HOOK_HANDLE.lock().unwrap().take();
+        hide_jump_overlay();
+        std::process::exit(1);
+    }));
 
     // Ensure Rust backtrace is enabled
     env::set_var("RUST_BACKTRACE", "1");
@@ -291,16 +305,11 @@ fn main() {
     config.initialize_bindings();
     println!("✅ Key Bindings Initialized");
 
-    let _hook = match unsafe { install_keyboard_hook() } {
-        Ok(h) => {
-            println!("✅ Keyboard Hook Installed Successfully!");
-            h
-        }
-        Err(e) => {
-            eprintln!("❌ Keyboard Hook Failed to Install: {e}");
-            return;
-        }
-    };
+    if let Err(e) = unsafe { install_keyboard_hook() } {
+        eprintln!("❌ Keyboard Hook Failed to Install: {e}");
+        return;
+    }
+    println!("✅ Keyboard Hook Installed Successfully!");
 
     println!("🔹 Attempting Overlay Initialization...");
     match OVERLAY.lock() {
