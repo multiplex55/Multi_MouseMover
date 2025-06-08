@@ -245,7 +245,7 @@ extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: L
     match msg {
         WM_PAINT => {
             // println!("🖌 Overlay WM_PAINT triggered!");
-            if let Some(ref mut ov) = *OVERLAY.lock().unwrap() {
+            if let Some(ref mut ov) = *OVERLAY.lock().unwrap_or_else(|e| e.into_inner()) {
                 ov.repaint();
             }
             LRESULT(0)
