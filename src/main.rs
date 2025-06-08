@@ -186,7 +186,11 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
                     return LRESULT(1);
                 }
 
-                if let Some((x, y)) = JUMP_OVERLAY.lock().unwrap().handle_key(virtual_key) {
+                if let Some((x, y)) = JUMP_OVERLAY
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .handle_key(virtual_key)
+                {
                     action_handler.mouse_master.move_mouse_to(x, y);
                     action_handler.mouse_master.jump_active = false;
                 }

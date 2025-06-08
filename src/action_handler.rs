@@ -131,7 +131,7 @@ impl MouseMaster {
 
     /// Function to update the overlay window
     fn update_overlay(&self) {
-        if let Some(ref mut ov) = *OVERLAY.lock().unwrap() {
+        if let Some(ref mut ov) = *OVERLAY.lock().unwrap_or_else(|e| e.into_inner()) {
             ov.update_color(self.left_click_held);
         }
     }

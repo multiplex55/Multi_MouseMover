@@ -251,7 +251,10 @@ extern "system" fn jump_window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         WM_PAINT => {
             let ps = &mut PAINTSTRUCT::default();
             let hdc = unsafe { BeginPaint(hwnd, ps) };
-            JUMP_OVERLAY.lock().unwrap().draw(hdc);
+            JUMP_OVERLAY
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .draw(hdc);
             unsafe { EndPaint(hwnd, ps) };
             LRESULT(0)
         }
@@ -262,11 +265,11 @@ extern "system" fn jump_window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
 }
 
 pub fn show_jump_overlay(config: &Config) {
-    let mut ov = JUMP_OVERLAY.lock().unwrap();
+    let mut ov = JUMP_OVERLAY.lock().unwrap_or_else(|e| e.into_inner());
     ov.initialize(config);
     ov.show();
 }
 
 pub fn hide_jump_overlay() {
-    JUMP_OVERLAY.lock().unwrap().hide();
+    JUMP_OVERLAY.lock().unwrap_or_else(|e| e.into_inner()).hide();
 }
