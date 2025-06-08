@@ -54,8 +54,27 @@ struct GridSize {
 
 impl Config {
     fn load_from_file(path: &str) -> Self {
-        let config_str = fs::read_to_string(path).expect("Failed to read config file");
-        toml::from_str(&config_str).expect("Failed to parse config file")
+        // Try to read the config from the provided path relative to the current
+        // working directory.  If that fails, fall back to looking in the same
+        // directory as the executable.  This allows running the binary from any
+        // location as long as `config.toml` sits next to it.
+
+        // First attempt: path relative to current directory
+        if let Ok(config_str) = fs::read_to_string(path) {
+            return toml::from_str(&config_str).expect("Failed to parse config file");
+        }
+
+        // Second attempt: path relative to the executable location
+        if let Ok(mut exe_path) = env::current_exe() {
+            exe_path.pop();
+            exe_path.push(path);
+            if let Ok(config_str) = fs::read_to_string(&exe_path) {
+                return toml::from_str(&config_str)
+                    .expect("Failed to parse config file");
+            }
+        }
+
+        panic!("Failed to read config file: {}", path);
     }
     fn initialize_bindings(&self) {
         let mut key_actions = KEY_ACTIONS.write().unwrap(); // Acquire write lock
