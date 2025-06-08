@@ -59,7 +59,21 @@ impl Config {
         // directory as the executable.  This allows running the binary from any
         // location as long as `config.toml` sits next to it.
 
+        // DEBUG: print current working directory and executable path
+        if let Ok(cwd) = env::current_dir() {
+            println!("[DEBUG] current_dir: {}", cwd.display());
+        } else {
+            println!("[DEBUG] current_dir: <failed>");
+        }
+
+        if let Ok(exe) = env::current_exe() {
+            println!("[DEBUG] current_exe: {}", exe.display());
+        } else {
+            println!("[DEBUG] current_exe: <failed>");
+        }
+
         // First attempt: path relative to current directory
+        println!("[DEBUG] trying path: {}", path);
         if let Ok(config_str) = fs::read_to_string(path) {
             return toml::from_str(&config_str).expect("Failed to parse config file");
         }
@@ -68,6 +82,7 @@ impl Config {
         if let Ok(mut exe_path) = env::current_exe() {
             exe_path.pop();
             exe_path.push(path);
+            println!("[DEBUG] trying exe path: {}", exe_path.display());
             if let Ok(config_str) = fs::read_to_string(&exe_path) {
                 return toml::from_str(&config_str)
                     .expect("Failed to parse config file");
