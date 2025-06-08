@@ -91,6 +91,13 @@ impl JumpOverlay {
 
     fn draw(&self) {
         if let Some(hwnd) = self.hwnd {
+            if self.grid_size.0 == 0 || self.grid_size.1 == 0 {
+                println!(
+                    "JumpOverlay::draw aborted due to zero grid size: ({}, {})",
+                    self.grid_size.0, self.grid_size.1
+                );
+                return;
+            }
             unsafe {
                 let mut rect = RECT::default();
                 GetClientRect(hwnd, &mut rect);
