@@ -9,7 +9,7 @@ use action_handler::*;
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::OVERLAY;
-use jump_overlay::JUMP_OVERLAY;
+use jump_overlay::{JUMP_OVERLAY, hide_jump_overlay};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::RwLock;
@@ -133,6 +133,12 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             let is_keydown = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
 
             if action_handler.mouse_master.jump_active {
+                if virtual_key == VirtualKey::Escape && is_keydown {
+                    hide_jump_overlay();
+                    action_handler.mouse_master.jump_active = false;
+                    return LRESULT(1);
+                }
+
                 if let Some((x, y)) = JUMP_OVERLAY.lock().unwrap().handle_key(virtual_key) {
                     action_handler.mouse_master.move_mouse_to(x, y);
                     action_handler.mouse_master.jump_active = false;
