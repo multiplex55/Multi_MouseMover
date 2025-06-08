@@ -299,11 +299,18 @@ fn main() {
     };
 
     println!("🔹 Attempting Overlay Initialization...");
-    if let Ok(mut overlay) = OVERLAY.lock() {
-        println!("✅ Overlay Initialized Successfully");
-        overlay.repaint();
-    } else {
-        println!("❌ Overlay Lock Failed!");
+    match OVERLAY.lock() {
+        Ok(mut maybe_ov) => {
+            if let Some(ref mut ov) = *maybe_ov {
+                println!("✅ Overlay Initialized Successfully");
+                ov.repaint();
+            } else {
+                eprintln!("Overlay disabled due to initialization failure");
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ Overlay Lock Failed: {e}");
+        }
     }
 
     println!("🔄 Entering Main Event Loop...");
@@ -317,10 +324,11 @@ fn main() {
                 // ✅ Update the overlay position inside the loop
                 let is_left_click_held =
                     ACTION_HANDLER.read().unwrap().mouse_master.left_click_held;
-                OVERLAY
-                    .lock()
-                    .unwrap()
-                    .update_overlay_status(is_left_click_held);
+                if let Ok(mut maybe_ov) = OVERLAY.lock() {
+                    if let Some(ref mut ov) = *maybe_ov {
+                        ov.update_overlay_status(is_left_click_held);
+                    }
+                }
 
                 sleep(Duration::from_millis(config.polling_rate));
 
