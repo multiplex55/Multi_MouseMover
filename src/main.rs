@@ -2,12 +2,14 @@ mod action;
 mod action_handler;
 mod keyboard;
 mod overlay;
+mod jump_overlay;
 
 use action::*;
 use action_handler::*;
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::OVERLAY;
+use jump_overlay::JUMP_OVERLAY;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::RwLock;
@@ -95,6 +97,11 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             let mut active_keys = ACTIVE_KEYS.write().unwrap();
 
             let is_keydown = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
+
+            if action_handler.mouse_master.jump_active {
+                JUMP_OVERLAY.lock().unwrap().handle_key(virtual_key);
+                return LRESULT(1);
+            }
 
             println!(
                 "[DEBUG] Processing Key Event | VirtualKey: {:?} | KeyDown: {}",

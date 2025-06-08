@@ -1,0 +1,163 @@
+use std::ptr;
+use std::sync::{Arc, Mutex};
+use windows::core::w;
+use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+use crate::{Config, keyboard::VirtualKey};
+
+lazy_static::lazy_static! {
+    /// Global instance of the jump overlay
+    pub static ref JUMP_OVERLAY: Arc<Mutex<JumpOverlay>> = Arc::new(Mutex::new(JumpOverlay::new()));
+}
+
+pub struct JumpOverlay {
+    hwnd: Option<HWND>,
+    grid_size: (u32, u32),
+    visible: bool,
+}
+
+impl JumpOverlay {
+    pub fn new() -> Self {
+        Self { hwnd: None, grid_size: (10, 10), visible: false }
+    }
+
+    fn create_window(&mut self) {
+        if self.hwnd.is_some() { return; }
+        unsafe {
+            let h_instance = GetModuleHandleW(None).unwrap();
+            let class = w!("JumpOverlayClass");
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(jump_window_proc),
+                hInstance: h_instance.into(),
+                lpszClassName: class,
+                style: CS_HREDRAW | CS_VREDRAW,
+                hbrBackground: HBRUSH(ptr::null_mut()),
+                ..Default::default()
+            };
+            RegisterClassW(&wc);
+            let width = GetSystemMetrics(SM_CXSCREEN);
+            let height = GetSystemMetrics(SM_CYSCREEN);
+            let hwnd = CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                class,
+                w!("JumpOverlay"),
+                WS_POPUP,
+                0,
+                0,
+                width,
+                height,
+                None,
+                None,
+                Some(h_instance.into()),
+                None,
+            );
+            if let Ok(h) = hwnd {
+                SetLayeredWindowAttributes(h, COLORREF(0), 180, LWA_ALPHA);
+                ShowWindow(h, SW_HIDE);
+                self.hwnd = Some(h);
+            }
+        }
+    }
+
+    pub fn initialize(&mut self, config: &Config) {
+        self.grid_size = (config.grid_size.width, config.grid_size.height);
+        self.create_window();
+    }
+
+    pub fn show(&mut self) {
+        if let Some(h) = self.hwnd {
+            unsafe {
+                ShowWindow(h, SW_SHOW);
+                UpdateWindow(h);
+            }
+            self.visible = true;
+        }
+    }
+
+    pub fn hide(&mut self) {
+        if let Some(h) = self.hwnd {
+            unsafe { ShowWindow(h, SW_HIDE); }
+            self.visible = false;
+        }
+    }
+
+    fn draw(&self) {
+        if let Some(hwnd) = self.hwnd {
+            unsafe {
+                let mut rect = RECT::default();
+                GetClientRect(hwnd, &mut rect);
+                let width = rect.right - rect.left;
+                let height = rect.bottom - rect.top;
+                let cell_w = width / self.grid_size.0 as i32;
+                let cell_h = height / self.grid_size.1 as i32;
+
+                let hdc = GetDC(hwnd);
+                let pen = CreatePen(PS_SOLID as i32, 1, RGB(255, 255, 255));
+                let old_pen = SelectObject(hdc, HGDIOBJ(pen.0 as isize));
+
+                // draw vertical lines
+                for x in 0..=self.grid_size.0 {
+                    let pos = rect.left + (x as i32 * cell_w);
+                    MoveToEx(hdc, pos, rect.top, None);
+                    LineTo(hdc, pos, rect.bottom);
+                }
+
+                // draw horizontal lines
+                for y in 0..=self.grid_size.1 {
+                    let pos = rect.top + (y as i32 * cell_h);
+                    MoveToEx(hdc, rect.left, pos, None);
+                    LineTo(hdc, rect.right, pos);
+                }
+
+                // draw labels
+                for row in 0..self.grid_size.1 {
+                    for col in 0..self.grid_size.0 {
+                        let code = format!("{}{}",
+                            (b'A' + row as u8) as char,
+                            (b'A' + col as u8) as char);
+                        let text: Vec<u16> = code.encode_utf16().collect();
+                        let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
+                        let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
+                        TextOutW(hdc, x, y, PWSTR(text.as_ptr() as *mut _), text.len() as i32);
+                    }
+                }
+
+                SelectObject(hdc, old_pen);
+                DeleteObject(pen.into());
+                ReleaseDC(hwnd, hdc);
+            }
+        }
+    }
+
+    pub fn handle_key(&mut self, key: VirtualKey) {
+        println!("JumpOverlay key: {:?}", key);
+        // In a real implementation we would map the key press to a cell
+    }
+}
+
+extern "system" fn jump_window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            let ps = &mut PAINTSTRUCT::default();
+            unsafe { BeginPaint(hwnd, ps); }
+            JUMP_OVERLAY.lock().unwrap().draw();
+            unsafe { EndPaint(hwnd, ps); }
+            LRESULT(0)
+        }
+        WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+        WM_DESTROY => LRESULT(0),
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+pub fn show_jump_overlay(config: &Config) {
+    let mut ov = JUMP_OVERLAY.lock().unwrap();
+    ov.initialize(config);
+    ov.show();
+}
+
+pub fn hide_jump_overlay() {
+    JUMP_OVERLAY.lock().unwrap().hide();
+}

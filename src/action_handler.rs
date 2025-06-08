@@ -1,5 +1,6 @@
 use crate::overlay::OVERLAY;
 use crate::{action, Config};
+use crate::jump_overlay;
 use action::Action;
 use enigo::*;
 
@@ -11,6 +12,7 @@ pub struct MouseMaster {
     pub acceleration_counter: u32,
     pub top_speed: i32,
     pub left_click_held: bool,
+    pub jump_active: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -30,6 +32,7 @@ impl MouseMaster {
             acceleration_counter: 0,
             top_speed: config.top_speed,
             left_click_held: false,
+            jump_active: false,
         }
     }
 
@@ -206,6 +209,13 @@ impl MouseMaster {
 
     /// Activates jump mode
     fn activate_jump_mode(&mut self) {
-        println!("Jump Mode Activated!");
+        use crate::jump_overlay::{show_jump_overlay, hide_jump_overlay};
+        if self.jump_active {
+            hide_jump_overlay();
+            self.jump_active = false;
+        } else {
+            show_jump_overlay(&self.config);
+            self.jump_active = true;
+        }
     }
 }
