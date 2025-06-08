@@ -119,7 +119,9 @@ impl MouseMaster {
         println!("[DEBUG] Left Click Pressed!");
         self.left_click_held = true; // ✅ Update state
         self.update_overlay(); // ✅ Notify the overlay
-        self.enigo.button(Button::Left, Direction::Click).unwrap();
+        if let Err(e) = self.enigo.button(Button::Left, Direction::Click) {
+            eprintln!("Failed to perform left click: {e}");
+        }
     }
 
     /// Detect when left click is released
@@ -139,7 +141,9 @@ impl MouseMaster {
     /// Simulates a right mouse click
     fn right_click(&mut self) {
         // println!("Performing Right Click!");
-        self.enigo.button(Button::Right, Direction::Click).unwrap();
+        if let Err(e) = self.enigo.button(Button::Right, Direction::Click) {
+            eprintln!("Failed to perform right click: {e}");
+        }
     }
 
     /// Moves the mouse by the given `dx` and `dy` offsets with immediate response
@@ -164,13 +168,13 @@ impl MouseMaster {
 
         // Perform the mouse movement
         if let Ok((current_x, current_y)) = self.enigo.location() {
-            self.enigo
-                .move_mouse(
-                    current_x + actual_dx,
-                    current_y + actual_dy,
-                    Coordinate::Abs,
-                )
-                .unwrap();
+            if let Err(e) = self.enigo.move_mouse(
+                current_x + actual_dx,
+                current_y + actual_dy,
+                Coordinate::Abs,
+            ) {
+                eprintln!("Failed to move mouse: {e}");
+            }
         } else {
             println!("Failed to retrieve mouse location.");
         }
@@ -178,7 +182,9 @@ impl MouseMaster {
 
     /// Moves the mouse cursor instantly to the given absolute position
     pub fn move_mouse_to(&mut self, x: i32, y: i32) {
-        self.enigo.move_mouse(x, y, Coordinate::Abs).unwrap();
+        if let Err(e) = self.enigo.move_mouse(x, y, Coordinate::Abs) {
+            eprintln!("Failed to move mouse to position: {e}");
+        }
     }
 
     /// Resets the speed and acceleration counter when motion stops
