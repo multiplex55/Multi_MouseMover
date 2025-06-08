@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::sync::RwLock;
 use std::thread::sleep;
 use std::time::Duration;
-use std::{env, fs};
+use std::{env, fs, error::Error, io};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState};
@@ -25,7 +25,13 @@ static mut HOOK_HANDLE: Option<HHOOK> = None;
 
 lazy_static! {
     static ref ACTION_HANDLER: RwLock<ActionHandler> = {
-        let config = Config::load_from_file("config.toml");
+        let config = match Config::load_from_file("config.toml") {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                eprintln!("Failed to load configuration: {}", e);
+                std::process::exit(1);
+            }
+        };
         let mouse_master = MouseMaster::new(config.clone());
         let handler = ActionHandler::new(mouse_master);
 
@@ -46,14 +52,34 @@ struct Config {
     top_speed: i32,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            key_bindings: Vec::new(),
+            polling_rate: 0,
+            grid_size: GridSize::default(),
+            starting_speed: 1,
+            acceleration: 2,
+            acceleration_rate: 1,
+            top_speed: 6,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 struct GridSize {
     width: u32,
     height: u32,
 }
 
+impl Default for GridSize {
+    fn default() -> Self {
+        Self { width: 10, height: 10 }
+    }
+}
+
 impl Config {
-    fn load_from_file(path: &str) -> Self {
+    fn load_from_file(path: &str) -> Result<Self, Box<dyn Error>> {
         // Try to read the config from the provided path relative to the current
         // working directory.  If that fails, fall back to looking in the same
         // directory as the executable.  This allows running the binary from any
@@ -74,8 +100,13 @@ impl Config {
 
         // First attempt: path relative to current directory
         println!("[DEBUG] trying path: {}", path);
-        if let Ok(config_str) = fs::read_to_string(path) {
-            return toml::from_str(&config_str).expect("Failed to parse config file");
+        match fs::read_to_string(path) {
+            Ok(config_str) => return Ok(toml::from_str(&config_str)?),
+            Err(e) => {
+                if e.kind() != io::ErrorKind::NotFound {
+                    return Err(e.into());
+                }
+            }
         }
 
         // Second attempt: path relative to the executable location
@@ -83,13 +114,18 @@ impl Config {
             exe_path.pop();
             exe_path.push(path);
             println!("[DEBUG] trying exe path: {}", exe_path.display());
-            if let Ok(config_str) = fs::read_to_string(&exe_path) {
-                return toml::from_str(&config_str)
-                    .expect("Failed to parse config file");
+            match fs::read_to_string(&exe_path) {
+                Ok(config_str) => return Ok(toml::from_str(&config_str)?),
+                Err(e) => {
+                    if e.kind() != io::ErrorKind::NotFound {
+                        return Err(e.into());
+                    }
+                }
             }
         }
 
-        panic!("Failed to read config file: {}", path);
+        eprintln!("Config file not found, using defaults");
+        Ok(Self::default())
     }
     fn initialize_bindings(&self) {
         let mut key_actions = KEY_ACTIONS.write().unwrap(); // Acquire write lock
@@ -212,7 +248,13 @@ fn main() {
     env::set_var("RUST_BACKTRACE", "1");
     println!("🔹 Backtrace Enabled");
 
-    let config = Config::load_from_file("config.toml");
+    let config = match Config::load_from_file("config.toml") {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("Error loading configuration: {}", e);
+            std::process::exit(1);
+        }
+    };
     println!("✅ Config Loaded");
 
     config.initialize_bindings();
