@@ -1,11 +1,12 @@
 use std::ptr;
 use std::sync::{Arc, Mutex};
-use windows::core::w;
+use windows::core::{w, PWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::{Config, keyboard::VirtualKey};
+use crate::{Config, keyboard::VirtualKey, overlay::RGB};
 
 lazy_static::lazy_static! {
     /// Global instance of the jump overlay
@@ -18,6 +19,9 @@ pub struct JumpOverlay {
     visible: bool,
     input: String,
 }
+
+unsafe impl Send for JumpOverlay {}
+unsafe impl Sync for JumpOverlay {}
 
 impl JumpOverlay {
     pub fn new() -> Self {
@@ -95,9 +99,9 @@ impl JumpOverlay {
                 let cell_w = width / self.grid_size.0 as i32;
                 let cell_h = height / self.grid_size.1 as i32;
 
-                let hdc = GetDC(hwnd);
-                let pen = CreatePen(PS_SOLID as i32, 1, RGB(255, 255, 255));
-                let old_pen = SelectObject(hdc, HGDIOBJ(pen.0 as isize));
+                let hdc = GetDC(Some(hwnd));
+                let pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                let old_pen = SelectObject(hdc, pen.into());
 
                 // draw vertical lines
                 for x in 0..=self.grid_size.0 {
@@ -122,13 +126,13 @@ impl JumpOverlay {
                         let text: Vec<u16> = code.encode_utf16().collect();
                         let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
                         let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
-                        TextOutW(hdc, x, y, PWSTR(text.as_ptr() as *mut _), text.len() as i32);
+                        TextOutW(hdc, x, y, &text);
                     }
                 }
 
                 SelectObject(hdc, old_pen);
                 DeleteObject(pen.into());
-                ReleaseDC(hwnd, hdc);
+                ReleaseDC(Some(hwnd), hdc);
             }
         }
     }
