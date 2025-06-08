@@ -50,6 +50,7 @@ impl MouseMaster {
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
+            Action::JumpMode => self.activate_jump_mode(),
         }
     }
     /// Toggles between `Idle` and `Active` mode
@@ -201,5 +202,10 @@ impl MouseMaster {
 
         println!("Switched to mode: {}", mode);
         // FUTURE GROWTH
+    }
+
+    /// Activates jump mode
+    fn activate_jump_mode(&mut self) {
+        println!("Jump Mode Activated!");
     }
 }

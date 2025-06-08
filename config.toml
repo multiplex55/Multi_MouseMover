@@ -33,6 +33,10 @@ key_bindings = [
         "left_click"
     ],
     [
+        "F",
+        "jump_mode"
+    ],
+    [
         "W",
         "move_up"
     ]

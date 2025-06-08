@@ -15,6 +15,7 @@ pub enum Action {
     RightClick,
     Exit,
     SlowMouse,
+    JumpMode,
 }
 
 impl Action {
@@ -32,6 +33,7 @@ impl Action {
             "right_click" => Some(Self::RightClick),
             "exit" => Some(Self::Exit),
             "slow_mouse" => Some(Self::SlowMouse),
+            "jump_mode" => Some(Self::JumpMode),
             _ => None,
         }
     }
