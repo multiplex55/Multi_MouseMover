@@ -16,11 +16,12 @@ pub struct JumpOverlay {
     hwnd: Option<HWND>,
     grid_size: (u32, u32),
     visible: bool,
+    input: String,
 }
 
 impl JumpOverlay {
     pub fn new() -> Self {
-        Self { hwnd: None, grid_size: (10, 10), visible: false }
+        Self { hwnd: None, grid_size: (10, 10), visible: false, input: String::new() }
     }
 
     fn create_window(&mut self) {
@@ -64,6 +65,7 @@ impl JumpOverlay {
     pub fn initialize(&mut self, config: &Config) {
         self.grid_size = (config.grid_size.width, config.grid_size.height);
         self.create_window();
+        self.input.clear();
     }
 
     pub fn show(&mut self) {
@@ -131,9 +133,59 @@ impl JumpOverlay {
         }
     }
 
-    pub fn handle_key(&mut self, key: VirtualKey) {
-        println!("JumpOverlay key: {:?}", key);
-        // In a real implementation we would map the key press to a cell
+    fn letters_needed(value: u32) -> usize {
+        if value <= 26 {
+            1
+        } else if value <= 26 * 26 {
+            2
+        } else {
+            3
+        }
+    }
+
+    fn expected_len(&self) -> usize {
+        Self::letters_needed(self.grid_size.1) + Self::letters_needed(self.grid_size.0)
+    }
+
+    fn code_to_index(code: &[char]) -> usize {
+        let mut idx = 0usize;
+        for &ch in code {
+            idx = idx * 26 + ((ch as u8 - b'A') as usize);
+        }
+        idx
+    }
+
+    fn target_position(&self, row: usize, col: usize) -> Option<(i32, i32)> {
+        let width = unsafe { GetSystemMetrics(SM_CXSCREEN) } as i32;
+        let height = unsafe { GetSystemMetrics(SM_CYSCREEN) } as i32;
+        let cell_w = width / self.grid_size.0 as i32;
+        let cell_h = height / self.grid_size.1 as i32;
+        if row < self.grid_size.1 as usize && col < self.grid_size.0 as usize {
+            let x = col as i32 * cell_w + cell_w / 2;
+            let y = row as i32 * cell_h + cell_h / 2;
+            Some((x, y))
+        } else {
+            None
+        }
+    }
+
+    pub fn handle_key(&mut self, key: VirtualKey) -> Option<(i32, i32)> {
+        if let Some(ch) = key.to_char() {
+            self.input.push(ch);
+            println!("JumpOverlay sequence: {}", self.input);
+            self.draw();
+            if self.input.len() >= self.expected_len() {
+                let row_len = Self::letters_needed(self.grid_size.1);
+                let row_code: Vec<char> = self.input.chars().take(row_len).collect();
+                let col_code: Vec<char> = self.input.chars().skip(row_len).take(Self::letters_needed(self.grid_size.0)).collect();
+                let row = Self::code_to_index(&row_code);
+                let col = Self::code_to_index(&col_code);
+                self.input.clear();
+                self.hide();
+                return self.target_position(row, col);
+            }
+        }
+        None
     }
 }
 

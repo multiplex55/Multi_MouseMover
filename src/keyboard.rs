@@ -552,6 +552,49 @@ impl VirtualKey {
             _ => None,
         }
     }
+
+    /// Convert a `VirtualKey` representing alphanumeric keys into a `char`
+    pub fn to_char(self) -> Option<char> {
+        match self {
+            Self::A => Some('A'),
+            Self::B => Some('B'),
+            Self::C => Some('C'),
+            Self::D => Some('D'),
+            Self::E => Some('E'),
+            Self::F => Some('F'),
+            Self::G => Some('G'),
+            Self::H => Some('H'),
+            Self::I => Some('I'),
+            Self::J => Some('J'),
+            Self::K => Some('K'),
+            Self::L => Some('L'),
+            Self::M => Some('M'),
+            Self::N => Some('N'),
+            Self::O => Some('O'),
+            Self::P => Some('P'),
+            Self::Q => Some('Q'),
+            Self::R => Some('R'),
+            Self::S => Some('S'),
+            Self::T => Some('T'),
+            Self::U => Some('U'),
+            Self::V => Some('V'),
+            Self::W => Some('W'),
+            Self::X => Some('X'),
+            Self::Y => Some('Y'),
+            Self::Z => Some('Z'),
+            Self::Num0 => Some('0'),
+            Self::Num1 => Some('1'),
+            Self::Num2 => Some('2'),
+            Self::Num3 => Some('3'),
+            Self::Num4 => Some('4'),
+            Self::Num5 => Some('5'),
+            Self::Num6 => Some('6'),
+            Self::Num7 => Some('7'),
+            Self::Num8 => Some('8'),
+            Self::Num9 => Some('9'),
+            _ => None,
+        }
+    }
 }
 
 /// Struct for managing keybindings

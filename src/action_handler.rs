@@ -175,6 +175,11 @@ impl MouseMaster {
         }
     }
 
+    /// Moves the mouse cursor instantly to the given absolute position
+    pub fn move_mouse_to(&mut self, x: i32, y: i32) {
+        self.enigo.move_mouse(x, y, Coordinate::Abs).unwrap();
+    }
+
     /// Resets the speed and acceleration counter when motion stops
     pub fn reset_speed(&mut self) {
         self.current_speed = self.config.starting_speed;
