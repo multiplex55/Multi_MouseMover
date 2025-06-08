@@ -1,6 +1,6 @@
 use std::ptr;
 use std::sync::{Arc, Mutex};
-use windows::core::{w, PWSTR};
+use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -123,10 +123,19 @@ impl JumpOverlay {
                         let code = format!("{}{}",
                             (b'A' + row as u8) as char,
                             (b'A' + col as u8) as char);
-                        let text: Vec<u16> = code.encode_utf16().collect();
+                        let mut text: Vec<u16> = code
+                            .encode_utf16()
+                            .chain(std::iter::once(0))
+                            .collect();
                         let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
                         let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
-                        TextOutW(hdc, x, y, &text);
+                        TextOutW(
+                            hdc,
+                            x,
+                            y,
+                            PCWSTR(text.as_ptr()),
+                            (text.len() - 1) as i32,
+                        );
                     }
                 }
 
