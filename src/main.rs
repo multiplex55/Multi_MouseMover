@@ -21,7 +21,18 @@ use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-static mut HOOK_HANDLE: Option<HHOOK> = None;
+/// RAII guard for the installed keyboard hook.
+struct KeyboardHook(HHOOK);
+
+impl Drop for KeyboardHook {
+    fn drop(&mut self) {
+        unsafe {
+            if !UnhookWindowsHookEx(self.0).as_bool() {
+                eprintln!("Failed to unhook keyboard");
+            }
+        }
+    }
+}
 
 lazy_static! {
     static ref ACTION_HANDLER: RwLock<ActionHandler> = {
@@ -241,6 +252,22 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
     CallNextHookEx(None, code, w_param, l_param)
 }
 
+unsafe fn install_keyboard_hook() -> windows::core::Result<KeyboardHook> {
+    println!("🔹 Attempting to Get Module Handle...");
+    let h_instance = GetModuleHandleW(None)?;
+    println!("✅ Module Handle Retrieved");
+
+    println!("🔹 Setting Up Keyboard Hook...");
+    let hook = SetWindowsHookExW(
+        WH_KEYBOARD_LL,
+        Some(keyboard_hook),
+        Some(h_instance.into()),
+        0,
+    )?;
+
+    Ok(KeyboardHook(hook))
+}
+
 fn main() {
     println!("🚀 Program Start!");
 
@@ -260,25 +287,16 @@ fn main() {
     config.initialize_bindings();
     println!("✅ Key Bindings Initialized");
 
-    unsafe {
-        println!("🔹 Attempting to Get Module Handle...");
-        let h_instance = GetModuleHandleW(None).expect("❌ Failed to get module handle!");
-        println!("✅ Module Handle Retrieved");
-
-        println!("🔹 Setting Up Keyboard Hook...");
-        HOOK_HANDLE = SetWindowsHookExW(
-            WH_KEYBOARD_LL,
-            Some(keyboard_hook),
-            Some(h_instance.into()),
-            0,
-        )
-        .ok();
-
-        if HOOK_HANDLE.is_none() {
-            panic!("❌ Keyboard Hook Failed to Install!");
+    let _hook = match unsafe { install_keyboard_hook() } {
+        Ok(h) => {
+            println!("✅ Keyboard Hook Installed Successfully!");
+            h
         }
-        println!("✅ Keyboard Hook Installed Successfully!");
-    }
+        Err(e) => {
+            eprintln!("❌ Keyboard Hook Failed to Install: {e}");
+            return;
+        }
+    };
 
     println!("🔹 Attempting Overlay Initialization...");
     if let Ok(mut overlay) = OVERLAY.lock() {
