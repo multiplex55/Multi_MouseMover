@@ -89,7 +89,7 @@ impl JumpOverlay {
         }
     }
 
-    fn draw(&self) {
+    fn draw(&self, hdc: HDC) {
         if let Some(hwnd) = self.hwnd {
             if self.grid_size.0 == 0 || self.grid_size.1 == 0 {
                 println!(
@@ -106,7 +106,6 @@ impl JumpOverlay {
                 let cell_w = width / self.grid_size.0 as i32;
                 let cell_h = height / self.grid_size.1 as i32;
 
-                let hdc = GetDC(Some(hwnd));
                 let pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
                 let old_pen = SelectObject(hdc, pen.into());
 
@@ -150,7 +149,6 @@ impl JumpOverlay {
 
                 SelectObject(hdc, old_pen);
                 DeleteObject(pen.into());
-                ReleaseDC(Some(hwnd), hdc);
             }
         }
     }
@@ -204,7 +202,13 @@ impl JumpOverlay {
         if let Some(ch) = key.to_char() {
             self.input.push(ch);
             println!("JumpOverlay sequence: {}", self.input);
-            self.draw();
+            if let Some(hwnd) = self.hwnd {
+                unsafe {
+                    let hdc = GetDC(Some(hwnd));
+                    self.draw(hdc);
+                    ReleaseDC(Some(hwnd), hdc);
+                }
+            }
             if self.input.len() >= self.expected_len() {
                 let row_len = Self::letters_needed(self.grid_size.1);
                 let row_code: Vec<char> = self.input.chars().take(row_len).collect();
@@ -224,9 +228,9 @@ extern "system" fn jump_window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
     match msg {
         WM_PAINT => {
             let ps = &mut PAINTSTRUCT::default();
-            unsafe { BeginPaint(hwnd, ps); }
-            JUMP_OVERLAY.lock().unwrap().draw();
-            unsafe { EndPaint(hwnd, ps); }
+            let hdc = unsafe { BeginPaint(hwnd, ps) };
+            JUMP_OVERLAY.lock().unwrap().draw(hdc);
+            unsafe { EndPaint(hwnd, ps) };
             LRESULT(0)
         }
         WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
