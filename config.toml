@@ -1,45 +1,16 @@
+
 # Key bindings map keyboard keys to actions
 key_bindings = [
-    [
-        "A",
-        "move_left"
-    ],
-    [
-        "D",
-        "move_right"
-    ],
-    [
-        "Escape",
-        "exit"
-    ],
-    [
-        "L",
-        "right_click"
-    ],
-    [
-        "LeftShift",
-        "slow_mouse"
-    ],
-    [
-        "RightShift",
-        "slow_mouse"
-    ],
-    [
-        "S",
-        "move_down"
-    ],
-    [
-        "SPACE",
-        "left_click"
-    ],
-    [
-        "F",
-        "jump_mode"
-    ],
-    [
-        "W",
-        "move_up"
-    ]
+    ["A", "move_left"],
+    ["D", "move_right"],
+    ["Escape", "exit"],
+    ["L", "right_click"],
+    ["LeftShift", "slow_mouse"],
+    ["RightShift", "slow_mouse"],
+    ["S", "move_down"],
+    ["SPACE", "left_click"],
+    ["F", "jump_mode"],
+    ["W", "move_up"]
 ]
 polling_rate = 0
 
@@ -51,3 +22,4 @@ acceleration      = 2 # Pixels per acceleration step
 acceleration_rate = 1 # Polling cycles before applying acceleration
 starting_speed    = 1 # Initial speed in pixels
 top_speed         = 6
+
