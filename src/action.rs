@@ -1,3 +1,4 @@
+use crate::action_handler::MovementTick;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -84,9 +85,9 @@ impl ActionHandler {
         }
     }
 
-    pub fn tick_movement(&mut self) {
+    pub fn tick_movement(&mut self) -> MovementTick {
         self.mouse_master
-            .tick_movement(&self.active_keys, Duration::from_millis(0));
+            .tick_movement(&self.active_keys, Duration::from_millis(0))
     }
 
     pub fn is_movement_action(action: Action) -> bool {

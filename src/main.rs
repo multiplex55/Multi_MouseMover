@@ -17,7 +17,7 @@ use serde::Deserialize;
 use std::cell::RefCell;
 use std::sync::RwLock;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{env, error::Error, fs, io};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
@@ -25,6 +25,56 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const DEFAULT_POLLING_RATE_MS: u64 = 8;
+const MAX_MESSAGES_PER_TICK: usize = 64;
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+const DEBUG_HEARTBEAT_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct LoopDiagnostics {
+    loop_iterations: u64,
+    messages_processed: u64,
+    queued_key_events_processed: u64,
+    commands_executed: u64,
+    movement_ticks: u64,
+}
+
+impl LoopDiagnostics {
+    fn add(&mut self, other: Self) {
+        self.loop_iterations += other.loop_iterations;
+        self.messages_processed += other.messages_processed;
+        self.queued_key_events_processed += other.queued_key_events_processed;
+        self.commands_executed += other.commands_executed;
+        self.movement_ticks += other.movement_ticks;
+    }
+}
+
+#[derive(Debug, Default)]
+struct HeartbeatDiagnostics {
+    pending: LoopDiagnostics,
+    elapsed: Duration,
+}
+
+impl HeartbeatDiagnostics {
+    fn record(
+        &mut self,
+        diagnostics: LoopDiagnostics,
+        elapsed: Duration,
+    ) -> Option<LoopDiagnostics> {
+        self.pending.add(diagnostics);
+        self.elapsed += elapsed;
+
+        if self.elapsed < HEARTBEAT_INTERVAL {
+            return None;
+        }
+
+        let snapshot = self.pending;
+        self.pending = LoopDiagnostics::default();
+        while self.elapsed >= HEARTBEAT_INTERVAL {
+            self.elapsed -= HEARTBEAT_INTERVAL;
+        }
+        Some(snapshot)
+    }
+}
 
 /// RAII guard for the installed keyboard hook.
 struct KeyboardHook(HHOOK);
@@ -245,7 +295,9 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
     CallNextHookEx(None, code, w_param, l_param)
 }
 
-fn process_queued_key_events() {
+fn process_queued_key_events() -> LoopDiagnostics {
+    let mut diagnostics = LoopDiagnostics::default();
+
     loop {
         let event = {
             let mut app_state = APP_STATE.write().unwrap();
@@ -259,6 +311,7 @@ fn process_queued_key_events() {
         let action = KEY_ACTIONS.read().unwrap().get_action(event.key).copied();
 
         APP_STATE.write().unwrap().route_key_event(event, action);
+        diagnostics.queued_key_events_processed += 1;
     }
 
     loop {
@@ -269,7 +322,10 @@ fn process_queued_key_events() {
         };
 
         execute_app_command(command);
+        diagnostics.commands_executed += 1;
     }
+
+    diagnostics
 }
 
 fn execute_app_command(command: AppCommand) {
@@ -319,6 +375,47 @@ fn execute_app_command(command: AppCommand) {
             }
         }
     }
+}
+
+unsafe fn drain_windows_messages(max_messages: usize) -> u64 {
+    let mut messages_processed = 0;
+    let mut msg = MSG::default();
+
+    // Bound message pumping so an endless stream of Win32 messages cannot
+    // starve queued key handling, movement ticks, or overlay updates. If the
+    // loop later needs true wait-based scheduling, move this to
+    // MsgWaitForMultipleObjectsEx so input and timers can share one wake path.
+    while messages_processed < max_messages as u64
+        && PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool()
+    {
+        let _ = TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+        messages_processed += 1;
+    }
+
+    messages_processed
+}
+
+fn debug_heartbeat_enabled() -> bool {
+    env::var(DEBUG_HEARTBEAT_ENV)
+        .map(|value| {
+            matches!(
+                value.as_str(),
+                "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn print_heartbeat(diagnostics: LoopDiagnostics) {
+    println!(
+        "[heartbeat] loops={} messages={} key_events={} commands={} movement_ticks={}",
+        diagnostics.loop_iterations,
+        diagnostics.messages_processed,
+        diagnostics.queued_key_events_processed,
+        diagnostics.commands_executed,
+        diagnostics.movement_ticks
+    );
 }
 
 unsafe fn install_keyboard_hook() -> windows::core::Result<()> {
@@ -392,19 +489,23 @@ fn main() {
     }
 
     println!("🔄 Entering Main Event Loop...");
+    let debug_heartbeat = debug_heartbeat_enabled();
+    let mut heartbeat = HeartbeatDiagnostics::default();
+    let mut last_heartbeat_sample = Instant::now();
 
     loop {
-        unsafe {
-            let mut msg = MSG::default();
-            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
+        let mut loop_diagnostics = LoopDiagnostics {
+            loop_iterations: 1,
+            messages_processed: unsafe { drain_windows_messages(MAX_MESSAGES_PER_TICK) },
+            ..LoopDiagnostics::default()
+        };
+
+        loop_diagnostics.add(process_queued_key_events());
+
+        let movement_tick = ACTION_HANDLER.write().unwrap().tick_movement();
+        if movement_tick.moving {
+            loop_diagnostics.movement_ticks += 1;
         }
-
-        process_queued_key_events();
-
-        ACTION_HANDLER.write().unwrap().tick_movement();
 
         // ✅ Update the overlay position inside the loop
         let is_left_click_held = ACTION_HANDLER.read().unwrap().mouse_master.left_click_held;
@@ -412,6 +513,15 @@ fn main() {
             if let Some(ref mut ov) = *maybe_ov {
                 ov.update_overlay_status(is_left_click_held);
             }
+        }
+
+        if debug_heartbeat {
+            let now = Instant::now();
+            if let Some(snapshot) = heartbeat.record(loop_diagnostics, now - last_heartbeat_sample)
+            {
+                print_heartbeat(snapshot);
+            }
+            last_heartbeat_sample = now;
         }
 
         sleep(Duration::from_millis(config.polling_rate));
@@ -453,5 +563,116 @@ mod tests {
         assert_eq!(config.acceleration_rate, defaults.acceleration_rate);
         assert_eq!(config.top_speed, defaults.top_speed);
         assert!(config.key_bindings.is_empty());
+    }
+
+    #[test]
+    fn heartbeat_accumulates_until_interval_elapses() {
+        let mut heartbeat = HeartbeatDiagnostics::default();
+
+        let first = heartbeat.record(
+            LoopDiagnostics {
+                loop_iterations: 2,
+                messages_processed: 3,
+                ..LoopDiagnostics::default()
+            },
+            Duration::from_millis(400),
+        );
+        let second = heartbeat.record(
+            LoopDiagnostics {
+                loop_iterations: 5,
+                queued_key_events_processed: 7,
+                ..LoopDiagnostics::default()
+            },
+            Duration::from_millis(500),
+        );
+
+        assert_eq!(first, None);
+        assert_eq!(second, None);
+    }
+
+    #[test]
+    fn heartbeat_emits_snapshot_and_resets_after_interval() {
+        let mut heartbeat = HeartbeatDiagnostics::default();
+
+        assert_eq!(
+            heartbeat.record(
+                LoopDiagnostics {
+                    loop_iterations: 2,
+                    messages_processed: 3,
+                    ..LoopDiagnostics::default()
+                },
+                Duration::from_millis(750),
+            ),
+            None
+        );
+
+        let snapshot = heartbeat.record(
+            LoopDiagnostics {
+                loop_iterations: 5,
+                queued_key_events_processed: 7,
+                commands_executed: 11,
+                movement_ticks: 13,
+                ..LoopDiagnostics::default()
+            },
+            Duration::from_millis(250),
+        );
+
+        assert_eq!(
+            snapshot,
+            Some(LoopDiagnostics {
+                loop_iterations: 7,
+                messages_processed: 3,
+                queued_key_events_processed: 7,
+                commands_executed: 11,
+                movement_ticks: 13,
+            })
+        );
+        assert_eq!(heartbeat.pending, LoopDiagnostics::default());
+    }
+
+    #[test]
+    fn heartbeat_preserves_elapsed_remainder_after_rollover() {
+        let mut heartbeat = HeartbeatDiagnostics::default();
+
+        let snapshot = heartbeat.record(
+            LoopDiagnostics {
+                loop_iterations: 1,
+                ..LoopDiagnostics::default()
+            },
+            Duration::from_millis(1250),
+        );
+
+        assert_eq!(
+            snapshot,
+            Some(LoopDiagnostics {
+                loop_iterations: 1,
+                ..LoopDiagnostics::default()
+            })
+        );
+        assert_eq!(heartbeat.elapsed, Duration::from_millis(250));
+
+        assert_eq!(
+            heartbeat.record(
+                LoopDiagnostics {
+                    loop_iterations: 2,
+                    ..LoopDiagnostics::default()
+                },
+                Duration::from_millis(749),
+            ),
+            None
+        );
+        assert_eq!(
+            heartbeat.record(
+                LoopDiagnostics {
+                    loop_iterations: 3,
+                    ..LoopDiagnostics::default()
+                },
+                Duration::from_millis(1),
+            ),
+            Some(LoopDiagnostics {
+                loop_iterations: 5,
+                ..LoopDiagnostics::default()
+            })
+        );
     }
 }

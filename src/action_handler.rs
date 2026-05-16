@@ -3,9 +3,11 @@ use crate::{action, Config};
 use action::Action;
 use enigo::*;
 use std::collections::HashSet;
+use std::env;
 use std::time::Duration;
 
 const DIAGONAL_NORMALIZATION: f64 = std::f64::consts::FRAC_1_SQRT_2;
+const DEBUG_DIAGNOSTICS_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MovementTick {
@@ -126,17 +128,19 @@ impl MouseMaster {
             self.move_mouse(tick.dx.round() as i32, tick.dy.round() as i32);
         }
 
-        println!(
-            "[DEBUG] Mode: {:?} | Active Keys: {:?} | DX: {:.3} | DY: {:.3} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {}",
-            self.current_mode,
-            active_actions,
-            tick.dx,
-            tick.dy,
-            self.current_speed,
-            self.acceleration_counter,
-            active_actions.contains(&Action::SlowMouse),
-            tick.moving
-        );
+        if debug_diagnostics_enabled() {
+            println!(
+                "[DEBUG] Mode: {:?} | Active Keys: {:?} | DX: {:.3} | DY: {:.3} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {}",
+                self.current_mode,
+                active_actions,
+                tick.dx,
+                tick.dy,
+                self.current_speed,
+                self.acceleration_counter,
+                active_actions.contains(&Action::SlowMouse),
+                tick.moving
+            );
+        }
 
         tick
     }
@@ -200,6 +204,17 @@ impl MouseMaster {
         println!("Switched to mode: {}", mode);
         // FUTURE GROWTH
     }
+}
+
+fn debug_diagnostics_enabled() -> bool {
+    env::var(DEBUG_DIAGNOSTICS_ENV)
+        .map(|value| {
+            matches!(
+                value.as_str(),
+                "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn calculate_movement(
