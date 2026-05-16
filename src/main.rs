@@ -1,21 +1,22 @@
 mod action;
 mod action_handler;
+mod jump_overlay;
 mod keyboard;
 mod overlay;
-mod jump_overlay;
 
 use action::*;
 use action_handler::*;
+use jump_overlay::{hide_jump_overlay, JUMP_OVERLAY};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::OVERLAY;
-use jump_overlay::{JUMP_OVERLAY, hide_jump_overlay};
 use serde::Deserialize;
+use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::{RwLock, Mutex};
+use std::sync::RwLock;
 use std::thread::sleep;
 use std::time::Duration;
-use std::{env, fs, error::Error, io};
+use std::{env, error::Error, fs, io};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState};
@@ -50,8 +51,15 @@ lazy_static! {
     };
     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
     static ref ACTIVE_KEYS: RwLock<HashSet<VirtualKey>> = RwLock::new(HashSet::new());
-    /// Stores the installed keyboard hook handle so it can be cleaned up on panic.
-    static ref KEYBOARD_HOOK_HANDLE: Mutex<Option<KeyboardHook>> = Mutex::new(None);
+}
+
+thread_local! {
+    /// Thread-local keyboard hook guard.
+    ///
+    /// The low-level hook handle (`HHOOK`) should be installed and unhooked on the
+    /// same thread. Keeping the RAII guard in TLS preserves that ownership model
+    /// and avoids sharing the Win32 handle wrapper across threads.
+    static KEYBOARD_HOOK_HANDLE: RefCell<Option<KeyboardHook>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -87,7 +95,10 @@ struct GridSize {
 
 impl Default for GridSize {
     fn default() -> Self {
-        Self { width: 10, height: 10 }
+        Self {
+            width: 10,
+            height: 10,
+        }
     }
 }
 
@@ -188,10 +199,8 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
                     return LRESULT(1);
                 }
 
-                if let Some((x, y)) = JUMP_OVERLAY
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .handle_key(virtual_key)
+                if let Some((x, y)) =
+                    JUMP_OVERLAY.with(|overlay| overlay.borrow_mut().handle_key(virtual_key))
                 {
                     action_handler.mouse_master.move_mouse_to(x, y);
                     action_handler.mouse_master.jump_active = false;
@@ -272,7 +281,7 @@ unsafe fn install_keyboard_hook() -> windows::core::Result<()> {
     )?;
 
     // Store the hook guard for cleanup on panic
-    *KEYBOARD_HOOK_HANDLE.lock().unwrap() = Some(KeyboardHook(hook));
+    KEYBOARD_HOOK_HANDLE.with(|slot| *slot.borrow_mut() = Some(KeyboardHook(hook)));
 
     Ok(())
 }
@@ -284,7 +293,9 @@ fn main() {
     std::panic::set_hook(Box::new(|info| {
         eprintln!("Application panicked: {}", info);
         // Drop the hook guard so the keyboard is unhooked
-        KEYBOARD_HOOK_HANDLE.lock().unwrap().take();
+        KEYBOARD_HOOK_HANDLE.with(|slot| {
+            slot.borrow_mut().take();
+        });
         hide_jump_overlay();
         std::process::exit(1);
     }));

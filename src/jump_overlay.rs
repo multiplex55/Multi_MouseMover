@@ -1,20 +1,20 @@
+use std::cell::RefCell;
 use std::ptr;
-use std::sync::{Arc, Mutex};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::{Config, keyboard::VirtualKey, overlay::RGB};
+use crate::{keyboard::VirtualKey, overlay::RGB, Config};
 
-lazy_static::lazy_static! {
-    /// Global instance of the jump overlay.
+thread_local! {
+    /// Thread-local jump overlay state.
     ///
-    /// `JumpOverlay` only interacts with Windows APIs from the thread that
-    /// installs the keyboard hook and runs the message loop.  Because no other
-    /// threads access it, `Send` and `Sync` are unnecessary.
-    pub static ref JUMP_OVERLAY: Arc<Mutex<JumpOverlay>> = Arc::new(Mutex::new(JumpOverlay::new()));
+    /// Win32 window handles (`HWND`) are thread-affine and must be created and
+    /// manipulated from the UI/hook thread that owns the window. We intentionally
+    /// keep `JumpOverlay` in TLS to prevent accidental cross-thread access.
+    pub static JUMP_OVERLAY: RefCell<JumpOverlay> = RefCell::new(JumpOverlay::new());
 }
 
 pub struct JumpOverlay {
@@ -24,14 +24,20 @@ pub struct JumpOverlay {
     input: String,
 }
 
-
 impl JumpOverlay {
     pub fn new() -> Self {
-        Self { hwnd: None, grid_size: (10, 10), visible: false, input: String::new() }
+        Self {
+            hwnd: None,
+            grid_size: (10, 10),
+            visible: false,
+            input: String::new(),
+        }
     }
 
     fn create_window(&mut self) {
-        if self.hwnd.is_some() { return; }
+        if self.hwnd.is_some() {
+            return;
+        }
         unsafe {
             let h_instance = GetModuleHandleW(None).unwrap();
             let class = w!("JumpOverlayClass");
@@ -94,7 +100,9 @@ impl JumpOverlay {
 
     pub fn hide(&mut self) {
         if let Some(h) = self.hwnd {
-            unsafe { ShowWindow(h, SW_HIDE); }
+            unsafe {
+                ShowWindow(h, SW_HIDE);
+            }
             self.visible = false;
         }
     }
@@ -149,19 +157,11 @@ impl JumpOverlay {
                     for col in 0..self.grid_size.0 {
                         let col_code = Self::index_to_code(col as usize, col_len);
                         let code = format!("{}{}", row_code, col_code);
-                        let mut text: Vec<u16> = code
-                            .encode_utf16()
-                            .chain(std::iter::once(0))
-                            .collect();
+                        let mut text: Vec<u16> =
+                            code.encode_utf16().chain(std::iter::once(0)).collect();
                         let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
                         let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
-                        TextOutW(
-                            hdc,
-                            x,
-                            y,
-                            PCWSTR(text.as_ptr()),
-                            (text.len() - 1) as i32,
-                        );
+                        TextOutW(hdc, x, y, PCWSTR(text.as_ptr()), (text.len() - 1) as i32);
                     }
                 }
 
@@ -234,7 +234,12 @@ impl JumpOverlay {
             if self.input.len() >= self.expected_len() {
                 let row_len = Self::letters_needed(self.grid_size.1);
                 let row_code: Vec<char> = self.input.chars().take(row_len).collect();
-                let col_code: Vec<char> = self.input.chars().skip(row_len).take(Self::letters_needed(self.grid_size.0)).collect();
+                let col_code: Vec<char> = self
+                    .input
+                    .chars()
+                    .skip(row_len)
+                    .take(Self::letters_needed(self.grid_size.0))
+                    .collect();
                 let row = Self::code_to_index(&row_code);
                 let col = Self::code_to_index(&col_code);
                 self.input.clear();
@@ -246,15 +251,17 @@ impl JumpOverlay {
     }
 }
 
-extern "system" fn jump_window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+extern "system" fn jump_window_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_PAINT => {
             let ps = &mut PAINTSTRUCT::default();
             let hdc = unsafe { BeginPaint(hwnd, ps) };
-            JUMP_OVERLAY
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .draw(hdc);
+            JUMP_OVERLAY.with(|overlay| overlay.borrow().draw(hdc));
             unsafe { EndPaint(hwnd, ps) };
             LRESULT(0)
         }
@@ -265,11 +272,13 @@ extern "system" fn jump_window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
 }
 
 pub fn show_jump_overlay(config: &Config) {
-    let mut ov = JUMP_OVERLAY.lock().unwrap_or_else(|e| e.into_inner());
-    ov.initialize(config);
-    ov.show();
+    JUMP_OVERLAY.with(|overlay| {
+        let mut ov = overlay.borrow_mut();
+        ov.initialize(config);
+        ov.show();
+    });
 }
 
 pub fn hide_jump_overlay() {
-    JUMP_OVERLAY.lock().unwrap_or_else(|e| e.into_inner()).hide();
+    JUMP_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
 }
