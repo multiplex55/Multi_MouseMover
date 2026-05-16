@@ -121,7 +121,7 @@ impl JumpOverlay {
 
                 let pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
                 let old_pen = SelectObject(hdc, pen.into());
-                if old_pen.0 == 0 {
+                if old_pen.is_invalid() {
                     eprintln!("[Win32] SelectObject failed: {:?}", GetLastError());
                     DeleteObject(pen.into());
                     return;
@@ -223,7 +223,7 @@ impl JumpOverlay {
             if let Some(hwnd) = self.hwnd {
                 unsafe {
                     let hdc = GetDC(Some(hwnd));
-                    if hdc.0 == 0 {
+                    if hdc.is_invalid() {
                         eprintln!("[Win32] GetDC failed: {:?}", GetLastError());
                     } else {
                         self.draw(hdc);
