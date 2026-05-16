@@ -13,6 +13,7 @@ pub struct KeyEvent {
 }
 
 impl KeyEvent {
+    #[cfg(test)]
     pub fn new(key: VirtualKey, is_down: bool) -> Self {
         Self {
             key,
@@ -94,6 +95,7 @@ impl AppState {
         }
     }
 
+    #[cfg(test)]
     pub fn set_preserve_global_shortcuts(&mut self, preserve: bool) {
         self.preserve_global_shortcuts = preserve;
     }
