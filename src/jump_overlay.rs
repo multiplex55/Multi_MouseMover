@@ -407,8 +407,8 @@ pub fn hide_jump_overlay() {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_target_center, format_jump_indicator, overlay_colorkey, overlay_ex_style, transparency_mode,
-        JumpKeyResult, JumpOverlay, ScreenRect, TransparencyMode, OVERLAY_ALPHA,
+        calculate_target_center, format_jump_indicator, overlay_colorkey, overlay_ex_style,
+        transparency_mode, JumpKeyResult, JumpOverlay, ScreenRect, TransparencyMode, OVERLAY_ALPHA,
     };
     use crate::keyboard::VirtualKey;
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
@@ -455,7 +455,10 @@ mod tests {
             width: 3840,
             height: 2160,
         };
-        assert_eq!(calculate_target_center(rect, (4, 3), 1, 2), Some((480, 1200)));
+        assert_eq!(
+            calculate_target_center(rect, (4, 3), 1, 2),
+            Some((480, 1200))
+        );
     }
 
     #[test]
@@ -466,8 +469,14 @@ mod tests {
             width: 1000,
             height: 800,
         };
-        assert_eq!(calculate_target_center(rect, (10, 8), 0, 0), Some((150, 250)));
-        assert_eq!(calculate_target_center(rect, (10, 8), 7, 9), Some((1050, 950)));
+        assert_eq!(
+            calculate_target_center(rect, (10, 8), 0, 0),
+            Some((150, 250))
+        );
+        assert_eq!(
+            calculate_target_center(rect, (10, 8), 7, 9),
+            Some((1050, 950))
+        );
     }
 
     #[test]

@@ -23,6 +23,8 @@ use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+const DEFAULT_POLLING_RATE_MS: u64 = 8;
+
 /// RAII guard for the installed keyboard hook.
 struct KeyboardHook(HHOOK);
 
@@ -69,6 +71,7 @@ thread_local! {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 struct Config {
     key_bindings: Vec<(String, String)>,
     polling_rate: u64,
@@ -83,7 +86,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             key_bindings: Vec::new(),
-            polling_rate: 0,
+            polling_rate: DEFAULT_POLLING_RATE_MS,
             grid_size: GridSize::default(),
             starting_speed: 1,
             acceleration: 2,
@@ -94,6 +97,7 @@ impl Default for Config {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
 struct GridSize {
     width: u32,
     height: u32,
@@ -109,6 +113,13 @@ impl Default for GridSize {
 }
 
 impl Config {
+    fn normalize(mut self) -> Self {
+        if self.polling_rate == 0 {
+            self.polling_rate = DEFAULT_POLLING_RATE_MS;
+        }
+        self
+    }
+
     fn load_from_file(path: &str) -> Result<Self, Box<dyn Error>> {
         // Try to read the config from the provided path relative to the current
         // working directory.  If that fails, fall back to looking in the same
@@ -131,7 +142,7 @@ impl Config {
         // First attempt: path relative to current directory
         println!("[DEBUG] trying path: {}", path);
         match fs::read_to_string(path) {
-            Ok(config_str) => return Ok(toml::from_str(&config_str)?),
+            Ok(config_str) => return Ok(toml::from_str::<Self>(&config_str)?.normalize()),
             Err(e) => {
                 if e.kind() != io::ErrorKind::NotFound {
                     return Err(e.into());
@@ -145,7 +156,7 @@ impl Config {
             exe_path.push(path);
             println!("[DEBUG] trying exe path: {}", exe_path.display());
             match fs::read_to_string(&exe_path) {
-                Ok(config_str) => return Ok(toml::from_str(&config_str)?),
+                Ok(config_str) => return Ok(toml::from_str::<Self>(&config_str)?.normalize()),
                 Err(e) => {
                     if e.kind() != io::ErrorKind::NotFound {
                         return Err(e.into());
@@ -155,7 +166,7 @@ impl Config {
         }
 
         eprintln!("Config file not found, using defaults");
-        Ok(Self::default())
+        Ok(Self::default().normalize())
     }
     fn initialize_bindings(&self) {
         let mut key_actions = KEY_ACTIONS.write().unwrap(); // Acquire write lock
@@ -390,6 +401,8 @@ fn main() {
 
         process_queued_key_events();
 
+        ACTION_HANDLER.write().unwrap().tick_movement();
+
         // ✅ Update the overlay position inside the loop
         let is_left_click_held = ACTION_HANDLER.read().unwrap().mouse_master.left_click_held;
         if let Ok(mut maybe_ov) = OVERLAY.lock() {
@@ -399,5 +412,43 @@ fn main() {
         }
 
         sleep(Duration::from_millis(config.polling_rate));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_config(toml: &str) -> Config {
+        toml::from_str::<Config>(toml).unwrap().normalize()
+    }
+
+    #[test]
+    fn zero_polling_rate_normalizes_to_default() {
+        let config = parse_config("polling_rate = 0");
+
+        assert_eq!(config.polling_rate, DEFAULT_POLLING_RATE_MS);
+    }
+
+    #[test]
+    fn positive_polling_rate_is_preserved() {
+        let config = parse_config("polling_rate = 16");
+
+        assert_eq!(config.polling_rate, 16);
+    }
+
+    #[test]
+    fn missing_values_fall_back_to_defaults() {
+        let config = parse_config("");
+        let defaults = Config::default();
+
+        assert_eq!(config.polling_rate, defaults.polling_rate);
+        assert_eq!(config.grid_size.width, defaults.grid_size.width);
+        assert_eq!(config.grid_size.height, defaults.grid_size.height);
+        assert_eq!(config.starting_speed, defaults.starting_speed);
+        assert_eq!(config.acceleration, defaults.acceleration);
+        assert_eq!(config.acceleration_rate, defaults.acceleration_rate);
+        assert_eq!(config.top_speed, defaults.top_speed);
+        assert!(config.key_bindings.is_empty());
     }
 }

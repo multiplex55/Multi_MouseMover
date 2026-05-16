@@ -83,6 +83,12 @@ impl ActionHandler {
             self.active_keys.remove(&key);
         }
 
+        if is_keydown && !Self::is_movement_action(key) {
+            self.execute_action(&key);
+        }
+    }
+
+    pub fn tick_movement(&mut self) {
         // Reset dx and dy for movement tracking
         let mut dx: i32 = 0;
         let mut dy: i32 = 0;
@@ -143,33 +149,8 @@ impl ActionHandler {
             self.mouse_master.reset_speed();
         }
 
-        // Collect non-movement actions to execute
-        let non_movement_actions: Vec<Action> = self
-            .active_keys
-            .iter()
-            .copied()
-            .filter(|action| {
-                !matches!(
-                    action,
-                    Action::MoveUp
-                        | Action::MoveDown
-                        | Action::MoveLeft
-                        | Action::MoveRight
-                        | Action::MoveUpRight
-                        | Action::MoveUpLeft
-                        | Action::MoveDownRight
-                        | Action::MoveDownLeft
-                )
-            })
-            .collect();
-
-        // Execute collected non-movement actions
-        for action in &non_movement_actions {
-            self.execute_action(action);
-        }
-
         println!(
-            "[DEBUG] Mode: {:?} | Active Keys: {:?} | DX: {} | DY: {} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {} | Non-Movement Actions: {:?}",
+            "[DEBUG] Mode: {:?} | Active Keys: {:?} | DX: {} | DY: {} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {}",
             self.mouse_master.current_mode,
             self.active_keys,
             dx,
@@ -177,8 +158,21 @@ impl ActionHandler {
             self.mouse_master.current_speed,
             self.mouse_master.acceleration_counter,
             shift_held,
-            movement_detected,
-            non_movement_actions
+            movement_detected
         );
+    }
+
+    fn is_movement_action(action: Action) -> bool {
+        matches!(
+            action,
+            Action::MoveUp
+                | Action::MoveDown
+                | Action::MoveLeft
+                | Action::MoveRight
+                | Action::MoveUpRight
+                | Action::MoveUpLeft
+                | Action::MoveDownRight
+                | Action::MoveDownLeft
+        )
     }
 }
