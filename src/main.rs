@@ -290,10 +290,12 @@ fn execute_app_command(command: AppCommand) {
             APP_STATE.write().unwrap().enter_jump_mode(activation_key);
         }
         AppCommand::KeyAction { action, is_down } => {
-            ACTION_HANDLER
-                .write()
-                .unwrap()
-                .process_active_keys(action, is_down);
+            let mut action_handler = ACTION_HANDLER.write().unwrap();
+            action_handler.process_active_keys(action, is_down);
+
+            if is_down && !ActionHandler::is_movement_action(action) {
+                action_handler.execute_action(&action);
+            }
         }
         AppCommand::JumpInput(event) => {
             let jump_result = JUMP_OVERLAY

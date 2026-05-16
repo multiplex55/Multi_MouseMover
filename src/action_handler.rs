@@ -2,6 +2,18 @@ use crate::overlay::OVERLAY;
 use crate::{action, Config};
 use action::Action;
 use enigo::*;
+use std::collections::HashSet;
+use std::time::Duration;
+
+const DIAGONAL_NORMALIZATION: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MovementTick {
+    pub dx: f64,
+    pub dy: f64,
+    pub speed: i32,
+    pub moving: bool,
+}
 
 pub struct MouseMaster {
     pub enigo: Enigo,
@@ -36,16 +48,16 @@ impl MouseMaster {
     /// Handles an action and executes the corresponding behavior
     pub fn handle_action(&mut self, action: Action) {
         match action {
-            Action::MoveUp => self.move_up(),
-            Action::MoveDown => self.move_down(),
-            Action::MoveLeft => self.move_left(),
-            Action::MoveRight => self.move_right(),
+            Action::MoveUp => self.move_mouse(0, -10),
+            Action::MoveDown => self.move_mouse(0, 10),
+            Action::MoveLeft => self.move_mouse(-10, 0),
+            Action::MoveRight => self.move_mouse(10, 0),
             Action::LeftClick => self.left_click(),
             Action::RightClick => self.right_click(),
-            Action::MoveUpRight => self.move_up_right(),
-            Action::MoveUpLeft => self.move_up_left(),
-            Action::MoveDownRight => self.move_down_right(),
-            Action::MoveDownLeft => self.move_down_left(),
+            Action::MoveUpRight => self.move_mouse(10, -10),
+            Action::MoveUpLeft => self.move_mouse(-10, -10),
+            Action::MoveDownRight => self.move_mouse(10, 10),
+            Action::MoveDownLeft => self.move_mouse(-10, 10),
             Action::Exit => self.exit(),
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
@@ -62,54 +74,6 @@ impl MouseMaster {
             self.current_mode = ModeState::Active;
             println!("Switched to: Active Mode");
         }
-    }
-
-    /// Moves the mouse up
-    fn move_up(&mut self) {
-        self.move_mouse(0, -10);
-        println!("Moving up!");
-    }
-
-    /// Moves the mouse down
-    fn move_down(&mut self) {
-        self.move_mouse(0, 10);
-        println!("Moving down!");
-    }
-
-    /// Moves the mouse left
-    fn move_left(&mut self) {
-        self.move_mouse(-10, 0);
-        println!("Moving left!");
-    }
-
-    /// Moves the mouse right
-    fn move_right(&mut self) {
-        self.move_mouse(10, 0);
-        println!("Moving right!");
-    }
-
-    /// Moves the mouse up-right
-    fn move_up_right(&mut self) {
-        self.move_mouse(10, -10);
-        println!("Moving up-right!");
-    }
-
-    /// Moves the mouse up-right
-    fn move_up_left(&mut self) {
-        self.move_mouse(-10, -10);
-        println!("Moving up-left");
-    }
-
-    /// Moves the mouse down-left
-    fn move_down_right(&mut self) {
-        self.move_mouse(10, 10);
-        println!("Moving down-right!");
-    }
-
-    /// Moves the mouse down-left
-    fn move_down_left(&mut self) {
-        self.move_mouse(-10, 10);
-        println!("Moving down-left!");
     }
 
     /// Simulates a left mouse click
@@ -145,33 +109,50 @@ impl MouseMaster {
         }
     }
 
-    /// Moves the mouse by the given `dx` and `dy` offsets with immediate response
+    pub fn tick_movement(
+        &mut self,
+        active_actions: &HashSet<Action>,
+        _dt: Duration,
+    ) -> MovementTick {
+        let tick = calculate_movement(
+            active_actions,
+            &self.config,
+            self.top_speed,
+            &mut self.current_speed,
+            &mut self.acceleration_counter,
+        );
+
+        if tick.moving {
+            self.move_mouse(tick.dx.round() as i32, tick.dy.round() as i32);
+        }
+
+        println!(
+            "[DEBUG] Mode: {:?} | Active Keys: {:?} | DX: {:.3} | DY: {:.3} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {}",
+            self.current_mode,
+            active_actions,
+            tick.dx,
+            tick.dy,
+            self.current_speed,
+            self.acceleration_counter,
+            active_actions.contains(&Action::SlowMouse),
+            tick.moving
+        );
+
+        tick
+    }
+    /// Moves the mouse by the given `dx` and `dy` offsets with immediate response.
     pub fn move_mouse(&mut self, dx: i32, dy: i32) {
-        // If no movement, reset speed & acceleration
         if dx == 0 && dy == 0 {
             self.reset_speed();
             return;
         }
 
-        self.acceleration_counter += 1;
-
-        // Apply acceleration only after enough polling cycles
-        if self.acceleration_counter >= self.config.acceleration_rate {
-            self.current_speed += self.config.acceleration;
-            self.acceleration_counter = 0;
-        }
-
-        // Calculate the actual movement based on the current speed
-        let actual_dx = dx * self.current_speed;
-        let actual_dy = dy * self.current_speed;
-
         // Perform the mouse movement
         if let Ok((current_x, current_y)) = self.enigo.location() {
-            if let Err(e) = self.enigo.move_mouse(
-                current_x + actual_dx,
-                current_y + actual_dy,
-                Coordinate::Abs,
-            ) {
+            if let Err(e) = self
+                .enigo
+                .move_mouse(current_x + dx, current_y + dy, Coordinate::Abs)
+            {
                 eprintln!("Failed to move mouse: {e}");
             }
         } else {
@@ -218,5 +199,212 @@ impl MouseMaster {
 
         println!("Switched to mode: {}", mode);
         // FUTURE GROWTH
+    }
+}
+
+fn calculate_movement(
+    active_actions: &HashSet<Action>,
+    config: &Config,
+    top_speed: i32,
+    current_speed: &mut i32,
+    acceleration_counter: &mut u32,
+) -> MovementTick {
+    let mut dx = 0;
+    let mut dy = 0;
+
+    for &action in active_actions {
+        match action {
+            Action::MoveUp => dy -= 1,
+            Action::MoveDown => dy += 1,
+            Action::MoveLeft => dx -= 1,
+            Action::MoveRight => dx += 1,
+            Action::MoveUpRight => {
+                dx += 1;
+                dy -= 1;
+            }
+            Action::MoveUpLeft => {
+                dx -= 1;
+                dy -= 1;
+            }
+            Action::MoveDownRight => {
+                dx += 1;
+                dy += 1;
+            }
+            Action::MoveDownLeft => {
+                dx -= 1;
+                dy += 1;
+            }
+            _ => {}
+        }
+    }
+
+    if dx == 0 && dy == 0 {
+        *current_speed = config.starting_speed;
+        *acceleration_counter = 0;
+        return MovementTick {
+            dx: 0.0,
+            dy: 0.0,
+            speed: *current_speed,
+            moving: false,
+        };
+    }
+
+    let speed = if active_actions.contains(&Action::SlowMouse) {
+        config.starting_speed
+    } else {
+        advance_speed(config, top_speed, current_speed, acceleration_counter)
+    };
+
+    let mut scaled_dx = f64::from(dx * speed);
+    let mut scaled_dy = f64::from(dy * speed);
+
+    if dx != 0 && dy != 0 {
+        scaled_dx *= DIAGONAL_NORMALIZATION;
+        scaled_dy *= DIAGONAL_NORMALIZATION;
+    }
+
+    MovementTick {
+        dx: scaled_dx,
+        dy: scaled_dy,
+        speed,
+        moving: true,
+    }
+}
+
+fn advance_speed(
+    config: &Config,
+    top_speed: i32,
+    current_speed: &mut i32,
+    acceleration_counter: &mut u32,
+) -> i32 {
+    *acceleration_counter += 1;
+
+    if *acceleration_counter >= config.acceleration_rate {
+        *current_speed += config.acceleration;
+        *acceleration_counter = 0;
+    }
+
+    *current_speed = (*current_speed).min(top_speed);
+    *current_speed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> Config {
+        Config {
+            starting_speed: 2,
+            acceleration: 3,
+            acceleration_rate: 2,
+            top_speed: 10,
+            ..Config::default()
+        }
+    }
+
+    fn actions(actions: &[Action]) -> HashSet<Action> {
+        actions.iter().copied().collect()
+    }
+
+    fn tick(
+        active_actions: &HashSet<Action>,
+        config: &Config,
+        current_speed: &mut i32,
+        acceleration_counter: &mut u32,
+    ) -> MovementTick {
+        calculate_movement(
+            active_actions,
+            config,
+            config.top_speed,
+            current_speed,
+            acceleration_counter,
+        )
+    }
+
+    #[test]
+    fn diagonal_normalization_preserves_cardinal_magnitude() {
+        let config = test_config();
+        let mut current_speed = config.starting_speed;
+        let mut acceleration_counter = 0;
+        let active_actions = actions(&[Action::MoveUp, Action::MoveRight]);
+
+        let movement = tick(
+            &active_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        let magnitude = (movement.dx.powi(2) + movement.dy.powi(2)).sqrt();
+
+        assert!((magnitude - f64::from(config.starting_speed)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn acceleration_progresses_over_ticks() {
+        let config = test_config();
+        let mut current_speed = config.starting_speed;
+        let mut acceleration_counter = 0;
+        let active_actions = actions(&[Action::MoveRight]);
+
+        let first = tick(
+            &active_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+        let second = tick(
+            &active_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        assert_eq!(first.speed, config.starting_speed);
+        assert_eq!(second.speed, config.starting_speed + config.acceleration);
+    }
+
+    #[test]
+    fn speed_is_clamped_to_top_speed() {
+        let config = Config {
+            starting_speed: 4,
+            acceleration: 4,
+            acceleration_rate: 1,
+            top_speed: 6,
+            ..Config::default()
+        };
+        let mut current_speed = config.starting_speed;
+        let mut acceleration_counter = 0;
+        let active_actions = actions(&[Action::MoveRight]);
+
+        let movement = tick(
+            &active_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        assert_eq!(movement.speed, config.top_speed);
+        assert_eq!(current_speed, config.top_speed);
+    }
+
+    #[test]
+    fn speed_resets_on_idle() {
+        let config = test_config();
+        let mut current_speed = 9;
+        let mut acceleration_counter = 1;
+        let active_actions = HashSet::new();
+
+        let movement = tick(
+            &active_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        assert!(!movement.moving);
+        assert_eq!(movement.speed, config.starting_speed);
+        assert_eq!(current_speed, config.starting_speed);
+        assert_eq!(acceleration_counter, 0);
     }
 }

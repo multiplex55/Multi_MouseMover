@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 /// Enum representing all possible actions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -76,93 +77,19 @@ impl ActionHandler {
         }
     }
     pub fn process_active_keys(&mut self, key: Action, is_keydown: bool) {
-        // Add or remove the key from the active set
         if is_keydown {
             self.active_keys.insert(key);
         } else {
             self.active_keys.remove(&key);
         }
-
-        if is_keydown && !Self::is_movement_action(key) {
-            self.execute_action(&key);
-        }
     }
 
     pub fn tick_movement(&mut self) {
-        // Reset dx and dy for movement tracking
-        let mut dx: i32 = 0;
-        let mut dy: i32 = 0;
-
-        // Check if Shift is held
-        let shift_held = self.active_keys.contains(&Action::SlowMouse);
-
-        // Use starting speed if Shift is held, otherwise use current speed
-        let mut speed: i32 = if shift_held {
-            self.mouse_master.config.starting_speed
-        } else {
-            self.mouse_master.current_speed
-        };
-
-        // Iterate over all active keys to calculate movement
-        for &action in &self.active_keys {
-            match action {
-                Action::MoveUp => dy -= 1,
-                Action::MoveDown => dy += 1,
-                Action::MoveLeft => dx -= 1,
-                Action::MoveRight => dx += 1,
-                _ => {}
-            }
-        }
-
-        // Track if there is movement
-        let movement_detected = dx != 0 || dy != 0;
-
-        if movement_detected {
-            if !shift_held {
-                // Only increase the acceleration counter if movement is sustained and Shift is NOT held
-                self.mouse_master.acceleration_counter += 1;
-
-                // Apply acceleration if enough polling cycles have passed
-                if self.mouse_master.acceleration_counter
-                    >= self.mouse_master.config.acceleration_rate
-                {
-                    speed += self.mouse_master.config.acceleration;
-                    self.mouse_master.current_speed = speed; // Update current speed
-                    self.mouse_master.acceleration_counter =
-                        self.mouse_master.config.acceleration_rate / 2; // Reduce but don't reset
-                }
-            }
-            // Ensure speed does not exceed top_speed
-            if speed > self.mouse_master.top_speed {
-                speed = self.mouse_master.top_speed;
-            }
-            self.mouse_master.current_speed = speed; // Enforce max speed
-
-            // Scale movement by the current speed
-            dx *= speed;
-            dy *= speed;
-
-            // Perform the mouse movement
-            self.mouse_master.move_mouse(dx, dy);
-        } else {
-            // Reset speed and acceleration if no movement keys are active
-            self.mouse_master.reset_speed();
-        }
-
-        println!(
-            "[DEBUG] Mode: {:?} | Active Keys: {:?} | DX: {} | DY: {} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {}",
-            self.mouse_master.current_mode,
-            self.active_keys,
-            dx,
-            dy,
-            self.mouse_master.current_speed,
-            self.mouse_master.acceleration_counter,
-            shift_held,
-            movement_detected
-        );
+        self.mouse_master
+            .tick_movement(&self.active_keys, Duration::from_millis(0));
     }
 
-    fn is_movement_action(action: Action) -> bool {
+    pub fn is_movement_action(action: Action) -> bool {
         matches!(
             action,
             Action::MoveUp
