@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::ptr;
-use windows::core::{w, PCWSTR};
+use windows::core::w;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -40,7 +40,7 @@ impl JumpOverlay {
         self.repaint_requested = true;
         if let Some(h) = self.hwnd {
             unsafe {
-                let _ = InvalidateRect(Some(h), None, BOOL(0));
+                let _ = InvalidateRect(Some(h), None, false);
             }
         }
     }
@@ -132,7 +132,7 @@ impl JumpOverlay {
             }
             unsafe {
                 let mut rect = RECT::default();
-                if !GetClientRect(hwnd, &mut rect).as_bool() {
+                if GetClientRect(hwnd, &mut rect).is_err() {
                     println!("GetClientRect failed: {:?}", GetLastError());
                     return;
                 }
@@ -143,7 +143,7 @@ impl JumpOverlay {
 
                 let pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
                 let old_pen = SelectObject(hdc, pen.into());
-                if old_pen.0 == 0 {
+                if old_pen.0.is_null() {
                     println!("SelectObject failed: {:?}", GetLastError());
                     DeleteObject(pen.into());
                     return;
@@ -171,11 +171,11 @@ impl JumpOverlay {
                     for col in 0..self.grid_size.0 {
                         let col_code = Self::index_to_code(col as usize, col_len);
                         let code = format!("{}{}", row_code, col_code);
-                        let mut text: Vec<u16> =
+                        let text: Vec<u16> =
                             code.encode_utf16().chain(std::iter::once(0)).collect();
                         let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
                         let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
-                        TextOutW(hdc, x, y, PCWSTR(text.as_ptr()), (text.len() - 1) as i32);
+                        TextOutW(hdc, x, y, &text[..text.len() - 1]);
                     }
                 }
 
