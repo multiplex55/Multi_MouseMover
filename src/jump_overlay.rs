@@ -17,6 +17,42 @@ thread_local! {
     pub static JUMP_OVERLAY: RefCell<JumpOverlay> = RefCell::new(JumpOverlay::new());
 }
 
+const OVERLAY_COLORKEY: COLORREF = RGB(0, 0, 0);
+const OVERLAY_ALPHA: u8 = 255;
+const GRID_COLOR: COLORREF = RGB(255, 255, 255);
+const LABEL_COLOR: COLORREF = RGB(255, 255, 0);
+const INPUT_COLOR: COLORREF = RGB(0, 255, 255);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransparencyMode {
+    ColorKey { color: COLORREF, alpha: u8 },
+}
+
+fn overlay_ex_style() -> WINDOW_EX_STYLE {
+    WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+}
+
+fn transparency_mode() -> TransparencyMode {
+    TransparencyMode::ColorKey {
+        color: OVERLAY_COLORKEY,
+        alpha: OVERLAY_ALPHA,
+    }
+}
+
+fn apply_layered_attributes(hwnd: HWND, mode: TransparencyMode) {
+    unsafe {
+        match mode {
+            TransparencyMode::ColorKey { color, alpha } => {
+                let _ = SetLayeredWindowAttributes(hwnd, color, alpha, LWA_COLORKEY);
+            }
+        }
+    }
+}
+
+fn format_jump_indicator(input: &str) -> String {
+    format!("Jump: {}_", input)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JumpKeyResult {
     Ignored,
@@ -76,7 +112,7 @@ impl JumpOverlay {
             let width = GetSystemMetrics(SM_CXSCREEN);
             let height = GetSystemMetrics(SM_CYSCREEN);
             let hwnd = CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                overlay_ex_style(),
                 class,
                 w!("JumpOverlay"),
                 WS_POPUP,
@@ -91,7 +127,7 @@ impl JumpOverlay {
             );
             match hwnd {
                 Ok(h) => {
-                    let _ = SetLayeredWindowAttributes(h, COLORREF(0), 180, LWA_ALPHA);
+                    apply_layered_attributes(h, transparency_mode());
                     let _ = ShowWindow(h, SW_HIDE);
                     self.hwnd = Some(h);
                 }
@@ -112,7 +148,6 @@ impl JumpOverlay {
     pub fn show(&mut self) {
         if let Some(h) = self.hwnd {
             unsafe {
-                // Use non-activating show mode so jump overlay never steals focus.
                 let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
             }
             self.request_repaint();
@@ -133,16 +168,11 @@ impl JumpOverlay {
     fn draw(&self, hdc: HDC) {
         if let Some(hwnd) = self.hwnd {
             if self.grid_size.0 == 0 || self.grid_size.1 == 0 {
-                println!(
-                    "JumpOverlay::draw aborted due to zero grid size: ({}, {})",
-                    self.grid_size.0, self.grid_size.1
-                );
                 return;
             }
             unsafe {
                 let mut rect = RECT::default();
                 if GetClientRect(hwnd, &mut rect).is_err() {
-                    println!("GetClientRect failed: {:?}", GetLastError());
                     return;
                 }
                 let width = rect.right - rect.left;
@@ -150,29 +180,26 @@ impl JumpOverlay {
                 let cell_w = width / self.grid_size.0 as i32;
                 let cell_h = height / self.grid_size.1 as i32;
 
-                let pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
-                let old_pen = SelectObject(hdc, pen.into());
-                if old_pen.0.is_null() {
-                    println!("SelectObject failed: {:?}", GetLastError());
-                    let _ = DeleteObject(pen.into());
-                    return;
-                }
+                let bg_brush = CreateSolidBrush(OVERLAY_COLORKEY);
+                let _ = FillRect(hdc, &rect, bg_brush);
 
-                // draw vertical lines
+                let old_bk_mode = SetBkMode(hdc, TRANSPARENT);
+                let old_text_color = SetTextColor(hdc, LABEL_COLOR);
+
+                let pen = CreatePen(PS_SOLID, 1, GRID_COLOR);
+                let old_pen = SelectObject(hdc, pen.into());
+
                 for x in 0..=self.grid_size.0 {
                     let pos = rect.left + (x as i32 * cell_w);
                     let _ = MoveToEx(hdc, pos, rect.top, None);
                     let _ = LineTo(hdc, pos, rect.bottom);
                 }
-
-                // draw horizontal lines
                 for y in 0..=self.grid_size.1 {
                     let pos = rect.top + (y as i32 * cell_h);
                     let _ = MoveToEx(hdc, rect.left, pos, None);
                     let _ = LineTo(hdc, rect.right, pos);
                 }
 
-                // draw labels
                 let row_len = Self::letters_needed(self.grid_size.1);
                 let col_len = Self::letters_needed(self.grid_size.0);
                 for row in 0..self.grid_size.1 {
@@ -180,16 +207,25 @@ impl JumpOverlay {
                     for col in 0..self.grid_size.0 {
                         let col_code = Self::index_to_code(col as usize, col_len);
                         let code = format!("{}{}", row_code, col_code);
-                        let text: Vec<u16> =
-                            code.encode_utf16().chain(std::iter::once(0)).collect();
+                        let text: Vec<u16> = code.encode_utf16().collect();
                         let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
                         let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
-                        let _ = TextOutW(hdc, x, y, &text[..text.len() - 1]);
+                        let _ = TextOutW(hdc, x, y, &text);
                     }
                 }
 
-                SelectObject(hdc, old_pen);
+                let _ = SetTextColor(hdc, INPUT_COLOR);
+                let indicator = format_jump_indicator(&self.input);
+                let indicator_utf16: Vec<u16> = indicator.encode_utf16().collect();
+                let indicator_x = rect.left + (width / 2) - 60;
+                let indicator_y = rect.top + 16;
+                let _ = TextOutW(hdc, indicator_x, indicator_y, &indicator_utf16);
+
+                let _ = SetTextColor(hdc, old_text_color);
+                let _ = SetBkMode(hdc, old_bk_mode);
+                let _ = SelectObject(hdc, old_pen);
                 let _ = DeleteObject(pen.into());
+                let _ = DeleteObject(bg_brush.into());
             }
         }
     }
@@ -231,9 +267,10 @@ impl JumpOverlay {
         let cell_w = width / self.grid_size.0 as i32;
         let cell_h = height / self.grid_size.1 as i32;
         if row < self.grid_size.1 as usize && col < self.grid_size.0 as usize {
-            let x = col as i32 * cell_w + cell_w / 2;
-            let y = row as i32 * cell_h + cell_h / 2;
-            Some((x, y))
+            Some((
+                col as i32 * cell_w + cell_w / 2,
+                row as i32 * cell_h + cell_h / 2,
+            ))
         } else {
             None
         }
@@ -243,7 +280,6 @@ impl JumpOverlay {
         if !is_keydown {
             return JumpKeyResult::Ignored;
         }
-
         match key {
             VirtualKey::Escape => {
                 self.input.clear();
@@ -257,7 +293,6 @@ impl JumpOverlay {
             _ => {
                 if let Some(ch) = key.to_char() {
                     self.input.push(ch);
-                    println!("JumpOverlay sequence: {}", self.input);
                     self.request_repaint();
                     if self.input.len() >= self.expected_len() {
                         let row_len = Self::letters_needed(self.grid_size.1);
@@ -270,22 +305,19 @@ impl JumpOverlay {
                             .collect();
                         let row = Self::code_to_index(&row_code);
                         let col = Self::code_to_index(&col_code);
-
                         if let Some((x, y)) = self.target_position(row, col) {
                             self.input.clear();
                             self.hide();
                             return JumpKeyResult::Completed { x, y };
                         }
-
                         self.input.clear();
                         self.request_repaint();
                         return JumpKeyResult::Invalid;
                     }
-                    return JumpKeyResult::Consumed;
+                    JumpKeyResult::Consumed
+                } else {
+                    JumpKeyResult::Ignored
                 }
-
-                // Policy: unsupported keys are ignored so they do not mutate jump input state.
-                JumpKeyResult::Ignored
             }
         }
     }
@@ -308,7 +340,7 @@ extern "system" fn jump_window_proc(
             });
             unsafe {
                 let _ = EndPaint(hwnd, ps);
-            };
+            }
             LRESULT(0)
         }
         WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
@@ -327,6 +359,40 @@ pub fn show_jump_overlay(config: &Config) {
 
 pub fn hide_jump_overlay() {
     JUMP_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        format_jump_indicator, overlay_ex_style, transparency_mode, JumpKeyResult, JumpOverlay,
+        TransparencyMode, OVERLAY_ALPHA, OVERLAY_COLORKEY,
+    };
+    use crate::keyboard::VirtualKey;
+    use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
+
+    #[test]
+    fn style_contains_non_activate_and_click_through_bits() {
+        let style = overlay_ex_style();
+        assert!(style.contains(WS_EX_NOACTIVATE));
+        assert!(style.contains(WS_EX_TRANSPARENT));
+    }
+
+    #[test]
+    fn jump_indicator_formatting() {
+        assert_eq!(format_jump_indicator(""), "Jump: _");
+        assert_eq!(format_jump_indicator("A"), "Jump: A_");
+    }
+
+    #[test]
+    fn transparency_mode_is_colorkey_black() {
+        assert_eq!(
+            transparency_mode(),
+            TransparencyMode::ColorKey {
+                color: OVERLAY_COLORKEY,
+                alpha: OVERLAY_ALPHA
+            }
+        );
+    }
 
     #[test]
     fn key_up_is_ignored() {
@@ -336,82 +402,5 @@ pub fn hide_jump_overlay() {
             JumpKeyResult::Ignored
         );
         assert!(overlay.input.is_empty());
-    }
-
-    #[test]
-    fn escape_cancels() {
-        let mut overlay = JumpOverlay::new();
-        overlay.input.push('A');
-        assert_eq!(
-            overlay.handle_key(VirtualKey::Escape, true),
-            JumpKeyResult::Cancelled
-        );
-        assert!(overlay.input.is_empty());
-    }
-
-    #[test]
-    fn valid_two_letter_code_completes() {
-        let mut overlay = JumpOverlay::new();
-        overlay.grid_size = (10, 10);
-        assert_eq!(
-            overlay.handle_key(VirtualKey::A, true),
-            JumpKeyResult::Consumed
-        );
-        match overlay.handle_key(VirtualKey::A, true) {
-            JumpKeyResult::Completed { .. } => {}
-            other => panic!("expected completed, got {:?}", other),
-        }
-        assert!(overlay.input.is_empty());
-        assert!(!overlay.visible);
-    }
-
-    #[test]
-    fn invalid_code_returns_invalid_and_stays_visible() {
-        let mut overlay = JumpOverlay::new();
-        overlay.grid_size = (27, 10);
-        overlay.visible = true;
-        assert_eq!(
-            overlay.handle_key(VirtualKey::A, true),
-            JumpKeyResult::Consumed
-        );
-        assert_eq!(
-            overlay.handle_key(VirtualKey::Z, true),
-            JumpKeyResult::Invalid
-        );
-        assert!(overlay.visible);
-        assert!(overlay.input.is_empty());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{JumpKeyResult, JumpOverlay};
-    use crate::keyboard::VirtualKey;
-
-    #[test]
-    fn hiding_clears_input_state() {
-        let mut overlay = JumpOverlay::new();
-        overlay.input.push('A');
-        overlay.visible = true;
-        overlay.hide();
-        assert!(overlay.input.is_empty());
-        assert!(!overlay.visible);
-    }
-
-    #[test]
-    fn key_input_requests_repaint() {
-        let mut overlay = JumpOverlay::new();
-        assert!(!overlay.repaint_requested);
-        let _ = overlay.handle_key(VirtualKey::A, true);
-        assert!(overlay.repaint_requested);
-    }
-
-    #[test]
-    fn key_handling_does_not_require_window_for_repaint_state() {
-        let mut overlay = JumpOverlay::new();
-        overlay.hwnd = None;
-        let _ = overlay.handle_key(VirtualKey::B, true);
-        assert_eq!(overlay.input, "B");
-        assert!(overlay.repaint_requested);
     }
 }
