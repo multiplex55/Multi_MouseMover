@@ -27,8 +27,8 @@ struct KeyboardHook(HHOOK);
 impl Drop for KeyboardHook {
     fn drop(&mut self) {
         unsafe {
-            if !UnhookWindowsHookEx(self.0).as_bool() {
-                eprintln!("Failed to unhook keyboard");
+            if let Err(err) = UnhookWindowsHookEx(self.0) {
+                eprintln!("[Win32] UnhookWindowsHookEx failed: {:?}", err);
             }
         }
     }
