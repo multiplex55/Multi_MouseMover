@@ -1,24 +1,26 @@
 mod action;
 mod action_handler;
+mod app_state;
 mod jump_overlay;
 mod keyboard;
 mod overlay;
 
 use action::*;
 use action_handler::*;
-use jump_overlay::{hide_jump_overlay, JumpKeyResult, JUMP_OVERLAY};
+use app_state::{AppCommand, AppState, KeyEvent};
+use jump_overlay::{hide_jump_overlay, show_jump_overlay, JumpKeyResult, JUMP_OVERLAY};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::OVERLAY;
 use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::sync::RwLock;
 use std::thread::sleep;
 use std::time::Duration;
 use std::{env, error::Error, fs, io};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// RAII guard for the installed keyboard hook.
@@ -54,7 +56,7 @@ lazy_static! {
         RwLock::new(handler)
     };
     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
-    static ref ACTIVE_KEYS: RwLock<HashSet<VirtualKey>> = RwLock::new(HashSet::new());
+    static ref APP_STATE: RwLock<AppState> = RwLock::new(AppState::default());
 }
 
 thread_local! {
@@ -173,7 +175,38 @@ impl Config {
                 println!("❌ Key '{}' is not recognized", key);
             }
         }
+
+        APP_STATE
+            .write()
+            .unwrap()
+            .set_bound_keys(key_actions.bound_keys());
     }
+}
+
+fn modifier_down(vk_code: i32) -> bool {
+    unsafe { (GetAsyncKeyState(vk_code) & i16::MIN) != 0 }
+}
+
+fn decode_key_event(w_param: WPARAM, kbd: KBDLLHOOKSTRUCT) -> Option<KeyEvent> {
+    let key = VirtualKey::from_vk_code(kbd.vkCode)?;
+    let is_down = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
+    let alt_down = (kbd.flags & LLKHF_ALTDOWN)
+        != windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0);
+
+    Some(KeyEvent {
+        key,
+        is_down,
+        alt_down,
+        ctrl_down: modifier_down(0x11)
+            || key == VirtualKey::Ctrl
+            || key == VirtualKey::LeftCtrl
+            || key == VirtualKey::RightCtrl,
+        shift_down: modifier_down(0x10)
+            || key == VirtualKey::Shift
+            || key == VirtualKey::LeftShift
+            || key == VirtualKey::RightShift,
+        win_down: modifier_down(0x5B) || modifier_down(0x5C),
+    })
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
@@ -184,128 +217,94 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             || w_param.0 as u32 == WM_SYSKEYUP)
     {
         let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
-        if let Some(virtual_key) = VirtualKey::from_vk_code(kbd.vkCode) {
-            println!(
-                "🔹 Key Event Captured: {:?} | w_param: {}",
-                virtual_key, w_param.0
-            );
+        if let Some(event) = decode_key_event(w_param, kbd) {
+            let swallow = {
+                let mut app_state = APP_STATE.write().unwrap();
+                let swallow = app_state.should_swallow_key(&event);
+                app_state.enqueue_key_event(event);
+                swallow
+            };
 
-            let key_actions = KEY_ACTIONS.read().unwrap();
-            let mut action_handler = ACTION_HANDLER.write().unwrap();
-            let mut active_keys = ACTIVE_KEYS.write().unwrap();
-
-            let is_keydown = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
-
-            if action_handler.mouse_master.jump_active {
-                if let Some(activation_key) = action_handler.mouse_master.activation_key {
-                    if virtual_key == activation_key {
-                        if is_keydown && !action_handler.mouse_master.activation_key_released {
-                            return LRESULT(1);
-                        }
-                        if !is_keydown {
-                            action_handler.mouse_master.activation_key_released = true;
-                            return LRESULT(1);
-                        }
-                    }
-                }
-
-                let jump_result = JUMP_OVERLAY
-                    .with(|overlay| overlay.borrow_mut().handle_key(virtual_key, is_keydown));
-
-                match jump_result {
-                    JumpKeyResult::Ignored | JumpKeyResult::Consumed => {}
-                    JumpKeyResult::Cancelled => {
-                        hide_jump_overlay();
-                        action_handler.mouse_master.jump_active = false;
-                        action_handler.mouse_master.activation_key = None;
-                        action_handler.mouse_master.activation_key_released = true;
-                    }
-                    JumpKeyResult::Completed { x, y } => {
-                        action_handler.mouse_master.move_mouse_to(x, y);
-                        action_handler.mouse_master.jump_active = false;
-                        action_handler.mouse_master.activation_key = None;
-                        action_handler.mouse_master.activation_key_released = true;
-                    }
-                    JumpKeyResult::Invalid => {
-                        action_handler.mouse_master.jump_active = true;
-                    }
-                }
+            if swallow {
                 return LRESULT(1);
             }
-
-            println!(
-                "[DEBUG] Processing Key Event | VirtualKey: {:?} | KeyDown: {}",
-                virtual_key, is_keydown
-            );
-
-            // ✅ **Detect Alt + E Pressed Together**
-            if virtual_key == VirtualKey::E && is_keydown {
-                let alt_pressed = (kbd.flags & LLKHF_ALTDOWN)
-                    != windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0);
-
-                if alt_pressed {
-                    println!("[DEBUG] Alt + E detected: Switching mode...");
-                    action_handler.mouse_master.toggle_mode();
-                    return LRESULT(1);
-                }
-            }
-
-            // ✅ Always allow `Escape` to exit
-            if virtual_key == VirtualKey::Escape && is_keydown {
-                println!("[DEBUG] Escape pressed: Exiting...");
-                action_handler.mouse_master.exit();
-                return LRESULT(1);
-            }
-
-            // ✅ Ignore keys if in `Idle Mode`
-            if action_handler.mouse_master.current_mode == ModeState::Idle {
-                println!("[DEBUG] Idle Mode active: Ignoring key event...");
-                return CallNextHookEx(None, code, w_param, l_param);
-            }
-
-            if is_keydown {
-                if let Some(action) = key_actions.get_action(virtual_key) {
-                    if *action == Action::JumpMode {
-                        action_handler.process_active_keys(*action, true);
-                        if action_handler.mouse_master.jump_active {
-                            action_handler.mouse_master.activation_key = Some(virtual_key);
-                            action_handler.mouse_master.activation_key_released = false;
-                        } else {
-                            action_handler.mouse_master.activation_key = None;
-                            action_handler.mouse_master.activation_key_released = true;
-                        }
-                        return LRESULT(1);
-                    }
-                }
-            }
-
-            // ✅ Normal key processing
-            if is_keydown {
-                active_keys.insert(virtual_key);
-            } else {
-                active_keys.remove(&virtual_key);
-            }
-
-            // ✅ Process active keys
-            for key in active_keys.iter() {
-                if let Some(action) = key_actions.get_action(*key) {
-                    println!("[DEBUG] Executing keybind: {:?} -> {:?}", key, action);
-                    action_handler.process_active_keys(*action, true);
-                }
-            }
-
-            // ✅ Process key release
-            if !is_keydown {
-                if let Some(action) = key_actions.get_action(virtual_key) {
-                    action_handler.process_active_keys(*action, false);
-                }
-            }
-
-            return LRESULT(1);
         }
     }
-    println!("⚠️ Unhandled key event");
     CallNextHookEx(None, code, w_param, l_param)
+}
+
+fn process_queued_key_events() {
+    loop {
+        let event = {
+            let mut app_state = APP_STATE.write().unwrap();
+            app_state.pop_key_event()
+        };
+
+        let Some(event) = event else {
+            break;
+        };
+
+        let action = KEY_ACTIONS.read().unwrap().get_action(event.key).copied();
+
+        APP_STATE.write().unwrap().route_key_event(event, action);
+    }
+
+    loop {
+        let command = APP_STATE.write().unwrap().pop_command();
+
+        let Some(command) = command else {
+            break;
+        };
+
+        execute_app_command(command);
+    }
+}
+
+fn execute_app_command(command: AppCommand) {
+    match command {
+        AppCommand::ToggleActiveMode => {
+            let active_mode = {
+                let mut action_handler = ACTION_HANDLER.write().unwrap();
+                action_handler.mouse_master.toggle_mode();
+                action_handler.mouse_master.current_mode == ModeState::Active
+            };
+            APP_STATE.write().unwrap().set_active_mode(active_mode);
+        }
+        AppCommand::Exit => {
+            ACTION_HANDLER.write().unwrap().mouse_master.exit();
+        }
+        AppCommand::EnterJumpMode { activation_key } => {
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+            show_jump_overlay(&config);
+            APP_STATE.write().unwrap().enter_jump_mode(activation_key);
+        }
+        AppCommand::KeyAction { action, is_down } => {
+            ACTION_HANDLER
+                .write()
+                .unwrap()
+                .process_active_keys(action, is_down);
+        }
+        AppCommand::JumpInput(event) => {
+            let jump_result = JUMP_OVERLAY
+                .with(|overlay| overlay.borrow_mut().handle_key(event.key, event.is_down));
+
+            match jump_result {
+                JumpKeyResult::Ignored | JumpKeyResult::Consumed | JumpKeyResult::Invalid => {}
+                JumpKeyResult::Cancelled => {
+                    hide_jump_overlay();
+                    APP_STATE.write().unwrap().exit_jump_mode();
+                }
+                JumpKeyResult::Completed { x, y } => {
+                    ACTION_HANDLER
+                        .write()
+                        .unwrap()
+                        .mouse_master
+                        .move_mouse_to(x, y);
+                    APP_STATE.write().unwrap().exit_jump_mode();
+                }
+            }
+        }
+    }
 }
 
 unsafe fn install_keyboard_hook() -> windows::core::Result<()> {
@@ -386,19 +385,19 @@ fn main() {
             while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
-                // ✅ Update the overlay position inside the loop
-                let is_left_click_held =
-                    ACTION_HANDLER.read().unwrap().mouse_master.left_click_held;
-                if let Ok(mut maybe_ov) = OVERLAY.lock() {
-                    if let Some(ref mut ov) = *maybe_ov {
-                        ov.update_overlay_status(is_left_click_held);
-                    }
-                }
-
-                sleep(Duration::from_millis(config.polling_rate));
-
-                // sleep(Duration::from_millis(config.polling_rate));
             }
         }
+
+        process_queued_key_events();
+
+        // ✅ Update the overlay position inside the loop
+        let is_left_click_held = ACTION_HANDLER.read().unwrap().mouse_master.left_click_held;
+        if let Ok(mut maybe_ov) = OVERLAY.lock() {
+            if let Some(ref mut ov) = *maybe_ov {
+                ov.update_overlay_status(is_left_click_held);
+            }
+        }
+
+        sleep(Duration::from_millis(config.polling_rate));
     }
 }

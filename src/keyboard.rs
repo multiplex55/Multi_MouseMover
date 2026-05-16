@@ -621,4 +621,8 @@ impl KeyBindings {
     pub fn get_action(&self, key: VirtualKey) -> Option<&Action> {
         self.bindings.get(&key)
     }
+
+    pub fn bound_keys(&self) -> impl Iterator<Item = VirtualKey> + '_ {
+        self.bindings.keys().copied()
+    }
 }
