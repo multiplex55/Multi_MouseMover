@@ -102,21 +102,28 @@ impl AppState {
         self.system_bindings = system_bindings;
     }
 
+    pub fn is_toggle_active_binding(&self, event: &KeyEvent) -> bool {
+        self.system_bindings.toggle_active.matches_event(event)
+    }
+
+    pub fn is_exit_binding(&self, event: &KeyEvent) -> bool {
+        self.system_bindings.exit.matches_event(event)
+    }
+
+    pub fn is_system_binding(&self, event: &KeyEvent) -> bool {
+        self.is_toggle_active_binding(event) || self.is_exit_binding(event)
+    }
+
     pub fn is_toggle_active_key_down_event(&self, event: &KeyEvent) -> bool {
-        event.is_down && self.system_bindings.toggle_active.matches_event(event)
+        event.is_down && self.is_toggle_active_binding(event)
     }
 
     pub fn is_exit_key_down_event(&self, event: &KeyEvent) -> bool {
-        event.is_down && self.system_bindings.exit.matches_event(event)
+        event.is_down && self.is_exit_binding(event)
     }
 
     pub fn is_system_key_down_event(&self, event: &KeyEvent) -> bool {
         self.is_toggle_active_key_down_event(event) || self.is_exit_key_down_event(event)
-    }
-
-    #[cfg(test)]
-    pub fn set_preserve_global_shortcuts(&mut self, preserve: bool) {
-        self.preserve_global_shortcuts = preserve;
     }
 
     pub fn enter_jump_mode(&mut self, activation_key: VirtualKey) {
@@ -132,26 +139,22 @@ impl AppState {
     }
 
     pub fn should_swallow_key(&self, event: &KeyEvent) -> bool {
-        if self.is_preserved_shortcut(event) {
-            return false;
-        }
-
         if self.jump_active {
             return true;
         }
 
-        if self.is_system_key_down_event(event) {
+        if self.is_system_binding(event) {
             return true;
+        }
+
+        if self.is_preserved_shortcut(event) {
+            return false;
         }
 
         self.active_mode && self.bound_keys.contains(&event.key)
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, action: Option<Action>) {
-        if self.is_preserved_shortcut(&event) {
-            return;
-        }
-
         if self.jump_active {
             if self.is_activation_key_event(&event) {
                 return;
@@ -168,6 +171,10 @@ impl AppState {
 
         if self.is_exit_key_down_event(&event) {
             self.enqueue_command(AppCommand::Exit);
+            return;
+        }
+
+        if self.is_preserved_shortcut(&event) {
             return;
         }
 
@@ -257,6 +264,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::key_chord::KeyChord;
 
     fn state_with_bound_key(key: VirtualKey) -> AppState {
         let mut state = AppState::default();
@@ -302,15 +310,34 @@ mod tests {
     }
 
     #[test]
-    fn global_shortcuts_not_swallowed_unless_configured() {
+    fn global_shortcuts_swallowed_while_jump_mode_is_active() {
         let mut state = AppState::default();
         state.enter_jump_mode(VirtualKey::J);
         let mut ctrl_w = KeyEvent::new(VirtualKey::W, true);
         ctrl_w.ctrl_down = true;
 
-        assert!(!state.should_swallow_key(&ctrl_w));
+        assert!(state.should_swallow_key(&ctrl_w));
+    }
 
-        state.set_preserve_global_shortcuts(false);
+    #[test]
+    fn global_shortcuts_not_swallowed_when_jump_mode_is_inactive() {
+        let state = AppState::default();
+        let mut ctrl_w = KeyEvent::new(VirtualKey::W, true);
+        ctrl_w.ctrl_down = true;
+
+        assert!(!state.should_swallow_key(&ctrl_w));
+    }
+
+    #[test]
+    fn configured_system_binding_wins_over_preserved_shortcut() {
+        let mut state = AppState::default();
+        state.set_system_bindings(RuntimeSystemBindings::new(
+            KeyChord::parse("Ctrl+W").unwrap(),
+            KeyChord::parse("Escape").unwrap(),
+        ));
+        let mut ctrl_w = KeyEvent::new(VirtualKey::W, true);
+        ctrl_w.ctrl_down = true;
+
         assert!(state.should_swallow_key(&ctrl_w));
     }
 
@@ -389,6 +416,51 @@ mod tests {
                 "active_mode={active_mode}"
             );
         }
+    }
+
+    #[test]
+    fn system_binding_key_up_is_swallowed_without_command() {
+        let mut state = AppState::default();
+        let mut event = KeyEvent::new(VirtualKey::E, false);
+        event.ctrl_down = true;
+
+        assert!(state.should_swallow_key(&event));
+
+        state.route_key_event(event, None);
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn jump_mode_routes_escape_to_jump_input_before_exit_binding() {
+        let mut state = AppState::default();
+        state.enter_jump_mode(VirtualKey::J);
+        let event = KeyEvent::new(VirtualKey::Escape, true);
+
+        state.route_key_event(event, None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::JumpInput(event)]
+        );
+    }
+
+    #[test]
+    fn configured_toggle_routes_before_preserved_shortcut() {
+        let mut state = AppState::default();
+        state.set_system_bindings(RuntimeSystemBindings::new(
+            KeyChord::parse("Ctrl+W").unwrap(),
+            KeyChord::parse("Escape").unwrap(),
+        ));
+        let mut ctrl_w = KeyEvent::new(VirtualKey::W, true);
+        ctrl_w.ctrl_down = true;
+
+        state.route_key_event(ctrl_w, None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
+        );
     }
 
     #[test]
