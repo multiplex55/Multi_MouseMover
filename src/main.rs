@@ -377,18 +377,18 @@ fn main() {
     println!("✅ Keyboard Hook Installed Successfully!");
 
     println!("🔹 Attempting Overlay Initialization...");
-    match OVERLAY.lock() {
-        Ok(mut maybe_ov) => {
-            if let Some(ref mut ov) = *maybe_ov {
-                println!("✅ Overlay Initialized Successfully");
-                ov.request_repaint();
-            } else {
-                eprintln!("Overlay disabled due to initialization failure");
-            }
-        }
+    let overlay = match OVERLAY.lock() {
+        Ok(maybe_ov) => maybe_ov.as_ref().cloned(),
         Err(e) => {
             eprintln!("❌ Overlay Lock Failed: {e}");
+            None
         }
+    };
+    if let Some(ov) = overlay {
+        println!("✅ Overlay Initialized Successfully");
+        ov.show();
+    } else {
+        eprintln!("Overlay disabled due to initialization failure");
     }
 
     println!("🔄 Entering Main Event Loop...");

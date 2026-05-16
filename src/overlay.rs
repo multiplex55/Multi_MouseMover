@@ -7,7 +7,7 @@ use std::time::Instant;
 use windows::core::{w, Error};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOSIZE, SWP_NOZORDER,
 };
 use windows::Win32::{
     Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*, UI::WindowsAndMessaging::*,
@@ -30,9 +30,14 @@ lazy_static::lazy_static! {
     static ref PAINT_SMOKE_LOG: Mutex<PaintSmokeLog> = Mutex::new(PaintSmokeLog::new());
 }
 
+#[derive(Clone)]
 pub struct OverlayWindow {
     hwnd: Arc<Mutex<Option<isize>>>, // ✅ Store HWND as `isize`
     is_green: bool,
+}
+
+fn overlay_ex_style() -> WINDOW_EX_STYLE {
+    WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
 }
 
 #[cfg(debug_assertions)]
@@ -87,11 +92,11 @@ impl OverlayWindow {
         unsafe { RegisterClassW(&wc) };
         println!("✅ Overlay: Window Class Registered");
 
-        // Create window
+        // Create window hidden; the caller shows it after global state is ready.
         println!("🔹 Overlay: Creating Overlay Window...");
         let hwnd = unsafe {
             CreateWindowExW(
-                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                overlay_ex_style(),
                 w!("OverlayClass"),
                 w!("OverlayWindow"),
                 WS_POPUP,
@@ -111,13 +116,13 @@ impl OverlayWindow {
         let hwnd_ptr = Some(hwnd.0 as isize);
         println!("🔹 Overlay: HWND Stored as isize");
 
-        // Ensure window is visible
+        // Apply layered attributes before the first show. The window remains
+        // hidden until `show` is called after application globals are ready.
         if let Some(h) = hwnd_ptr {
             unsafe {
-                println!("🔹 Overlay: Showing Window...");
-                let _ = ShowWindow(HWND(h as *mut _), SW_SHOW);
                 println!("🔹 Overlay: Setting Layered Window Attributes...");
                 let _ = SetLayeredWindowAttributes(HWND(h as *mut _), COLORREF(0), 255, LWA_ALPHA);
+                let _ = ShowWindow(HWND(h as *mut _), SW_HIDE);
             }
         }
 
@@ -126,7 +131,6 @@ impl OverlayWindow {
             hwnd: Arc::new(Mutex::new(hwnd_ptr)),
             is_green: false,
         };
-        overlay.request_repaint();
 
         // ✅ **Add this line to start tracking the mouse!**
 
@@ -134,6 +138,19 @@ impl OverlayWindow {
 
         Ok(overlay)
     }
+
+    /// Shows the overlay without activating it and schedules its first paint.
+    pub fn show(&self) {
+        let hwnd_lock = self.hwnd.lock().unwrap();
+        if let Some(h) = *hwnd_lock {
+            let hwnd = HWND(h as *mut _);
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                let _ = InvalidateRect(Some(hwnd), None, false);
+            }
+        }
+    }
+
     pub fn update_overlay_status(&mut self, is_left_click_held: bool) {
         let hwnd = *self.hwnd.lock().unwrap();
         if let Some(h) = hwnd {
@@ -153,7 +170,7 @@ impl OverlayWindow {
                         y,
                         5, // Small overlay width
                         5, // Small overlay height
-                        SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
+                        SWP_NOZORDER | SWP_NOSIZE,
                     );
                 }
             }
@@ -219,7 +236,7 @@ impl OverlayWindow {
                         y,
                         5, // Small overlay width
                         5, // Small overlay height
-                        SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
+                        SWP_NOZORDER | SWP_NOSIZE,
                     );
                 }
             }
@@ -255,7 +272,7 @@ impl OverlayWindow {
                                     y,
                                     20, // Small overlay width
                                     20, // Small overlay height
-                                    SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW,
+                                    SWP_NOZORDER | SWP_NOSIZE,
                                 );
                             }
                             *is_moving = false;
@@ -314,9 +331,31 @@ extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: L
             LRESULT(0)
         }
         WM_NCHITTEST => {
-            // ✅ Ensure mouse clicks go through the overlay
+            // Defense in depth for click-through behavior: the extended
+            // WS_EX_TRANSPARENT style should keep this overlay out of mouse
+            // targeting, and HTTRANSPARENT preserves that behavior if Windows
+            // still asks the non-client hit-test path about this window.
             LRESULT(HTTRANSPARENT as isize)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, _wparam, _lparam) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::overlay_ex_style;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
+    };
+
+    #[test]
+    fn style_contains_click_through_and_non_activate_bits() {
+        let style = overlay_ex_style();
+
+        assert!(style.contains(WS_EX_LAYERED));
+        assert!(style.contains(WS_EX_TOPMOST));
+        assert!(style.contains(WS_EX_TOOLWINDOW));
+        assert!(style.contains(WS_EX_TRANSPARENT));
+        assert!(style.contains(WS_EX_NOACTIVATE));
     }
 }
