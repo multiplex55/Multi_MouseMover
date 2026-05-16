@@ -149,6 +149,20 @@ impl AppState {
             return;
         }
 
+        // Escape is intentionally hardwired as an emergency exit while the
+        // system binding model is still implicit. Configured key-action
+        // bindings are resolved by the caller and passed in as `action`, so a
+        // config entry such as `["Escape", "exit"]` can also arrive here as
+        // `Some(Action::Exit)`. This branch takes precedence and returns before
+        // generic action routing, guaranteeing one Exit command per key-down.
+        //
+        // Future config proposal:
+        // [system_bindings]
+        // toggle_active = "Alt+E"
+        // exit = "Escape"
+        //
+        // Keep system bindings separate from movement/action bindings so
+        // emergency controls remain available even when active mode is off.
         if event.is_down && event.key == VirtualKey::Escape {
             self.enqueue_command(AppCommand::Exit);
             return;
@@ -247,6 +261,14 @@ mod tests {
         state
     }
 
+    fn collect_commands(state: &mut AppState) -> Vec<AppCommand> {
+        let mut commands = Vec::new();
+        while let Some(command) = state.pop_command() {
+            commands.push(command);
+        }
+        commands
+    }
+
     #[test]
     fn idle_unrelated_key_passthrough() {
         let mut state = state_with_bound_key(VirtualKey::A);
@@ -289,5 +311,31 @@ mod tests {
                 activation_key: VirtualKey::J
             })
         );
+    }
+
+    #[test]
+    fn escape_key_down_emits_exactly_one_exit_even_when_configured() {
+        let mut state = state_with_bound_key(VirtualKey::Escape);
+        let event = KeyEvent::new(VirtualKey::Escape, true);
+
+        state.route_key_event(event, Some(Action::Exit));
+
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::Exit]);
+    }
+
+    #[test]
+    fn escape_key_down_exit_is_consistent_across_active_modes() {
+        for active_mode in [true, false] {
+            let mut state = state_with_bound_key(VirtualKey::Escape);
+            state.set_active_mode(active_mode);
+
+            state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), Some(Action::Exit));
+
+            assert_eq!(
+                collect_commands(&mut state),
+                vec![AppCommand::Exit],
+                "active_mode={active_mode}"
+            );
+        }
     }
 }
