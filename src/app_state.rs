@@ -269,6 +269,19 @@ mod tests {
         commands
     }
 
+    fn alt_e_down() -> KeyEvent {
+        let mut event = KeyEvent::new(VirtualKey::E, true);
+        event.alt_down = true;
+        event
+    }
+
+    fn lookup_test_action(event: KeyEvent) -> Option<Action> {
+        match event.key {
+            VirtualKey::Left => Some(Action::MoveLeft),
+            _ => None,
+        }
+    }
+
     #[test]
     fn idle_unrelated_key_passthrough() {
         let mut state = state_with_bound_key(VirtualKey::A);
@@ -314,6 +327,42 @@ mod tests {
     }
 
     #[test]
+    fn bound_movement_key_down_in_active_mode_emits_key_action_down() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Left, true),
+            Some(Action::MoveLeft),
+        );
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveLeft,
+                is_down: true
+            }]
+        );
+    }
+
+    #[test]
+    fn bound_movement_key_up_in_active_mode_emits_key_action_up() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Left, false),
+            Some(Action::MoveLeft),
+        );
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveLeft,
+                is_down: false
+            }]
+        );
+    }
+
+    #[test]
     fn escape_key_down_emits_exactly_one_exit_even_when_configured() {
         let mut state = state_with_bound_key(VirtualKey::Escape);
         let event = KeyEvent::new(VirtualKey::Escape, true);
@@ -337,5 +386,99 @@ mod tests {
                 "active_mode={active_mode}"
             );
         }
+    }
+
+    #[test]
+    fn inactive_mode_ignores_normal_movement_key_down() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+        state.set_active_mode(false);
+
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Left, true),
+            Some(Action::MoveLeft),
+        );
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn alt_e_key_down_toggles_active_mode_without_movement_action() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+
+        state.route_key_event(alt_e_down(), Some(Action::MoveLeft));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
+        );
+    }
+
+    #[test]
+    fn unbound_key_down_generates_no_command() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::Right, true), None);
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn unbound_key_up_generates_no_command() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::Right, false), None);
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn queued_key_events_route_commands_in_fifo_order() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+        state.enqueue_key_event(KeyEvent::new(VirtualKey::Left, true));
+        state.enqueue_key_event(KeyEvent::new(VirtualKey::Left, false));
+        state.enqueue_key_event(KeyEvent::new(VirtualKey::Escape, true));
+
+        while let Some(event) = state.pop_key_event() {
+            state.route_key_event(event, lookup_test_action(event));
+        }
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![
+                AppCommand::KeyAction {
+                    action: Action::MoveLeft,
+                    is_down: true,
+                },
+                AppCommand::KeyAction {
+                    action: Action::MoveLeft,
+                    is_down: false,
+                },
+                AppCommand::Exit,
+            ]
+        );
+    }
+
+    #[test]
+    fn queued_mixed_system_and_movement_commands_preserve_fifo_order() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+        state.enqueue_key_event(alt_e_down());
+        state.enqueue_key_event(KeyEvent::new(VirtualKey::Escape, true));
+        state.enqueue_key_event(KeyEvent::new(VirtualKey::Left, true));
+
+        while let Some(event) = state.pop_key_event() {
+            state.route_key_event(event, lookup_test_action(event));
+        }
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![
+                AppCommand::ToggleActiveMode,
+                AppCommand::Exit,
+                AppCommand::KeyAction {
+                    action: Action::MoveLeft,
+                    is_down: true,
+                },
+            ]
+        );
     }
 }
