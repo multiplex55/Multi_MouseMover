@@ -234,7 +234,7 @@ impl JumpOverlay {
                 let _ = TextOutW(hdc, indicator_x, indicator_y, &indicator_utf16);
 
                 let _ = SetTextColor(hdc, old_text_color);
-                let _ = SetBkMode(hdc, BACKGROUND_MODE(old_bk_mode));
+                let _ = SetBkMode(hdc, BACKGROUND_MODE(old_bk_mode as u32));
                 let _ = SelectObject(hdc, old_pen);
                 let _ = DeleteObject(pen.into());
                 let _ = DeleteObject(bg_brush.into());
