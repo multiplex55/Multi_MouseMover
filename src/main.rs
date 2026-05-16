@@ -1,6 +1,7 @@
 mod action;
 mod action_handler;
 mod app_state;
+mod jump_grid;
 mod jump_overlay;
 mod keyboard;
 mod overlay;

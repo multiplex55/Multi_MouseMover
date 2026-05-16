@@ -6,7 +6,12 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::{keyboard::VirtualKey, overlay::RGB, Config};
+use crate::{
+    jump_grid::{code_to_index, expected_len, index_to_code, letters_needed, target_position},
+    keyboard::VirtualKey,
+    overlay::RGB,
+    Config,
+};
 
 thread_local! {
     /// Thread-local jump overlay state.
@@ -46,20 +51,15 @@ fn calculate_target_center(
     row: usize,
     col: usize,
 ) -> Option<(i32, i32)> {
-    let (cols, rows) = grid_size;
-    if cols == 0 || rows == 0 {
-        return None;
-    }
-    if row >= rows as usize || col >= cols as usize {
-        return None;
-    }
-
-    let x = screen_rect.left as f64
-        + (((col as f64) + 0.5f64) * screen_rect.width as f64 / cols as f64);
-    let y = screen_rect.top as f64
-        + (((row as f64) + 0.5f64) * screen_rect.height as f64 / rows as f64);
-
-    Some((x.round() as i32, y.round() as i32))
+    target_position(
+        screen_rect.left,
+        screen_rect.top,
+        screen_rect.width,
+        screen_rect.height,
+        grid_size,
+        row,
+        col,
+    )
 }
 
 fn overlay_colorkey() -> COLORREF {
@@ -254,12 +254,12 @@ impl JumpOverlay {
                     let _ = LineTo(hdc, rect.right, pos);
                 }
 
-                let row_len = Self::letters_needed(self.grid_size.1);
-                let col_len = Self::letters_needed(self.grid_size.0);
+                let row_len = letters_needed(self.grid_size.1);
+                let col_len = letters_needed(self.grid_size.0);
                 for row in 0..self.grid_size.1 {
-                    let row_code = Self::index_to_code(row as usize, row_len);
+                    let row_code = index_to_code(row as usize, row_len);
                     for col in 0..self.grid_size.0 {
-                        let col_code = Self::index_to_code(col as usize, col_len);
+                        let col_code = index_to_code(col as usize, col_len);
                         let code = format!("{}{}", row_code, col_code);
                         let text: Vec<u16> = code.encode_utf16().collect();
                         let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
@@ -284,35 +284,8 @@ impl JumpOverlay {
         }
     }
 
-    fn letters_needed(value: u32) -> usize {
-        if value <= 26 {
-            1
-        } else if value <= 26 * 26 {
-            2
-        } else {
-            3
-        }
-    }
-
     fn expected_len(&self) -> usize {
-        Self::letters_needed(self.grid_size.1) + Self::letters_needed(self.grid_size.0)
-    }
-
-    fn code_to_index(code: &[char]) -> usize {
-        let mut idx = 0usize;
-        for &ch in code {
-            idx = idx * 26 + ((ch as u8 - b'A') as usize);
-        }
-        idx
-    }
-
-    fn index_to_code(mut index: usize, len: usize) -> String {
-        let mut chars = vec!['A'; len];
-        for i in (0..len).rev() {
-            chars[i] = (b'A' + (index % 26) as u8) as char;
-            index /= 26;
-        }
-        chars.into_iter().collect()
+        expected_len(self.grid_size)
     }
 
     fn target_position(&self, row: usize, col: usize) -> Option<(i32, i32)> {
@@ -338,20 +311,19 @@ impl JumpOverlay {
                     self.input.push(ch);
                     self.request_repaint();
                     if self.input.len() >= self.expected_len() {
-                        let row_len = Self::letters_needed(self.grid_size.1);
-                        let row_code: Vec<char> = self.input.chars().take(row_len).collect();
-                        let col_code: Vec<char> = self
-                            .input
-                            .chars()
-                            .skip(row_len)
-                            .take(Self::letters_needed(self.grid_size.0))
-                            .collect();
-                        let row = Self::code_to_index(&row_code);
-                        let col = Self::code_to_index(&col_code);
-                        if let Some((x, y)) = self.target_position(row, col) {
-                            self.input.clear();
-                            self.hide();
-                            return JumpKeyResult::Completed { x, y };
+                        let row_len = letters_needed(self.grid_size.1);
+                        let col_len = letters_needed(self.grid_size.0);
+                        let row_code: String = self.input.chars().take(row_len).collect();
+                        let col_code: String =
+                            self.input.chars().skip(row_len).take(col_len).collect();
+                        if let (Some(row), Some(col)) =
+                            (code_to_index(&row_code), code_to_index(&col_code))
+                        {
+                            if let Some((x, y)) = self.target_position(row, col) {
+                                self.input.clear();
+                                self.hide();
+                                return JumpKeyResult::Completed { x, y };
+                            }
                         }
                         self.input.clear();
                         self.request_repaint();
@@ -445,6 +417,24 @@ mod tests {
             JumpKeyResult::Ignored
         );
         assert!(overlay.input.is_empty());
+    }
+
+    #[test]
+    fn invalid_code_clears_input_and_keeps_session_active() {
+        let mut overlay = JumpOverlay::new();
+        overlay.grid_size = (10, 10);
+        overlay.visible = true;
+
+        assert_eq!(
+            overlay.handle_key(VirtualKey::K, true),
+            JumpKeyResult::Consumed
+        );
+        assert_eq!(
+            overlay.handle_key(VirtualKey::A, true),
+            JumpKeyResult::Invalid
+        );
+        assert!(overlay.input.is_empty());
+        assert!(overlay.visible);
     }
 
     #[test]
