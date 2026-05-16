@@ -24,6 +24,7 @@ grid_size = {width = 10, height = 10}
 
 [jump]
 mode = "single"
+move_cursor_after_each_stage = false
 
 [jump.coarse]
 enabled = true

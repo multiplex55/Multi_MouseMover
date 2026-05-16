@@ -231,6 +231,7 @@ impl Default for JumpMode {
 #[serde(default)]
 struct JumpConfig {
     mode: JumpMode,
+    move_cursor_after_each_stage: bool,
     coarse: JumpStageConfig,
     fine: JumpStageConfig,
     precise: JumpStageConfig,
@@ -240,6 +241,7 @@ impl Default for JumpConfig {
     fn default() -> Self {
         Self {
             mode: JumpMode::Single,
+            move_cursor_after_each_stage: false,
             coarse: JumpStageConfig::missing_coarse(),
             fine: JumpStageConfig {
                 enabled: false,
@@ -658,16 +660,44 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::JumpInput(event) => {
-            let jump_result = APP_STATE.write().unwrap().handle_jump_input(event);
+            let (jump_result, view) = {
+                let mut app_state = APP_STATE.write().unwrap();
+                let jump_result = app_state.handle_jump_input(event);
+                let view = match jump_result {
+                    None
+                    | Some(JumpSessionUpdate::Consumed)
+                    | Some(JumpSessionUpdate::Invalid)
+                    | Some(JumpSessionUpdate::StageAdvanced { .. }) => app_state.jump_view(),
+                    Some(JumpSessionUpdate::Cancelled | JumpSessionUpdate::Completed { .. }) => {
+                        None
+                    }
+                };
+                (jump_result, view)
+            };
 
             match jump_result {
                 None | Some(JumpSessionUpdate::Consumed) | Some(JumpSessionUpdate::Invalid) => {
-                    if let Some(view) = APP_STATE.read().unwrap().jump_view() {
+                    if let Some(view) = view {
                         update_jump_overlay(view);
                     }
                 }
-                Some(JumpSessionUpdate::StageAdvanced { .. }) => {
-                    if let Some(view) = APP_STATE.read().unwrap().jump_view() {
+                Some(JumpSessionUpdate::StageAdvanced { region, .. }) => {
+                    let move_cursor_after_each_stage = ACTION_HANDLER
+                        .read()
+                        .unwrap()
+                        .mouse_master
+                        .config
+                        .jump
+                        .move_cursor_after_each_stage;
+                    if move_cursor_after_each_stage {
+                        let (x, y) = region.center();
+                        ACTION_HANDLER
+                            .write()
+                            .unwrap()
+                            .mouse_master
+                            .move_mouse_to(x, y);
+                    }
+                    if let Some(view) = view {
                         update_jump_overlay(view);
                     }
                 }
@@ -878,6 +908,10 @@ mod tests {
         assert_eq!(config.grid_size.width, defaults.grid_size.width);
         assert_eq!(config.grid_size.height, defaults.grid_size.height);
         assert_eq!(config.jump.mode, defaults.jump.mode);
+        assert_eq!(
+            config.jump.move_cursor_after_each_stage,
+            defaults.jump.move_cursor_after_each_stage
+        );
         assert_eq!(config.jump.coarse.width, defaults.grid_size.width);
         assert_eq!(config.jump.coarse.height, defaults.grid_size.height);
         assert_eq!(config.starting_speed, defaults.starting_speed);
@@ -963,6 +997,18 @@ mod tests {
 
         assert!(!config.jump.fine.enabled);
         assert!(!config.jump.precise.enabled);
+    }
+
+    #[test]
+    fn jump_move_cursor_after_each_stage_is_configurable() {
+        let config = parse_config(
+            r#"
+            [jump]
+            move_cursor_after_each_stage = true
+            "#,
+        );
+
+        assert!(config.jump.move_cursor_after_each_stage);
     }
 
     #[test]

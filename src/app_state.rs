@@ -225,6 +225,11 @@ impl AppState {
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, action: Option<Action>) {
+        if self.is_jump_active() && self.is_toggle_active_key_down_event(&event) {
+            self.enqueue_command(AppCommand::ToggleActiveMode);
+            return;
+        }
+
         if self.is_jump_active() {
             if self.is_activation_key_event(&event) {
                 return;
@@ -561,6 +566,19 @@ mod tests {
         assert_eq!(
             collect_commands(&mut state),
             vec![AppCommand::JumpInput(event)]
+        );
+    }
+
+    #[test]
+    fn jump_mode_routes_toggle_active_to_disable_transition() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::J);
+
+        state.route_key_event(ctrl_e_down(), None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
         );
     }
 
