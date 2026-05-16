@@ -8,6 +8,7 @@ mod jump_view;
 mod key_chord;
 mod keyboard;
 mod overlay;
+mod screen_capture;
 
 use action::*;
 use action_handler::*;
@@ -661,10 +662,14 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
 
             match jump_result {
                 None | Some(JumpSessionUpdate::Consumed) | Some(JumpSessionUpdate::Invalid) => {
-                    update_jump_overlay(APP_STATE.read().unwrap().jump_view());
+                    if let Some(view) = APP_STATE.read().unwrap().jump_view() {
+                        update_jump_overlay(view);
+                    }
                 }
                 Some(JumpSessionUpdate::StageAdvanced { .. }) => {
-                    update_jump_overlay(APP_STATE.read().unwrap().jump_view());
+                    if let Some(view) = APP_STATE.read().unwrap().jump_view() {
+                        update_jump_overlay(view);
+                    }
                 }
                 Some(JumpSessionUpdate::Cancelled) => {
                     hide_jump_overlay();
@@ -676,6 +681,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         .unwrap()
                         .mouse_master
                         .move_mouse_to(x, y);
+                    hide_jump_overlay();
                     APP_STATE.write().unwrap().exit_jump_mode();
                 }
             }

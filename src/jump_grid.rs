@@ -46,48 +46,9 @@ pub fn expected_len(grid_size: (u32, u32)) -> usize {
     letters_needed(rows) + letters_needed(cols)
 }
 
-pub fn target_position(
-    screen_left: i32,
-    screen_top: i32,
-    screen_width: i32,
-    screen_height: i32,
-    grid_size: (u32, u32),
-    row: usize,
-    col: usize,
-) -> Option<(i32, i32)> {
-    let (cols, rows) = grid_size;
-    if cols == 0 || rows == 0 {
-        return None;
-    }
-    if row >= rows as usize || col >= cols as usize {
-        return None;
-    }
-
-    let x = screen_left as f64 + (((col as f64) + 0.5f64) * screen_width as f64 / cols as f64);
-    let y = screen_top as f64 + (((row as f64) + 0.5f64) * screen_height as f64 / rows as f64);
-
-    Some((x.round() as i32, y.round() as i32))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{code_to_index, expected_len, index_to_code, letters_needed, target_position};
-
-    fn target_for_code(code: &str, grid_size: (u32, u32)) -> Option<(i32, i32)> {
-        let row_len = letters_needed(grid_size.1);
-        let col_len = letters_needed(grid_size.0);
-
-        if code.chars().count() != row_len + col_len {
-            return None;
-        }
-
-        let row_code: String = code.chars().take(row_len).collect();
-        let col_code: String = code.chars().skip(row_len).take(col_len).collect();
-        let row = code_to_index(&row_code)?;
-        let col = code_to_index(&col_code)?;
-
-        target_position(0, 0, 1000, 1000, grid_size, row, col)
-    }
+    use super::{code_to_index, expected_len, index_to_code, letters_needed};
 
     #[test]
     fn letters_needed_scales_at_base_26_boundaries() {
@@ -124,11 +85,13 @@ mod tests {
     #[test]
     fn ten_by_ten_validity_matrix() {
         for code in ["AA", "AJ", "JA", "JJ"] {
-            assert!(target_for_code(code, (10, 10)).is_some(), "{code}");
+            assert!(code_to_index(code).is_some(), "{code}");
         }
 
         for code in ["KA", "AZ", "ZZ"] {
-            assert!(target_for_code(code, (10, 10)).is_none(), "{code}");
+            let row = code_to_index(&code[..1]).unwrap();
+            let col = code_to_index(&code[1..]).unwrap();
+            assert!(row >= 10 || col >= 10, "{code}");
         }
     }
 

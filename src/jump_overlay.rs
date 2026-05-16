@@ -7,10 +7,11 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::{
-    jump_grid::{index_to_code, letters_needed, target_position},
+    jump_grid::{index_to_code, letters_needed},
     jump_session::JumpRegion,
     jump_view::JumpOverlayView,
     overlay::RGB,
+    screen_capture::{capture_virtual_screen, ScreenSnapshot},
 };
 
 thread_local! {
@@ -49,23 +50,6 @@ impl ScreenRect {
     }
 }
 
-fn calculate_target_center(
-    screen_rect: ScreenRect,
-    grid_size: (u32, u32),
-    row: usize,
-    col: usize,
-) -> Option<(i32, i32)> {
-    target_position(
-        screen_rect.left,
-        screen_rect.top,
-        screen_rect.width,
-        screen_rect.height,
-        grid_size,
-        row,
-        col,
-    )
-}
-
 fn overlay_colorkey() -> COLORREF {
     RGB(0, 0, 0)
 }
@@ -85,6 +69,13 @@ fn input_color() -> COLORREF {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransparencyMode {
     ColorKey { color: COLORREF, alpha: u8 },
+    Opaque { alpha: u8 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrawMode {
+    TransparentGrid,
+    MagnifiedPreview,
 }
 
 fn overlay_ex_style() -> WINDOW_EX_STYLE {
@@ -104,18 +95,49 @@ fn apply_layered_attributes(hwnd: HWND, mode: TransparencyMode) {
             TransparencyMode::ColorKey { color, alpha } => {
                 let _ = SetLayeredWindowAttributes(hwnd, color, alpha, LWA_COLORKEY);
             }
+            TransparencyMode::Opaque { alpha } => {
+                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
+            }
         }
     }
 }
 
-fn format_jump_indicator(input: &str) -> String {
-    format!("Jump: {}_", input)
+fn draw_mode_for_view(view: &JumpOverlayView) -> DrawMode {
+    if view.stage_index > 0 {
+        DrawMode::MagnifiedPreview
+    } else {
+        DrawMode::TransparentGrid
+    }
+}
+
+fn format_jump_indicator(view: &JumpOverlayView) -> String {
+    format!(
+        "Jump {}/{}: {}_",
+        view.stage_index + 1,
+        view.stage_count,
+        view.input
+    )
+}
+
+fn preview_source_rect(view: &JumpOverlayView, snapshot: &ScreenSnapshot) -> RECT {
+    let margin_x = view.region.width * view.preview_margin_percent as i32 / 100;
+    let margin_y = view.region.height * view.preview_margin_percent as i32 / 100;
+    let snapshot_right = snapshot.left + snapshot.width;
+    let snapshot_bottom = snapshot.top + snapshot.height;
+
+    RECT {
+        left: (view.region.left - margin_x).max(snapshot.left),
+        top: (view.region.top - margin_y).max(snapshot.top),
+        right: (view.region.left + view.region.width + margin_x).min(snapshot_right),
+        bottom: (view.region.top + view.region.height + margin_y).min(snapshot_bottom),
+    }
 }
 
 pub struct JumpOverlay {
     hwnd: Option<HWND>,
     visible: bool,
     view: Option<JumpOverlayView>,
+    snapshot: Option<ScreenSnapshot>,
     repaint_requested: bool,
 }
 
@@ -125,6 +147,7 @@ impl JumpOverlay {
             hwnd: None,
             visible: false,
             view: None,
+            snapshot: None,
             repaint_requested: false,
         }
     }
@@ -187,7 +210,9 @@ impl JumpOverlay {
 
     pub fn initialize(&mut self, view: JumpOverlayView) {
         self.create_window();
+        self.snapshot = capture_virtual_screen();
         self.view = Some(view);
+        self.apply_view_layering();
         self.repaint_requested = false;
     }
 
@@ -203,6 +228,7 @@ impl JumpOverlay {
 
     pub fn hide(&mut self) {
         self.view = None;
+        self.snapshot = None;
         if let Some(h) = self.hwnd {
             unsafe {
                 let _ = ShowWindow(h, SW_HIDE);
@@ -211,8 +237,101 @@ impl JumpOverlay {
         self.visible = false;
     }
 
-    fn draw(&self, hdc: HDC) {
+    fn effective_draw_mode(&self) -> DrawMode {
+        let Some(view) = &self.view else {
+            return DrawMode::TransparentGrid;
+        };
+        match (draw_mode_for_view(view), self.snapshot.as_ref()) {
+            (DrawMode::MagnifiedPreview, Some(_)) => DrawMode::MagnifiedPreview,
+            _ => DrawMode::TransparentGrid,
+        }
+    }
+
+    fn apply_view_layering(&self) {
         if let Some(hwnd) = self.hwnd {
+            let mode = match self.effective_draw_mode() {
+                DrawMode::TransparentGrid => transparency_mode(),
+                DrawMode::MagnifiedPreview => TransparencyMode::Opaque {
+                    alpha: OVERLAY_ALPHA,
+                },
+            };
+            apply_layered_attributes(hwnd, mode);
+        }
+    }
+
+    fn client_rect(&self) -> Option<RECT> {
+        let hwnd = self.hwnd?;
+        unsafe {
+            let mut rect = RECT::default();
+            GetClientRect(hwnd, &mut rect).ok()?;
+            Some(rect)
+        }
+    }
+
+    fn grid_rect(&self, view: &JumpOverlayView, client_rect: RECT) -> RECT {
+        match self.effective_draw_mode() {
+            DrawMode::TransparentGrid => {
+                let virtual_screen = ScreenRect::from_virtual_screen();
+                RECT {
+                    left: view.region.left - virtual_screen.left,
+                    top: view.region.top - virtual_screen.top,
+                    right: view.region.left - virtual_screen.left + view.region.width,
+                    bottom: view.region.top - virtual_screen.top + view.region.height,
+                }
+            }
+            DrawMode::MagnifiedPreview => client_rect,
+        }
+    }
+
+    fn draw_background(&self, hdc: HDC, client_rect: &RECT, view: &JumpOverlayView) {
+        unsafe {
+            match self.effective_draw_mode() {
+                DrawMode::TransparentGrid => {
+                    let bg_brush = CreateSolidBrush(overlay_colorkey());
+                    let _ = FillRect(hdc, client_rect, bg_brush);
+                    let _ = DeleteObject(bg_brush.into());
+                }
+                DrawMode::MagnifiedPreview => {
+                    if let Some(snapshot) = &self.snapshot {
+                        let _ = BitBlt(
+                            hdc,
+                            0,
+                            0,
+                            snapshot.width,
+                            snapshot.height,
+                            Some(snapshot.hdc()),
+                            0,
+                            0,
+                            SRCCOPY,
+                        );
+
+                        let src = preview_source_rect(view, snapshot);
+                        let src_w = src.right - src.left;
+                        let src_h = src.bottom - src.top;
+                        if src_w > 0 && src_h > 0 {
+                            let _ = SetStretchBltMode(hdc, HALFTONE);
+                            let _ = StretchBlt(
+                                hdc,
+                                client_rect.left,
+                                client_rect.top,
+                                client_rect.right - client_rect.left,
+                                client_rect.bottom - client_rect.top,
+                                Some(snapshot.hdc()),
+                                snapshot.source_x(src.left),
+                                snapshot.source_y(src.top),
+                                src_w,
+                                src_h,
+                                SRCCOPY,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn draw(&self, hdc: HDC) {
+        if self.hwnd.is_some() {
             let Some(view) = &self.view else {
                 return;
             };
@@ -221,24 +340,19 @@ impl JumpOverlay {
                 return;
             }
             unsafe {
-                let mut rect = RECT::default();
-                if GetClientRect(hwnd, &mut rect).is_err() {
+                let Some(rect) = self.client_rect() else {
                     return;
-                }
-                let bg_brush = CreateSolidBrush(overlay_colorkey());
-                let _ = FillRect(hdc, &rect, bg_brush);
-
-                let virtual_screen = ScreenRect::from_virtual_screen();
-                let grid_rect = RECT {
-                    left: view.region.left - virtual_screen.left,
-                    top: view.region.top - virtual_screen.top,
-                    right: view.region.left - virtual_screen.left + view.region.width,
-                    bottom: view.region.top - virtual_screen.top + view.region.height,
                 };
+                self.draw_background(hdc, &rect, view);
+
+                let grid_rect = self.grid_rect(view, rect);
                 let width = grid_rect.right - grid_rect.left;
                 let height = grid_rect.bottom - grid_rect.top;
                 let cell_w = width / grid_size.0 as i32;
                 let cell_h = height / grid_size.1 as i32;
+                if cell_w <= 0 || cell_h <= 0 {
+                    return;
+                }
 
                 let old_bk_mode = SetBkMode(hdc, TRANSPARENT);
                 let old_text_color = SetTextColor(hdc, label_color());
@@ -272,7 +386,7 @@ impl JumpOverlay {
                 }
 
                 let _ = SetTextColor(hdc, input_color());
-                let indicator = format_jump_indicator(&view.input);
+                let indicator = format_jump_indicator(view);
                 let indicator_utf16: Vec<u16> = indicator.encode_utf16().collect();
                 let indicator_x = grid_rect.left + (width / 2) - 60;
                 let indicator_y = grid_rect.top + 16;
@@ -282,14 +396,20 @@ impl JumpOverlay {
                 let _ = SetBkMode(hdc, BACKGROUND_MODE(old_bk_mode as u32));
                 let _ = SelectObject(hdc, old_pen);
                 let _ = DeleteObject(pen.into());
-                let _ = DeleteObject(bg_brush.into());
             }
         }
     }
 
-    pub fn update_view(&mut self, view: Option<JumpOverlayView>) {
-        self.view = view;
+    pub fn update_view(&mut self, view: JumpOverlayView) {
+        self.view = Some(view);
+        self.apply_view_layering();
         self.request_repaint();
+    }
+}
+
+impl Drop for JumpOverlay {
+    fn drop(&mut self) {
+        self.snapshot = None;
     }
 }
 
@@ -338,7 +458,7 @@ pub fn show_jump_overlay(view: JumpOverlayView) {
     });
 }
 
-pub fn update_jump_overlay(view: Option<JumpOverlayView>) {
+pub fn update_jump_overlay(view: JumpOverlayView) {
     JUMP_OVERLAY.with(|overlay| overlay.borrow_mut().update_view(view));
 }
 
@@ -349,9 +469,10 @@ pub fn hide_jump_overlay() {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_target_center, format_jump_indicator, overlay_colorkey, overlay_ex_style,
-        transparency_mode, ScreenRect, TransparencyMode, OVERLAY_ALPHA,
+        draw_mode_for_view, format_jump_indicator, overlay_colorkey, overlay_ex_style,
+        transparency_mode, DrawMode, TransparencyMode, OVERLAY_ALPHA,
     };
+    use crate::jump_view::JumpOverlayView;
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
 
     #[test]
@@ -363,8 +484,8 @@ mod tests {
 
     #[test]
     fn jump_indicator_formatting() {
-        assert_eq!(format_jump_indicator(""), "Jump: _");
-        assert_eq!(format_jump_indicator("A"), "Jump: A_");
+        assert_eq!(format_jump_indicator(&view(0, 1, "")), "Jump 1/1: _");
+        assert_eq!(format_jump_indicator(&view(1, 3, "AB")), "Jump 2/3: AB_");
     }
 
     #[test]
@@ -379,46 +500,35 @@ mod tests {
     }
 
     #[test]
-    fn target_center_handles_non_zero_virtual_screen_origin() {
-        let rect = ScreenRect {
-            left: -1920,
-            top: 120,
-            width: 3840,
-            height: 2160,
-        };
+    fn first_stage_uses_transparent_grid() {
         assert_eq!(
-            calculate_target_center(rect, (4, 3), 1, 2),
-            Some((480, 1200))
+            draw_mode_for_view(&view(0, 2, "")),
+            DrawMode::TransparentGrid
         );
     }
 
     #[test]
-    fn target_center_uses_edge_cell_centers() {
-        let rect = ScreenRect {
-            left: 100,
-            top: 200,
-            width: 1000,
-            height: 800,
-        };
+    fn later_stages_use_magnified_preview() {
         assert_eq!(
-            calculate_target_center(rect, (10, 8), 0, 0),
-            Some((150, 250))
-        );
-        assert_eq!(
-            calculate_target_center(rect, (10, 8), 7, 9),
-            Some((1050, 950))
+            draw_mode_for_view(&view(1, 2, "")),
+            DrawMode::MagnifiedPreview
         );
     }
 
-    #[test]
-    fn target_center_rejects_invalid_row_or_col() {
-        let rect = ScreenRect {
-            left: 0,
-            top: 0,
-            width: 1920,
-            height: 1080,
-        };
-        assert_eq!(calculate_target_center(rect, (10, 10), 10, 0), None);
-        assert_eq!(calculate_target_center(rect, (10, 10), 0, 10), None);
+    fn view(stage_index: usize, stage_count: usize, input: &str) -> JumpOverlayView {
+        JumpOverlayView {
+            stage_index,
+            stage_count,
+            stages: Vec::new(),
+            region: crate::jump_session::JumpRegion {
+                left: -100,
+                top: 50,
+                width: 200,
+                height: 100,
+            },
+            grid_size: (10, 10),
+            input: input.to_string(),
+            preview_margin_percent: 10,
+        }
     }
 }
