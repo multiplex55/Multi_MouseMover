@@ -29,6 +29,7 @@ impl Action {
             "move_up_right" => Some(Self::MoveUpRight),
             "move_up_left" => Some(Self::MoveUpLeft),
             "move_down_right" => Some(Self::MoveDownRight),
+            "move_down_left" => Some(Self::MoveDownLeft),
             "left_click" => Some(Self::LeftClick),
             "right_click" => Some(Self::RightClick),
             "exit" => Some(Self::Exit),
@@ -57,6 +58,7 @@ impl ActionHandler {
     }
 
     /// Add an action to the handler
+    #[allow(dead_code)]
     pub fn add_action<F>(&mut self, action: Action, callback: F)
     where
         F: Fn() + Send + Sync + 'static,

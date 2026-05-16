@@ -80,11 +80,11 @@ impl OverlayWindow {
         if let Some(h) = hwnd_ptr {
             unsafe {
                 println!("🔹 Overlay: Showing Window...");
-                ShowWindow(HWND(h as *mut _), SW_SHOW);
+                let _ = ShowWindow(HWND(h as *mut _), SW_SHOW);
                 println!("🔹 Overlay: Updating Window...");
-                UpdateWindow(HWND(h as *mut _));
+                let _ = UpdateWindow(HWND(h as *mut _));
                 println!("🔹 Overlay: Setting Layered Window Attributes...");
-                SetLayeredWindowAttributes(HWND(h as *mut _), COLORREF(0), 255, LWA_ALPHA);
+                let _ = SetLayeredWindowAttributes(HWND(h as *mut _), COLORREF(0), 255, LWA_ALPHA);
             }
         }
 
@@ -112,7 +112,7 @@ impl OverlayWindow {
                 let y = point.y + 5;
 
                 unsafe {
-                    SetWindowPos(
+                    let _ = SetWindowPos(
                         hwnd,
                         Some(HWND_TOPMOST),
                         x,
@@ -154,7 +154,7 @@ impl OverlayWindow {
                 };
                 FillRect(hdc, &rect, hbrush);
 
-                DeleteObject(hbrush.into());
+                let _ = DeleteObject(hbrush.into());
                 ReleaseDC(Some(hwnd), hdc);
             }
         }
@@ -172,7 +172,7 @@ impl OverlayWindow {
                 let y = point.y + 5; // Offset below
 
                 unsafe {
-                    SetWindowPos(
+                    let _ = SetWindowPos(
                         hwnd,
                         Some(HWND_TOPMOST),
                         x,
@@ -186,6 +186,7 @@ impl OverlayWindow {
         }
     }
 
+    #[allow(dead_code)]
     pub fn follow_cursor(&self) {
         let hwnd_arc = Arc::clone(&self.hwnd); // Clone Arc for safe access in the thread
         let is_moving_arc = Arc::new(Mutex::new(false)); // Prevent unnecessary movement updates
@@ -207,7 +208,7 @@ impl OverlayWindow {
                         if *is_moving == false {
                             *is_moving = true;
                             unsafe {
-                                SetWindowPos(
+                                let _ = SetWindowPos(
                                     hwnd,
                                     Some(HWND_TOPMOST),
                                     x,
@@ -236,6 +237,7 @@ impl OverlayWindow {
 }
 
 /// Helper function to create a `COLORREF`
+#[allow(non_snake_case)]
 pub fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
     COLORREF(((b as u32) << 16) | ((g as u32) << 8) | (r as u32))
 }

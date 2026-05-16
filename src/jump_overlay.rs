@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::ptr;
-use windows::core::{w, PCWSTR};
+use windows::core::w;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -22,6 +22,7 @@ pub struct JumpOverlay {
     grid_size: (u32, u32),
     visible: bool,
     input: String,
+    repaint_requested: bool,
 }
 
 impl JumpOverlay {
@@ -31,6 +32,16 @@ impl JumpOverlay {
             grid_size: (10, 10),
             visible: false,
             input: String::new(),
+            repaint_requested: false,
+        }
+    }
+
+    fn request_repaint(&mut self) {
+        self.repaint_requested = true;
+        if let Some(h) = self.hwnd {
+            unsafe {
+                let _ = InvalidateRect(Some(h), None, false);
+            }
         }
     }
 
@@ -71,8 +82,8 @@ impl JumpOverlay {
             );
             match hwnd {
                 Ok(h) => {
-                    SetLayeredWindowAttributes(h, COLORREF(0), 180, LWA_ALPHA);
-                    ShowWindow(h, SW_HIDE);
+                    let _ = SetLayeredWindowAttributes(h, COLORREF(0), 180, LWA_ALPHA);
+                    let _ = ShowWindow(h, SW_HIDE);
                     self.hwnd = Some(h);
                 }
                 Err(e) => {
@@ -86,25 +97,28 @@ impl JumpOverlay {
         self.grid_size = (config.grid_size.width, config.grid_size.height);
         self.create_window();
         self.input.clear();
+        self.repaint_requested = false;
     }
 
     pub fn show(&mut self) {
         if let Some(h) = self.hwnd {
             unsafe {
-                ShowWindow(h, SW_SHOW);
-                UpdateWindow(h);
+                // Use non-activating show mode so jump overlay never steals focus.
+                let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
             }
+            self.request_repaint();
             self.visible = true;
         }
     }
 
     pub fn hide(&mut self) {
+        self.input.clear();
         if let Some(h) = self.hwnd {
             unsafe {
-                ShowWindow(h, SW_HIDE);
+                let _ = ShowWindow(h, SW_HIDE);
             }
-            self.visible = false;
         }
+        self.visible = false;
     }
 
     fn draw(&self, hdc: HDC) {
@@ -118,7 +132,7 @@ impl JumpOverlay {
             }
             unsafe {
                 let mut rect = RECT::default();
-                if !GetClientRect(hwnd, &mut rect).as_bool() {
+                if GetClientRect(hwnd, &mut rect).is_err() {
                     println!("GetClientRect failed: {:?}", GetLastError());
                     return;
                 }
@@ -129,24 +143,24 @@ impl JumpOverlay {
 
                 let pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
                 let old_pen = SelectObject(hdc, pen.into());
-                if old_pen.0 == 0 {
+                if old_pen.0.is_null() {
                     println!("SelectObject failed: {:?}", GetLastError());
-                    DeleteObject(pen.into());
+                    let _ = DeleteObject(pen.into());
                     return;
                 }
 
                 // draw vertical lines
                 for x in 0..=self.grid_size.0 {
                     let pos = rect.left + (x as i32 * cell_w);
-                    MoveToEx(hdc, pos, rect.top, None);
-                    LineTo(hdc, pos, rect.bottom);
+                    let _ = MoveToEx(hdc, pos, rect.top, None);
+                    let _ = LineTo(hdc, pos, rect.bottom);
                 }
 
                 // draw horizontal lines
                 for y in 0..=self.grid_size.1 {
                     let pos = rect.top + (y as i32 * cell_h);
-                    MoveToEx(hdc, rect.left, pos, None);
-                    LineTo(hdc, rect.right, pos);
+                    let _ = MoveToEx(hdc, rect.left, pos, None);
+                    let _ = LineTo(hdc, rect.right, pos);
                 }
 
                 // draw labels
@@ -157,16 +171,16 @@ impl JumpOverlay {
                     for col in 0..self.grid_size.0 {
                         let col_code = Self::index_to_code(col as usize, col_len);
                         let code = format!("{}{}", row_code, col_code);
-                        let mut text: Vec<u16> =
+                        let text: Vec<u16> =
                             code.encode_utf16().chain(std::iter::once(0)).collect();
                         let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
                         let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
-                        TextOutW(hdc, x, y, PCWSTR(text.as_ptr()), (text.len() - 1) as i32);
+                        let _ = TextOutW(hdc, x, y, &text[..text.len() - 1]);
                     }
                 }
 
                 SelectObject(hdc, old_pen);
-                DeleteObject(pen.into());
+                let _ = DeleteObject(pen.into());
             }
         }
     }
@@ -220,17 +234,7 @@ impl JumpOverlay {
         if let Some(ch) = key.to_char() {
             self.input.push(ch);
             println!("JumpOverlay sequence: {}", self.input);
-            if let Some(hwnd) = self.hwnd {
-                unsafe {
-                    let hdc = GetDC(Some(hwnd));
-                    if hdc.0 == 0 {
-                        println!("GetDC failed: {:?}", GetLastError());
-                    } else {
-                        self.draw(hdc);
-                        ReleaseDC(Some(hwnd), hdc);
-                    }
-                }
-            }
+            self.request_repaint();
             if self.input.len() >= self.expected_len() {
                 let row_len = Self::letters_needed(self.grid_size.1);
                 let row_code: Vec<char> = self.input.chars().take(row_len).collect();
@@ -261,8 +265,14 @@ extern "system" fn jump_window_proc(
         WM_PAINT => {
             let ps = &mut PAINTSTRUCT::default();
             let hdc = unsafe { BeginPaint(hwnd, ps) };
-            JUMP_OVERLAY.with(|overlay| overlay.borrow().draw(hdc));
-            unsafe { EndPaint(hwnd, ps) };
+            JUMP_OVERLAY.with(|overlay| {
+                let mut ov = overlay.borrow_mut();
+                ov.draw(hdc);
+                ov.repaint_requested = false;
+            });
+            unsafe {
+                let _ = EndPaint(hwnd, ps);
+            };
             LRESULT(0)
         }
         WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
@@ -281,4 +291,37 @@ pub fn show_jump_overlay(config: &Config) {
 
 pub fn hide_jump_overlay() {
     JUMP_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JumpOverlay;
+    use crate::keyboard::VirtualKey;
+
+    #[test]
+    fn hiding_clears_input_state() {
+        let mut overlay = JumpOverlay::new();
+        overlay.input.push('A');
+        overlay.visible = true;
+        overlay.hide();
+        assert!(overlay.input.is_empty());
+        assert!(!overlay.visible);
+    }
+
+    #[test]
+    fn key_input_requests_repaint() {
+        let mut overlay = JumpOverlay::new();
+        assert!(!overlay.repaint_requested);
+        let _ = overlay.handle_key(VirtualKey::A);
+        assert!(overlay.repaint_requested);
+    }
+
+    #[test]
+    fn key_handling_does_not_require_window_for_repaint_state() {
+        let mut overlay = JumpOverlay::new();
+        overlay.hwnd = None;
+        let _ = overlay.handle_key(VirtualKey::B);
+        assert_eq!(overlay.input, "B");
+        assert!(overlay.repaint_requested);
+    }
 }

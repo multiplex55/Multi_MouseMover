@@ -278,6 +278,7 @@ impl VirtualKey {
     }
 
     /// Convert a `VirtualKey` to its virtual key code
+    #[allow(dead_code)]
     pub fn to_vk_code(self) -> u32 {
         match self {
             // Function keys
