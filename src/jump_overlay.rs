@@ -8,10 +8,9 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::{
     jump_grid::{index_to_code, letters_needed, target_position},
-    jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage},
-    keyboard::VirtualKey,
+    jump_session::JumpRegion,
+    jump_view::JumpOverlayView,
     overlay::RGB,
-    Config,
 };
 
 thread_local! {
@@ -31,6 +30,10 @@ struct ScreenRect {
     top: i32,
     width: i32,
     height: i32,
+}
+
+pub fn virtual_screen_region() -> JumpRegion {
+    ScreenRect::from_virtual_screen().into()
 }
 
 impl ScreenRect {
@@ -109,20 +112,10 @@ fn format_jump_indicator(input: &str) -> String {
     format!("Jump: {}_", input)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JumpKeyResult {
-    Ignored,
-    Consumed,
-    Cancelled,
-    Completed { x: i32, y: i32 },
-    Invalid,
-}
-
 pub struct JumpOverlay {
     hwnd: Option<HWND>,
-    grid_size: (u32, u32),
     visible: bool,
-    session: Option<JumpSession>,
+    view: Option<JumpOverlayView>,
     repaint_requested: bool,
 }
 
@@ -130,9 +123,8 @@ impl JumpOverlay {
     pub fn new() -> Self {
         Self {
             hwnd: None,
-            grid_size: (10, 10),
             visible: false,
-            session: None,
+            view: None,
             repaint_requested: false,
         }
     }
@@ -193,14 +185,9 @@ impl JumpOverlay {
         }
     }
 
-    pub fn initialize(&mut self, config: &Config) {
-        self.grid_size = (config.jump.coarse.width, config.jump.coarse.height);
+    pub fn initialize(&mut self, view: JumpOverlayView) {
         self.create_window();
-        let screen_rect = ScreenRect::from_virtual_screen();
-        self.session = JumpSession::new(screen_rect.into(), jump_stages(config));
-        if let Some(session) = &self.session {
-            self.grid_size = session.current_grid();
-        }
+        self.view = Some(view);
         self.repaint_requested = false;
     }
 
@@ -215,7 +202,7 @@ impl JumpOverlay {
     }
 
     pub fn hide(&mut self) {
-        self.session = None;
+        self.view = None;
         if let Some(h) = self.hwnd {
             unsafe {
                 let _ = ShowWindow(h, SW_HIDE);
@@ -226,7 +213,11 @@ impl JumpOverlay {
 
     fn draw(&self, hdc: HDC) {
         if let Some(hwnd) = self.hwnd {
-            if self.grid_size.0 == 0 || self.grid_size.1 == 0 {
+            let Some(view) = &self.view else {
+                return;
+            };
+            let grid_size = view.grid_size;
+            if grid_size.0 == 0 || grid_size.1 == 0 {
                 return;
             }
             unsafe {
@@ -234,13 +225,20 @@ impl JumpOverlay {
                 if GetClientRect(hwnd, &mut rect).is_err() {
                     return;
                 }
-                let width = rect.right - rect.left;
-                let height = rect.bottom - rect.top;
-                let cell_w = width / self.grid_size.0 as i32;
-                let cell_h = height / self.grid_size.1 as i32;
-
                 let bg_brush = CreateSolidBrush(overlay_colorkey());
                 let _ = FillRect(hdc, &rect, bg_brush);
+
+                let virtual_screen = ScreenRect::from_virtual_screen();
+                let grid_rect = RECT {
+                    left: view.region.left - virtual_screen.left,
+                    top: view.region.top - virtual_screen.top,
+                    right: view.region.left - virtual_screen.left + view.region.width,
+                    bottom: view.region.top - virtual_screen.top + view.region.height,
+                };
+                let width = grid_rect.right - grid_rect.left;
+                let height = grid_rect.bottom - grid_rect.top;
+                let cell_w = width / grid_size.0 as i32;
+                let cell_h = height / grid_size.1 as i32;
 
                 let old_bk_mode = SetBkMode(hdc, TRANSPARENT);
                 let old_text_color = SetTextColor(hdc, label_color());
@@ -248,36 +246,36 @@ impl JumpOverlay {
                 let pen = CreatePen(PS_SOLID, 1, grid_color());
                 let old_pen = SelectObject(hdc, pen.into());
 
-                for x in 0..=self.grid_size.0 {
-                    let pos = rect.left + (x as i32 * cell_w);
-                    let _ = MoveToEx(hdc, pos, rect.top, None);
-                    let _ = LineTo(hdc, pos, rect.bottom);
+                for x in 0..=grid_size.0 {
+                    let pos = grid_rect.left + (x as i32 * cell_w);
+                    let _ = MoveToEx(hdc, pos, grid_rect.top, None);
+                    let _ = LineTo(hdc, pos, grid_rect.bottom);
                 }
-                for y in 0..=self.grid_size.1 {
-                    let pos = rect.top + (y as i32 * cell_h);
-                    let _ = MoveToEx(hdc, rect.left, pos, None);
-                    let _ = LineTo(hdc, rect.right, pos);
+                for y in 0..=grid_size.1 {
+                    let pos = grid_rect.top + (y as i32 * cell_h);
+                    let _ = MoveToEx(hdc, grid_rect.left, pos, None);
+                    let _ = LineTo(hdc, grid_rect.right, pos);
                 }
 
-                let row_len = letters_needed(self.grid_size.1);
-                let col_len = letters_needed(self.grid_size.0);
-                for row in 0..self.grid_size.1 {
+                let row_len = letters_needed(grid_size.1);
+                let col_len = letters_needed(grid_size.0);
+                for row in 0..grid_size.1 {
                     let row_code = index_to_code(row as usize, row_len);
-                    for col in 0..self.grid_size.0 {
+                    for col in 0..grid_size.0 {
                         let col_code = index_to_code(col as usize, col_len);
                         let code = format!("{}{}", row_code, col_code);
                         let text: Vec<u16> = code.encode_utf16().collect();
-                        let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
-                        let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
+                        let x = grid_rect.left + col as i32 * cell_w + cell_w / 2 - 8;
+                        let y = grid_rect.top + row as i32 * cell_h + cell_h / 2 - 8;
                         let _ = TextOutW(hdc, x, y, &text);
                     }
                 }
 
                 let _ = SetTextColor(hdc, input_color());
-                let indicator = format_jump_indicator(self.input());
+                let indicator = format_jump_indicator(&view.input);
                 let indicator_utf16: Vec<u16> = indicator.encode_utf16().collect();
-                let indicator_x = rect.left + (width / 2) - 60;
-                let indicator_y = rect.top + 16;
+                let indicator_x = grid_rect.left + (width / 2) - 60;
+                let indicator_y = grid_rect.top + 16;
                 let _ = TextOutW(hdc, indicator_x, indicator_y, &indicator_utf16);
 
                 let _ = SetTextColor(hdc, old_text_color);
@@ -289,43 +287,9 @@ impl JumpOverlay {
         }
     }
 
-    fn input(&self) -> &str {
-        self.session
-            .as_ref()
-            .map(|session| session.input.as_str())
-            .unwrap_or("")
-    }
-
-    pub fn handle_key(&mut self, key: VirtualKey, is_keydown: bool) -> JumpKeyResult {
-        let Some(session) = &mut self.session else {
-            return JumpKeyResult::Ignored;
-        };
-        let Some(update) = session.handle_key(key, is_keydown) else {
-            return JumpKeyResult::Ignored;
-        };
-
-        match update {
-            JumpSessionUpdate::Consumed => {
-                self.request_repaint();
-                JumpKeyResult::Consumed
-            }
-            JumpSessionUpdate::Invalid => {
-                self.request_repaint();
-                JumpKeyResult::Invalid
-            }
-            JumpSessionUpdate::Cancelled => JumpKeyResult::Cancelled,
-            JumpSessionUpdate::StageAdvanced { .. } => {
-                if let Some(session) = &self.session {
-                    self.grid_size = session.current_grid();
-                }
-                self.request_repaint();
-                JumpKeyResult::Consumed
-            }
-            JumpSessionUpdate::Completed { x, y, .. } => {
-                self.hide();
-                JumpKeyResult::Completed { x, y }
-            }
-        }
+    pub fn update_view(&mut self, view: Option<JumpOverlayView>) {
+        self.view = view;
+        self.request_repaint();
     }
 }
 
@@ -338,26 +302,6 @@ impl From<ScreenRect> for JumpRegion {
             height: rect.height,
         }
     }
-}
-
-fn jump_stages(config: &Config) -> Vec<JumpStage> {
-    let mut stages = vec![JumpStage::new(
-        config.jump.coarse.width,
-        config.jump.coarse.height,
-    )];
-    if config.jump.fine.enabled {
-        stages.push(JumpStage::new(
-            config.jump.fine.width,
-            config.jump.fine.height,
-        ));
-    }
-    if config.jump.precise.enabled {
-        stages.push(JumpStage::new(
-            config.jump.precise.width,
-            config.jump.precise.height,
-        ));
-    }
-    stages
 }
 
 extern "system" fn jump_window_proc(
@@ -386,12 +330,16 @@ extern "system" fn jump_window_proc(
     }
 }
 
-pub fn show_jump_overlay(config: &Config) {
+pub fn show_jump_overlay(view: JumpOverlayView) {
     JUMP_OVERLAY.with(|overlay| {
         let mut ov = overlay.borrow_mut();
-        ov.initialize(config);
+        ov.initialize(view);
         ov.show();
     });
+}
+
+pub fn update_jump_overlay(view: Option<JumpOverlayView>) {
+    JUMP_OVERLAY.with(|overlay| overlay.borrow_mut().update_view(view));
 }
 
 pub fn hide_jump_overlay() {
@@ -402,10 +350,8 @@ pub fn hide_jump_overlay() {
 mod tests {
     use super::{
         calculate_target_center, format_jump_indicator, overlay_colorkey, overlay_ex_style,
-        transparency_mode, JumpKeyResult, JumpOverlay, ScreenRect, TransparencyMode, OVERLAY_ALPHA,
+        transparency_mode, ScreenRect, TransparencyMode, OVERLAY_ALPHA,
     };
-    use crate::jump_session::{JumpRegion, JumpSession, JumpStage};
-    use crate::keyboard::VirtualKey;
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
 
     #[test]
@@ -430,43 +376,6 @@ mod tests {
                 alpha: OVERLAY_ALPHA
             }
         );
-    }
-
-    #[test]
-    fn key_up_is_ignored() {
-        let mut overlay = JumpOverlay::new();
-        assert_eq!(
-            overlay.handle_key(VirtualKey::A, false),
-            JumpKeyResult::Ignored
-        );
-        assert_eq!(overlay.input(), "");
-    }
-
-    #[test]
-    fn invalid_code_clears_input_and_keeps_session_active() {
-        let mut overlay = JumpOverlay::new();
-        overlay.grid_size = (10, 10);
-        overlay.session = JumpSession::new(
-            JumpRegion {
-                left: 0,
-                top: 0,
-                width: 100,
-                height: 100,
-            },
-            vec![JumpStage::new(10, 10)],
-        );
-        overlay.visible = true;
-
-        assert_eq!(
-            overlay.handle_key(VirtualKey::K, true),
-            JumpKeyResult::Consumed
-        );
-        assert_eq!(
-            overlay.handle_key(VirtualKey::A, true),
-            JumpKeyResult::Invalid
-        );
-        assert_eq!(overlay.input(), "");
-        assert!(overlay.visible);
     }
 
     #[test]

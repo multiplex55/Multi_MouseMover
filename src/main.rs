@@ -4,6 +4,7 @@ mod app_state;
 mod jump_grid;
 mod jump_overlay;
 mod jump_session;
+mod jump_view;
 mod key_chord;
 mod keyboard;
 mod overlay;
@@ -11,7 +12,10 @@ mod overlay;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, KeyEvent};
-use jump_overlay::{hide_jump_overlay, show_jump_overlay, JumpKeyResult, JUMP_OVERLAY};
+use jump_overlay::{
+    hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
+};
+use jump_session::JumpSessionUpdate;
 use key_chord::{KeyChord, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
@@ -628,8 +632,18 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::EnterJumpMode { activation_key } => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
-            show_jump_overlay(&config);
-            APP_STATE.write().unwrap().enter_jump_mode(activation_key);
+            let region = virtual_screen_region();
+            let view = {
+                let mut app_state = APP_STATE.write().unwrap();
+                app_state
+                    .enter_jump_mode(&config, region, activation_key)
+                    .then(|| app_state.jump_view())
+                    .flatten()
+            };
+
+            if let Some(view) = view {
+                show_jump_overlay(view);
+            }
         }
         AppCommand::KeyAction { action, is_down } => {
             let mut action_handler = ACTION_HANDLER.write().unwrap();
@@ -643,16 +657,20 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::JumpInput(event) => {
-            let jump_result = JUMP_OVERLAY
-                .with(|overlay| overlay.borrow_mut().handle_key(event.key, event.is_down));
+            let jump_result = APP_STATE.write().unwrap().handle_jump_input(event);
 
             match jump_result {
-                JumpKeyResult::Ignored | JumpKeyResult::Consumed | JumpKeyResult::Invalid => {}
-                JumpKeyResult::Cancelled => {
+                None | Some(JumpSessionUpdate::Consumed) | Some(JumpSessionUpdate::Invalid) => {
+                    update_jump_overlay(APP_STATE.read().unwrap().jump_view());
+                }
+                Some(JumpSessionUpdate::StageAdvanced { .. }) => {
+                    update_jump_overlay(APP_STATE.read().unwrap().jump_view());
+                }
+                Some(JumpSessionUpdate::Cancelled) => {
                     hide_jump_overlay();
                     APP_STATE.write().unwrap().exit_jump_mode();
                 }
-                JumpKeyResult::Completed { x, y } => {
+                Some(JumpSessionUpdate::Completed { x, y, .. }) => {
                     ACTION_HANDLER
                         .write()
                         .unwrap()

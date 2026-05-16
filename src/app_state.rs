@@ -1,6 +1,9 @@
 use crate::action::Action;
+use crate::jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
+use crate::jump_view::{JumpOverlayView, JumpStageMetadata};
 use crate::key_chord::RuntimeSystemBindings;
 use crate::keyboard::VirtualKey;
+use crate::Config;
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,12 +45,21 @@ pub struct AppState {
     commands: VecDeque<AppCommand>,
     bound_keys: HashSet<VirtualKey>,
     active_keys: HashSet<VirtualKey>,
-    jump_active: bool,
-    activation_key: Option<VirtualKey>,
-    activation_key_released: bool,
+    jump: JumpState,
     active_mode: bool,
     preserve_global_shortcuts: bool,
     system_bindings: RuntimeSystemBindings,
+}
+
+#[derive(Debug)]
+pub enum JumpState {
+    Inactive,
+    Active {
+        session: JumpSession,
+        activation_key: VirtualKey,
+        activation_key_released: bool,
+        stage_metadata: Vec<JumpStageMetadata>,
+    },
 }
 
 impl Default for AppState {
@@ -57,9 +69,7 @@ impl Default for AppState {
             commands: VecDeque::new(),
             bound_keys: HashSet::new(),
             active_keys: HashSet::new(),
-            jump_active: false,
-            activation_key: None,
-            activation_key_released: true,
+            jump: JumpState::Inactive,
             active_mode: true,
             preserve_global_shortcuts: true,
             system_bindings: RuntimeSystemBindings::default(),
@@ -126,20 +136,80 @@ impl AppState {
         self.is_toggle_active_key_down_event(event) || self.is_exit_key_down_event(event)
     }
 
-    pub fn enter_jump_mode(&mut self, activation_key: VirtualKey) {
-        self.jump_active = true;
-        self.activation_key = Some(activation_key);
-        self.activation_key_released = false;
+    pub fn is_jump_active(&self) -> bool {
+        matches!(self.jump, JumpState::Active { .. })
+    }
+
+    pub fn enter_jump_mode(
+        &mut self,
+        config: &Config,
+        virtual_screen_region: JumpRegion,
+        activation_key: VirtualKey,
+    ) -> bool {
+        let stage_metadata = jump_stage_metadata(config);
+        let stages = stage_metadata
+            .iter()
+            .map(|stage| JumpStage::new(stage.grid_size.0, stage.grid_size.1))
+            .collect();
+
+        let Some(session) = JumpSession::new(virtual_screen_region, stages) else {
+            self.exit_jump_mode();
+            return false;
+        };
+
+        self.jump = JumpState::Active {
+            session,
+            activation_key,
+            activation_key_released: false,
+            stage_metadata,
+        };
+        true
+    }
+
+    pub fn handle_jump_input(&mut self, event: KeyEvent) -> Option<JumpSessionUpdate> {
+        if self.is_activation_key_event(&event) {
+            return Some(JumpSessionUpdate::Consumed);
+        }
+
+        let JumpState::Active { session, .. } = &mut self.jump else {
+            return None;
+        };
+
+        session.handle_key(event.key, event.is_down)
+    }
+
+    pub fn jump_view(&self) -> Option<JumpOverlayView> {
+        let JumpState::Active {
+            session,
+            stage_metadata,
+            ..
+        } = &self.jump
+        else {
+            return None;
+        };
+
+        let preview_margin_percent = stage_metadata
+            .get(session.stage_index)
+            .map(|stage| stage.preview_margin_percent)
+            .unwrap_or(0);
+
+        Some(JumpOverlayView {
+            stage_index: session.stage_index,
+            stage_count: session.stages.len(),
+            stages: stage_metadata.clone(),
+            region: session.current_region,
+            grid_size: session.current_grid(),
+            input: session.input.clone(),
+            preview_margin_percent,
+        })
     }
 
     pub fn exit_jump_mode(&mut self) {
-        self.jump_active = false;
-        self.activation_key = None;
-        self.activation_key_released = true;
+        self.jump = JumpState::Inactive;
     }
 
     pub fn should_swallow_key(&self, event: &KeyEvent) -> bool {
-        if self.jump_active {
+        if self.is_jump_active() {
             return true;
         }
 
@@ -155,7 +225,7 @@ impl AppState {
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, action: Option<Action>) {
-        if self.jump_active {
+        if self.is_jump_active() {
             if self.is_activation_key_event(&event) {
                 return;
             }
@@ -218,16 +288,25 @@ impl AppState {
     }
 
     fn is_activation_key_event(&mut self, event: &KeyEvent) -> bool {
-        if Some(event.key) != self.activation_key {
+        let JumpState::Active {
+            activation_key,
+            activation_key_released,
+            ..
+        } = &mut self.jump
+        else {
+            return false;
+        };
+
+        if event.key != *activation_key {
             return false;
         }
 
-        if event.is_down && !self.activation_key_released {
+        if event.is_down && !*activation_key_released {
             return true;
         }
 
         if !event.is_down {
-            self.activation_key_released = true;
+            *activation_key_released = true;
             return true;
         }
 
@@ -261,10 +340,50 @@ impl AppState {
     }
 }
 
+fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
+    let mut stages = vec![JumpStageMetadata {
+        index: 0,
+        grid_size: (config.jump.coarse.width, config.jump.coarse.height),
+        preview_margin_percent: config.jump.coarse.preview_margin_percent,
+    }];
+
+    if config.jump.fine.enabled {
+        stages.push(JumpStageMetadata {
+            index: stages.len(),
+            grid_size: (config.jump.fine.width, config.jump.fine.height),
+            preview_margin_percent: config.jump.fine.preview_margin_percent,
+        });
+    }
+
+    if config.jump.precise.enabled {
+        stages.push(JumpStageMetadata {
+            index: stages.len(),
+            grid_size: (config.jump.precise.width, config.jump.precise.height),
+            preview_margin_percent: config.jump.precise.preview_margin_percent,
+        });
+    }
+
+    stages
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::key_chord::KeyChord;
+
+    fn jump_region() -> JumpRegion {
+        JumpRegion {
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+        }
+    }
+
+    fn enter_jump_mode(state: &mut AppState, activation_key: VirtualKey) {
+        let config = Config::default().normalize().unwrap();
+        assert!(state.enter_jump_mode(&config, jump_region(), activation_key));
+    }
 
     fn state_with_bound_key(key: VirtualKey) -> AppState {
         let mut state = AppState::default();
@@ -304,7 +423,7 @@ mod tests {
     #[test]
     fn jump_input_swallowed() {
         let mut state = AppState::default();
-        state.enter_jump_mode(VirtualKey::J);
+        enter_jump_mode(&mut state, VirtualKey::J);
 
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::A, true)));
     }
@@ -312,7 +431,7 @@ mod tests {
     #[test]
     fn global_shortcuts_swallowed_while_jump_mode_is_active() {
         let mut state = AppState::default();
-        state.enter_jump_mode(VirtualKey::J);
+        enter_jump_mode(&mut state, VirtualKey::J);
         let mut ctrl_w = KeyEvent::new(VirtualKey::W, true);
         ctrl_w.ctrl_down = true;
 
@@ -434,7 +553,7 @@ mod tests {
     #[test]
     fn jump_mode_routes_escape_to_jump_input_before_exit_binding() {
         let mut state = AppState::default();
-        state.enter_jump_mode(VirtualKey::J);
+        enter_jump_mode(&mut state, VirtualKey::J);
         let event = KeyEvent::new(VirtualKey::Escape, true);
 
         state.route_key_event(event, None);
@@ -443,6 +562,54 @@ mod tests {
             collect_commands(&mut state),
             vec![AppCommand::JumpInput(event)]
         );
+    }
+
+    #[test]
+    fn jump_input_escape_cancels_active_jump_session() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::J);
+
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::Escape, true)),
+            Some(JumpSessionUpdate::Cancelled)
+        );
+    }
+
+    #[test]
+    fn jump_activation_key_is_gated_until_release() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::J);
+
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true)),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(state.jump_view().unwrap().input, "");
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, false)),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true)),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(state.jump_view().unwrap().input, "J");
+    }
+
+    #[test]
+    fn jump_view_exposes_stage_region_input_and_preview_settings() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::J);
+
+        let view = state.jump_view().unwrap();
+
+        assert_eq!(view.stage_index, 0);
+        assert_eq!(view.stage_count, 1);
+        assert_eq!(view.region, jump_region());
+        assert_eq!(view.grid_size, (10, 10));
+        assert_eq!(view.input, "");
+        assert_eq!(view.preview_margin_percent, 0);
+        assert_eq!(view.stages.len(), 1);
     }
 
     #[test]
@@ -501,7 +668,7 @@ mod tests {
         state.route_key_event(KeyEvent::new(VirtualKey::J, true), Some(Action::JumpMode));
 
         assert_eq!(collect_commands(&mut state), Vec::new());
-        assert!(!state.jump_active);
+        assert!(!state.is_jump_active());
     }
 
     #[test]
