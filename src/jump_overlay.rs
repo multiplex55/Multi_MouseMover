@@ -110,8 +110,8 @@ impl JumpOverlay {
             }
             unsafe {
                 let mut rect = RECT::default();
-                if !GetClientRect(hwnd, &mut rect).as_bool() {
-                    println!("GetClientRect failed: {:?}", GetLastError());
+                if let Err(err) = GetClientRect(hwnd, &mut rect) {
+                    eprintln!("[Win32] GetClientRect failed: {:?}", err);
                     return;
                 }
                 let width = rect.right - rect.left;
@@ -122,7 +122,7 @@ impl JumpOverlay {
                 let pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
                 let old_pen = SelectObject(hdc, pen.into());
                 if old_pen.0 == 0 {
-                    println!("SelectObject failed: {:?}", GetLastError());
+                    eprintln!("[Win32] SelectObject failed: {:?}", GetLastError());
                     DeleteObject(pen.into());
                     return;
                 }
@@ -224,7 +224,7 @@ impl JumpOverlay {
                 unsafe {
                     let hdc = GetDC(Some(hwnd));
                     if hdc.0 == 0 {
-                        println!("GetDC failed: {:?}", GetLastError());
+                        eprintln!("[Win32] GetDC failed: {:?}", GetLastError());
                     } else {
                         self.draw(hdc);
                         ReleaseDC(Some(hwnd), hdc);
