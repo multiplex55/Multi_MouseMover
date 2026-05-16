@@ -6,7 +6,7 @@ mod overlay;
 
 use action::*;
 use action_handler::*;
-use jump_overlay::{hide_jump_overlay, JUMP_OVERLAY};
+use jump_overlay::{hide_jump_overlay, JumpKeyResult, JUMP_OVERLAY};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::OVERLAY;
@@ -197,17 +197,38 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             let is_keydown = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
 
             if action_handler.mouse_master.jump_active {
-                if virtual_key == VirtualKey::Escape && is_keydown {
-                    hide_jump_overlay();
-                    action_handler.mouse_master.jump_active = false;
-                    return LRESULT(1);
+                if let Some(activation_key) = action_handler.mouse_master.activation_key {
+                    if virtual_key == activation_key {
+                        if is_keydown && !action_handler.mouse_master.activation_key_released {
+                            return LRESULT(1);
+                        }
+                        if !is_keydown {
+                            action_handler.mouse_master.activation_key_released = true;
+                            return LRESULT(1);
+                        }
+                    }
                 }
 
-                if let Some((x, y)) =
-                    JUMP_OVERLAY.with(|overlay| overlay.borrow_mut().handle_key(virtual_key))
-                {
-                    action_handler.mouse_master.move_mouse_to(x, y);
-                    action_handler.mouse_master.jump_active = false;
+                let jump_result = JUMP_OVERLAY
+                    .with(|overlay| overlay.borrow_mut().handle_key(virtual_key, is_keydown));
+
+                match jump_result {
+                    JumpKeyResult::Ignored | JumpKeyResult::Consumed => {}
+                    JumpKeyResult::Cancelled => {
+                        hide_jump_overlay();
+                        action_handler.mouse_master.jump_active = false;
+                        action_handler.mouse_master.activation_key = None;
+                        action_handler.mouse_master.activation_key_released = true;
+                    }
+                    JumpKeyResult::Completed { x, y } => {
+                        action_handler.mouse_master.move_mouse_to(x, y);
+                        action_handler.mouse_master.jump_active = false;
+                        action_handler.mouse_master.activation_key = None;
+                        action_handler.mouse_master.activation_key_released = true;
+                    }
+                    JumpKeyResult::Invalid => {
+                        action_handler.mouse_master.jump_active = true;
+                    }
                 }
                 return LRESULT(1);
             }
@@ -240,6 +261,22 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             if action_handler.mouse_master.current_mode == ModeState::Idle {
                 println!("[DEBUG] Idle Mode active: Ignoring key event...");
                 return CallNextHookEx(None, code, w_param, l_param);
+            }
+
+            if is_keydown {
+                if let Some(action) = key_actions.get_action(virtual_key) {
+                    if *action == Action::JumpMode {
+                        action_handler.process_active_keys(*action, true);
+                        if action_handler.mouse_master.jump_active {
+                            action_handler.mouse_master.activation_key = Some(virtual_key);
+                            action_handler.mouse_master.activation_key_released = false;
+                        } else {
+                            action_handler.mouse_master.activation_key = None;
+                            action_handler.mouse_master.activation_key_released = true;
+                        }
+                        return LRESULT(1);
+                    }
+                }
             }
 
             // ✅ Normal key processing
