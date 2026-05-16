@@ -31,6 +31,9 @@ const DEFAULT_POLLING_RATE_MS: u64 = 8;
 const MAX_MESSAGES_PER_TICK: usize = 64;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const DEBUG_HEARTBEAT_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
+const MIN_JUMP_STAGE_SIZE: u32 = 1;
+const MAX_JUMP_STAGE_SIZE: u32 = 26;
+const MAX_PREVIEW_MARGIN_PERCENT: u8 = 50;
 
 static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_DECODED: AtomicU64 = AtomicU64::new(0);
@@ -150,6 +153,7 @@ struct Config {
     system_bindings: SystemBindings,
     polling_rate: u64,
     grid_size: GridSize,
+    jump: JumpConfig,
     starting_speed: i32,    // Initial speed in pixels
     acceleration: i32,      // Increment value for acceleration
     acceleration_rate: u32, // Polling cycles before applying acceleration
@@ -163,6 +167,7 @@ impl Default for Config {
             system_bindings: SystemBindings::default(),
             polling_rate: DEFAULT_POLLING_RATE_MS,
             grid_size: GridSize::default(),
+            jump: JumpConfig::default(),
             starting_speed: 1,
             acceleration: 2,
             acceleration_rate: 1,
@@ -203,13 +208,127 @@ impl Default for GridSize {
     }
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum JumpMode {
+    Single,
+    Precision,
+}
+
+impl Default for JumpMode {
+    fn default() -> Self {
+        Self::Single
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+struct JumpConfig {
+    mode: JumpMode,
+    coarse: JumpStageConfig,
+    fine: JumpStageConfig,
+    precise: JumpStageConfig,
+}
+
+impl Default for JumpConfig {
+    fn default() -> Self {
+        Self {
+            mode: JumpMode::Single,
+            coarse: JumpStageConfig::missing_coarse(),
+            fine: JumpStageConfig {
+                enabled: false,
+                width: 5,
+                height: 5,
+                preview_margin_percent: 10,
+            },
+            precise: JumpStageConfig {
+                enabled: false,
+                width: 3,
+                height: 3,
+                preview_margin_percent: 5,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+struct JumpStageConfig {
+    enabled: bool,
+    width: u32,
+    height: u32,
+    preview_margin_percent: u8,
+}
+
+impl JumpStageConfig {
+    fn missing_coarse() -> Self {
+        Self {
+            enabled: true,
+            width: 0,
+            height: 0,
+            preview_margin_percent: 0,
+        }
+    }
+}
+
+impl Default for JumpStageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            width: 1,
+            height: 1,
+            preview_margin_percent: 0,
+        }
+    }
+}
+
 impl Config {
     fn normalize(mut self) -> Result<Self, Box<dyn Error>> {
         if self.polling_rate == 0 {
             self.polling_rate = DEFAULT_POLLING_RATE_MS;
         }
+        self.normalize_jump_config();
         self.runtime_system_bindings()?;
         Ok(self)
+    }
+
+    fn normalize_jump_config(&mut self) {
+        if self.jump.coarse.width == 0 && self.jump.coarse.height == 0 {
+            warn_config_normalized(&format!(
+                "jump.coarse missing; deriving coarse size from legacy grid_size {}x{}",
+                self.grid_size.width, self.grid_size.height
+            ));
+            self.jump.coarse.width = self.grid_size.width;
+            self.jump.coarse.height = self.grid_size.height;
+        }
+
+        normalize_jump_stage("jump.coarse", &mut self.jump.coarse);
+        normalize_jump_stage("jump.fine", &mut self.jump.fine);
+        normalize_jump_stage("jump.precise", &mut self.jump.precise);
+
+        match self.jump.mode {
+            JumpMode::Single => {
+                if self.jump.fine.enabled {
+                    warn_config_normalized("jump.mode=single; disabling jump.fine");
+                }
+                if self.jump.precise.enabled {
+                    warn_config_normalized("jump.mode=single; disabling jump.precise");
+                }
+                self.jump.fine.enabled = false;
+                self.jump.precise.enabled = false;
+            }
+            JumpMode::Precision => {
+                if !self.jump.fine.enabled && self.jump.precise.enabled {
+                    warn_config_normalized("jump.precise disabled because jump.fine is disabled");
+                    self.jump.precise.enabled = false;
+                }
+            }
+        }
+
+        self.grid_size = GridSize {
+            width: self.jump.coarse.width,
+            height: self.jump.coarse.height,
+        };
     }
 
     fn load_from_file(path: &str) -> Result<Self, Box<dyn Error>> {
@@ -309,6 +428,40 @@ impl Config {
             .set_system_bindings(system_bindings);
 
         Ok(())
+    }
+}
+
+fn warn_config_normalized(message: &str) {
+    eprintln!("[config warning] {message}");
+}
+
+fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
+    stage.width = normalize_jump_stage_size(name, "width", stage.width);
+    stage.height = normalize_jump_stage_size(name, "height", stage.height);
+    if stage.preview_margin_percent > MAX_PREVIEW_MARGIN_PERCENT {
+        warn_config_normalized(&format!(
+            "{name}.preview_margin_percent={} is above {}; clamping to {}",
+            stage.preview_margin_percent, MAX_PREVIEW_MARGIN_PERCENT, MAX_PREVIEW_MARGIN_PERCENT
+        ));
+        stage.preview_margin_percent = MAX_PREVIEW_MARGIN_PERCENT;
+    }
+}
+
+fn normalize_jump_stage_size(name: &str, field: &str, value: u32) -> u32 {
+    if value < MIN_JUMP_STAGE_SIZE {
+        warn_config_normalized(&format!(
+            "{name}.{field}={value} is below {}; clamping to {}",
+            MIN_JUMP_STAGE_SIZE, MIN_JUMP_STAGE_SIZE
+        ));
+        MIN_JUMP_STAGE_SIZE
+    } else if value > MAX_JUMP_STAGE_SIZE {
+        warn_config_normalized(&format!(
+            "{name}.{field}={value} is above {}; clamping to {}",
+            MAX_JUMP_STAGE_SIZE, MAX_JUMP_STAGE_SIZE
+        ));
+        MAX_JUMP_STAGE_SIZE
+    } else {
+        value
     }
 }
 
@@ -699,6 +852,9 @@ mod tests {
         assert_eq!(config.polling_rate, defaults.polling_rate);
         assert_eq!(config.grid_size.width, defaults.grid_size.width);
         assert_eq!(config.grid_size.height, defaults.grid_size.height);
+        assert_eq!(config.jump.mode, defaults.jump.mode);
+        assert_eq!(config.jump.coarse.width, defaults.grid_size.width);
+        assert_eq!(config.jump.coarse.height, defaults.grid_size.height);
         assert_eq!(config.starting_speed, defaults.starting_speed);
         assert_eq!(config.acceleration, defaults.acceleration);
         assert_eq!(config.acceleration_rate, defaults.acceleration_rate);
@@ -724,6 +880,119 @@ mod tests {
         let err = config.normalize().unwrap_err().to_string();
         assert!(err.contains("system_bindings.toggle_active"));
         assert!(err.contains("invalid key token"));
+    }
+
+    #[test]
+    fn missing_jump_coarse_uses_legacy_grid_size() {
+        let config = parse_config(
+            r#"
+            grid_size = { width = 12, height = 8 }
+
+            [jump]
+            mode = "precision"
+            "#,
+        );
+
+        assert_eq!(config.jump.coarse.width, 12);
+        assert_eq!(config.jump.coarse.height, 8);
+        assert_eq!(config.grid_size.width, 12);
+        assert_eq!(config.grid_size.height, 8);
+    }
+
+    #[test]
+    fn jump_coarse_overrides_legacy_grid_size_after_normalization() {
+        let config = parse_config(
+            r#"
+            grid_size = { width = 12, height = 8 }
+
+            [jump.coarse]
+            width = 9
+            height = 7
+            "#,
+        );
+
+        assert_eq!(config.jump.coarse.width, 9);
+        assert_eq!(config.jump.coarse.height, 7);
+        assert_eq!(config.grid_size.width, 9);
+        assert_eq!(config.grid_size.height, 7);
+    }
+
+    #[test]
+    fn single_jump_mode_disables_later_stages() {
+        let config = parse_config(
+            r#"
+            [jump]
+            mode = "single"
+
+            [jump.coarse]
+            width = 10
+            height = 10
+
+            [jump.fine]
+            enabled = true
+
+            [jump.precise]
+            enabled = true
+            "#,
+        );
+
+        assert!(!config.jump.fine.enabled);
+        assert!(!config.jump.precise.enabled);
+    }
+
+    #[test]
+    fn disabled_fine_disables_precise_in_precision_mode() {
+        let config = parse_config(
+            r#"
+            [jump]
+            mode = "precision"
+
+            [jump.coarse]
+            width = 10
+            height = 10
+
+            [jump.fine]
+            enabled = false
+
+            [jump.precise]
+            enabled = true
+            "#,
+        );
+
+        assert!(!config.jump.precise.enabled);
+    }
+
+    #[test]
+    fn jump_stage_sizes_and_preview_margin_are_clamped() {
+        let config = parse_config(
+            r#"
+            [jump.coarse]
+            width = 0
+            height = 27
+            preview_margin_percent = 99
+            "#,
+        );
+
+        assert_eq!(config.jump.coarse.width, 1);
+        assert_eq!(config.jump.coarse.height, 26);
+        assert_eq!(
+            config.jump.coarse.preview_margin_percent,
+            MAX_PREVIEW_MARGIN_PERCENT
+        );
+    }
+
+    #[test]
+    fn invalid_jump_mode_fails_deserialization() {
+        let err = toml::from_str::<Config>(
+            r#"
+            [jump]
+            mode = "turbo"
+            "#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("unknown variant"));
     }
 
     #[test]

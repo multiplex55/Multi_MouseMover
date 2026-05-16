@@ -22,6 +22,27 @@ polling_rate = 8
 # Grid size
 grid_size = {width = 10, height = 10}
 
+[jump]
+mode = "single"
+
+[jump.coarse]
+enabled = true
+width = 10
+height = 10
+preview_margin_percent = 0
+
+[jump.fine]
+enabled = false
+width = 5
+height = 5
+preview_margin_percent = 10
+
+[jump.precise]
+enabled = false
+width = 3
+height = 3
+preview_margin_percent = 5
+
 # Mouse movement parameters
 acceleration      = 2 # Pixels per acceleration step
 acceleration_rate = 1 # Polling cycles before applying acceleration

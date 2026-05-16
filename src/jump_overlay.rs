@@ -193,7 +193,7 @@ impl JumpOverlay {
     }
 
     pub fn initialize(&mut self, config: &Config) {
-        self.grid_size = (config.grid_size.width, config.grid_size.height);
+        self.grid_size = (config.jump.coarse.width, config.jump.coarse.height);
         self.create_window();
         self.input.clear();
         self.repaint_requested = false;

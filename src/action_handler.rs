@@ -187,7 +187,7 @@ impl MouseMaster {
     pub fn display_grid(&self) {
         println!(
             "Displaying grid of size {}x{}",
-            self.config.grid_size.width, self.config.grid_size.height
+            self.config.jump.coarse.width, self.config.jump.coarse.height
         );
         // FUTURE GROWTH
     }
