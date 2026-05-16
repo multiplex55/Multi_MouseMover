@@ -24,6 +24,10 @@ pub struct JumpOverlay {
     input: String,
 }
 
+// SAFETY: `JumpOverlay` is only accessed through `Mutex<JumpOverlay>` and all
+// Win32 interaction remains serialized through that lock; this marks the type
+// transferable for the global lazy static.
+unsafe impl Send for JumpOverlay {}
 
 impl JumpOverlay {
     pub fn new() -> Self {

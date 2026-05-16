@@ -18,11 +18,15 @@ use std::time::Duration;
 use std::{env, fs, error::Error, io};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// RAII guard for the installed keyboard hook.
 struct KeyboardHook(HHOOK);
+
+// SAFETY: `KeyboardHook` is only accessed through `Mutex<Option<KeyboardHook>>` and
+// represents an opaque Win32 hook handle. Transferring ownership of the wrapper
+// between threads does not permit concurrent use of the raw handle.
+unsafe impl Send for KeyboardHook {}
 
 impl Drop for KeyboardHook {
     fn drop(&mut self) {
