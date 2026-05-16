@@ -60,6 +60,13 @@ Example sequence:
 
 Adjust these values to suit your workflow.  After editing the file restart the application to apply changes.
 
+## Troubleshooting
+
+For input-pipeline regressions, run the diagnostic smoke test in
+[docs/smoke_test_input_pipeline.md](docs/smoke_test_input_pipeline.md). It uses the
+current `MULTI_MOUSEMOVER_DEBUG=1` flag and lists the expected startup, heartbeat,
+key routing, command, click, and exit log fragments.
+
 ## License
 
 This project is licensed under the terms of the MIT license.  See [LICENSE](LICENSE) for details.
