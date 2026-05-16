@@ -7,7 +7,7 @@ use std::time::Instant;
 use windows::core::{w, Error};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOSIZE, SWP_NOZORDER,
+    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
 };
 use windows::Win32::{
     Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*, UI::WindowsAndMessaging::*,
@@ -34,10 +34,40 @@ lazy_static::lazy_static! {
 pub struct OverlayWindow {
     hwnd: Arc<Mutex<Option<isize>>>, // ✅ Store HWND as `isize`
     is_green: bool,
+    last_cursor_position: Option<OverlayPosition>,
+    last_visual_state: Option<OverlayVisualState>,
+    #[cfg(debug_assertions)]
+    debug_counters: Arc<Mutex<OverlayDebugCounters>>,
 }
 
 fn overlay_ex_style() -> WINDOW_EX_STYLE {
     WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OverlayPosition {
+    x: i32,
+    y: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OverlayVisualState {
+    is_green: bool,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct OverlayDebugCounters {
+    set_window_pos_calls: u64,
+    repaint_requests: u64,
+}
+
+fn should_move(previous: Option<&OverlayPosition>, current: &OverlayPosition) -> bool {
+    previous != Some(current)
+}
+
+fn should_repaint(previous: Option<&OverlayVisualState>, current: &OverlayVisualState) -> bool {
+    previous != Some(current)
 }
 
 #[cfg(debug_assertions)]
@@ -130,6 +160,10 @@ impl OverlayWindow {
         let overlay = Self {
             hwnd: Arc::new(Mutex::new(hwnd_ptr)),
             is_green: false,
+            last_cursor_position: None,
+            last_visual_state: None,
+            #[cfg(debug_assertions)]
+            debug_counters: Arc::new(Mutex::new(OverlayDebugCounters::default())),
         };
 
         // ✅ **Add this line to start tracking the mouse!**
@@ -157,28 +191,37 @@ impl OverlayWindow {
             let hwnd = HWND(h as *mut _);
             let mut point = POINT::default();
 
-            // ✅ Move overlay to cursor position
             if unsafe { GetCursorPos(&mut point) }.is_ok() {
-                let x = point.x + 5; // Small offset
-                let y = point.y + 5;
+                let current_position = OverlayPosition {
+                    x: point.x + 5,
+                    y: point.y + 5,
+                };
+                let current_visual = OverlayVisualState {
+                    is_green: is_left_click_held,
+                };
 
-                unsafe {
-                    let _ = SetWindowPos(
-                        hwnd,
-                        Some(HWND_TOPMOST),
-                        x,
-                        y,
-                        5, // Small overlay width
-                        5, // Small overlay height
-                        SWP_NOZORDER | SWP_NOSIZE,
-                    );
+                if should_move(self.last_cursor_position.as_ref(), &current_position) {
+                    unsafe {
+                        let _ = SetWindowPos(
+                            hwnd,
+                            Some(HWND_TOPMOST),
+                            current_position.x,
+                            current_position.y,
+                            5, // Small overlay width
+                            5, // Small overlay height
+                            SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
+                        );
+                    }
+                    self.record_set_window_pos_call();
                 }
-            }
 
-            // ✅ Fix flickering: Only repaint if state actually changes
-            if self.is_green != is_left_click_held {
-                self.is_green = is_left_click_held; // Green when clicking, Red when released
-                self.request_repaint();
+                if should_repaint(self.last_visual_state.as_ref(), &current_visual) {
+                    self.is_green = current_visual.is_green;
+                    self.request_repaint();
+                }
+
+                self.last_cursor_position = Some(current_position);
+                self.last_visual_state = Some(current_visual);
             }
         }
     }
@@ -214,31 +257,39 @@ impl OverlayWindow {
             unsafe {
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
+            self.record_repaint_request();
         }
     }
 
     /// Moves the overlay to follow the mouse cursor
-    pub fn move_to_mouse(&self) {
+    pub fn move_to_mouse(&mut self) {
         let hwnd_lock = self.hwnd.lock().unwrap();
         if let Some(h) = *hwnd_lock {
             let hwnd = HWND(h as *mut _);
             let mut point = POINT::default();
 
             if unsafe { GetCursorPos(&mut point) }.is_ok() {
-                let x = point.x + 5; // Offset to the right
-                let y = point.y + 5; // Offset below
+                let current_position = OverlayPosition {
+                    x: point.x + 5,
+                    y: point.y + 5,
+                };
 
-                unsafe {
-                    let _ = SetWindowPos(
-                        hwnd,
-                        Some(HWND_TOPMOST),
-                        x,
-                        y,
-                        5, // Small overlay width
-                        5, // Small overlay height
-                        SWP_NOZORDER | SWP_NOSIZE,
-                    );
+                if should_move(self.last_cursor_position.as_ref(), &current_position) {
+                    unsafe {
+                        let _ = SetWindowPos(
+                            hwnd,
+                            Some(HWND_TOPMOST),
+                            current_position.x,
+                            current_position.y,
+                            5, // Small overlay width
+                            5, // Small overlay height
+                            SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
+                        );
+                    }
+                    self.record_set_window_pos_call();
                 }
+
+                self.last_cursor_position = Some(current_position);
             }
         }
     }
@@ -272,7 +323,7 @@ impl OverlayWindow {
                                     y,
                                     20, // Small overlay width
                                     20, // Small overlay height
-                                    SWP_NOZORDER | SWP_NOSIZE,
+                                    SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
                                 );
                             }
                             *is_moving = false;
@@ -287,9 +338,44 @@ impl OverlayWindow {
 
     /// Updates the color of the square and moves it
     pub fn update_color(&mut self, is_green: bool) {
-        self.is_green = is_green;
-        self.request_repaint();
+        let current_visual = OverlayVisualState { is_green };
+        if should_repaint(self.last_visual_state.as_ref(), &current_visual) {
+            self.is_green = is_green;
+            self.request_repaint();
+        }
+        self.last_visual_state = Some(current_visual);
         self.move_to_mouse(); // 🟢 Move the overlay when color updates
+    }
+
+    #[cfg(debug_assertions)]
+    fn record_set_window_pos_call(&self) {
+        self.debug_counters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_window_pos_calls += 1;
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn record_set_window_pos_call(&self) {}
+
+    #[cfg(debug_assertions)]
+    fn record_repaint_request(&self) {
+        self.debug_counters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .repaint_requests += 1;
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn record_repaint_request(&self) {}
+
+    #[cfg(debug_assertions)]
+    #[allow(dead_code)]
+    fn debug_counters(&self) -> OverlayDebugCounters {
+        *self
+            .debug_counters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -343,7 +429,9 @@ extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: L
 
 #[cfg(test)]
 mod tests {
-    use super::overlay_ex_style;
+    use super::{
+        overlay_ex_style, should_move, should_repaint, OverlayPosition, OverlayVisualState,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     };
@@ -357,5 +445,39 @@ mod tests {
         assert!(style.contains(WS_EX_TOOLWINDOW));
         assert!(style.contains(WS_EX_TRANSPARENT));
         assert!(style.contains(WS_EX_NOACTIVATE));
+    }
+
+    #[test]
+    fn should_move_when_there_is_no_previous_position() {
+        let current = OverlayPosition { x: 10, y: 20 };
+
+        assert!(should_move(None, &current));
+    }
+
+    #[test]
+    fn should_move_only_when_position_changes() {
+        let previous = OverlayPosition { x: 10, y: 20 };
+        let same = OverlayPosition { x: 10, y: 20 };
+        let changed = OverlayPosition { x: 11, y: 20 };
+
+        assert!(!should_move(Some(&previous), &same));
+        assert!(should_move(Some(&previous), &changed));
+    }
+
+    #[test]
+    fn should_repaint_when_there_is_no_previous_visual_state() {
+        let current = OverlayVisualState { is_green: false };
+
+        assert!(should_repaint(None, &current));
+    }
+
+    #[test]
+    fn should_repaint_only_when_visual_state_changes() {
+        let previous = OverlayVisualState { is_green: false };
+        let same = OverlayVisualState { is_green: false };
+        let changed = OverlayVisualState { is_green: true };
+
+        assert!(!should_repaint(Some(&previous), &same));
+        assert!(should_repaint(Some(&previous), &changed));
     }
 }
