@@ -17,6 +17,15 @@ thread_local! {
     pub static JUMP_OVERLAY: RefCell<JumpOverlay> = RefCell::new(JumpOverlay::new());
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JumpKeyResult {
+    Ignored,
+    Consumed,
+    Cancelled,
+    Completed { x: i32, y: i32 },
+    Invalid,
+}
+
 pub struct JumpOverlay {
     hwnd: Option<HWND>,
     grid_size: (u32, u32),
@@ -230,28 +239,55 @@ impl JumpOverlay {
         }
     }
 
-    pub fn handle_key(&mut self, key: VirtualKey) -> Option<(i32, i32)> {
-        if let Some(ch) = key.to_char() {
-            self.input.push(ch);
-            println!("JumpOverlay sequence: {}", self.input);
-            self.request_repaint();
-            if self.input.len() >= self.expected_len() {
-                let row_len = Self::letters_needed(self.grid_size.1);
-                let row_code: Vec<char> = self.input.chars().take(row_len).collect();
-                let col_code: Vec<char> = self
-                    .input
-                    .chars()
-                    .skip(row_len)
-                    .take(Self::letters_needed(self.grid_size.0))
-                    .collect();
-                let row = Self::code_to_index(&row_code);
-                let col = Self::code_to_index(&col_code);
+    pub fn handle_key(&mut self, key: VirtualKey, is_keydown: bool) -> JumpKeyResult {
+        if !is_keydown {
+            return JumpKeyResult::Ignored;
+        }
+
+        match key {
+            VirtualKey::Escape => {
                 self.input.clear();
-                self.hide();
-                return self.target_position(row, col);
+                JumpKeyResult::Cancelled
+            }
+            VirtualKey::Backspace => {
+                self.input.pop();
+                self.request_repaint();
+                JumpKeyResult::Consumed
+            }
+            _ => {
+                if let Some(ch) = key.to_char() {
+                    self.input.push(ch);
+                    println!("JumpOverlay sequence: {}", self.input);
+                    self.request_repaint();
+                    if self.input.len() >= self.expected_len() {
+                        let row_len = Self::letters_needed(self.grid_size.1);
+                        let row_code: Vec<char> = self.input.chars().take(row_len).collect();
+                        let col_code: Vec<char> = self
+                            .input
+                            .chars()
+                            .skip(row_len)
+                            .take(Self::letters_needed(self.grid_size.0))
+                            .collect();
+                        let row = Self::code_to_index(&row_code);
+                        let col = Self::code_to_index(&col_code);
+
+                        if let Some((x, y)) = self.target_position(row, col) {
+                            self.input.clear();
+                            self.hide();
+                            return JumpKeyResult::Completed { x, y };
+                        }
+
+                        self.input.clear();
+                        self.request_repaint();
+                        return JumpKeyResult::Invalid;
+                    }
+                    return JumpKeyResult::Consumed;
+                }
+
+                // Policy: unsupported keys are ignored so they do not mutate jump input state.
+                JumpKeyResult::Ignored
             }
         }
-        None
     }
 }
 
@@ -291,11 +327,65 @@ pub fn show_jump_overlay(config: &Config) {
 
 pub fn hide_jump_overlay() {
     JUMP_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+
+    #[test]
+    fn key_up_is_ignored() {
+        let mut overlay = JumpOverlay::new();
+        assert_eq!(
+            overlay.handle_key(VirtualKey::A, false),
+            JumpKeyResult::Ignored
+        );
+        assert!(overlay.input.is_empty());
+    }
+
+    #[test]
+    fn escape_cancels() {
+        let mut overlay = JumpOverlay::new();
+        overlay.input.push('A');
+        assert_eq!(
+            overlay.handle_key(VirtualKey::Escape, true),
+            JumpKeyResult::Cancelled
+        );
+        assert!(overlay.input.is_empty());
+    }
+
+    #[test]
+    fn valid_two_letter_code_completes() {
+        let mut overlay = JumpOverlay::new();
+        overlay.grid_size = (10, 10);
+        assert_eq!(
+            overlay.handle_key(VirtualKey::A, true),
+            JumpKeyResult::Consumed
+        );
+        match overlay.handle_key(VirtualKey::A, true) {
+            JumpKeyResult::Completed { .. } => {}
+            other => panic!("expected completed, got {:?}", other),
+        }
+        assert!(overlay.input.is_empty());
+        assert!(!overlay.visible);
+    }
+
+    #[test]
+    fn invalid_code_returns_invalid_and_stays_visible() {
+        let mut overlay = JumpOverlay::new();
+        overlay.grid_size = (27, 10);
+        overlay.visible = true;
+        assert_eq!(
+            overlay.handle_key(VirtualKey::A, true),
+            JumpKeyResult::Consumed
+        );
+        assert_eq!(
+            overlay.handle_key(VirtualKey::Z, true),
+            JumpKeyResult::Invalid
+        );
+        assert!(overlay.visible);
+        assert!(overlay.input.is_empty());
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::JumpOverlay;
+    use super::{JumpKeyResult, JumpOverlay};
     use crate::keyboard::VirtualKey;
 
     #[test]
@@ -312,7 +402,7 @@ mod tests {
     fn key_input_requests_repaint() {
         let mut overlay = JumpOverlay::new();
         assert!(!overlay.repaint_requested);
-        let _ = overlay.handle_key(VirtualKey::A);
+        let _ = overlay.handle_key(VirtualKey::A, true);
         assert!(overlay.repaint_requested);
     }
 
@@ -320,7 +410,7 @@ mod tests {
     fn key_handling_does_not_require_window_for_repaint_state() {
         let mut overlay = JumpOverlay::new();
         overlay.hwnd = None;
-        let _ = overlay.handle_key(VirtualKey::B);
+        let _ = overlay.handle_key(VirtualKey::B, true);
         assert_eq!(overlay.input, "B");
         assert!(overlay.repaint_requested);
     }

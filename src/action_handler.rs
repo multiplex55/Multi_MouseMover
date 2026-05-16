@@ -1,3 +1,4 @@
+use crate::keyboard::VirtualKey;
 use crate::overlay::OVERLAY;
 use crate::{action, Config};
 use action::Action;
@@ -12,6 +13,8 @@ pub struct MouseMaster {
     pub top_speed: i32,
     pub left_click_held: bool,
     pub jump_active: bool,
+    pub activation_key: Option<VirtualKey>,
+    pub activation_key_released: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -32,6 +35,8 @@ impl MouseMaster {
             top_speed: config.top_speed,
             left_click_held: false,
             jump_active: false,
+            activation_key: None,
+            activation_key_released: true,
         }
     }
 
@@ -224,7 +229,7 @@ impl MouseMaster {
 
     /// Activates jump mode
     fn activate_jump_mode(&mut self) {
-        use crate::jump_overlay::{show_jump_overlay, hide_jump_overlay};
+        use crate::jump_overlay::{hide_jump_overlay, show_jump_overlay};
         if self.jump_active {
             hide_jump_overlay();
             self.jump_active = false;
