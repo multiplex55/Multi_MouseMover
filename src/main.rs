@@ -15,6 +15,7 @@ use lazy_static::lazy_static;
 use overlay::OVERLAY;
 use serde::Deserialize;
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -29,6 +30,10 @@ const MAX_MESSAGES_PER_TICK: usize = 64;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const DEBUG_HEARTBEAT_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
 
+static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
+static HOOK_EVENTS_DECODED: AtomicU64 = AtomicU64::new(0);
+static HOOK_EVENTS_SWALLOWED: AtomicU64 = AtomicU64::new(0);
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct LoopDiagnostics {
     loop_iterations: u64,
@@ -36,6 +41,21 @@ struct LoopDiagnostics {
     queued_key_events_processed: u64,
     commands_executed: u64,
     movement_ticks: u64,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct HookDiagnostics {
+    events_seen: u64,
+    events_decoded: u64,
+    events_swallowed: u64,
+}
+
+fn hook_diagnostics_snapshot() -> HookDiagnostics {
+    HookDiagnostics {
+        events_seen: HOOK_EVENTS_SEEN.load(Ordering::Relaxed),
+        events_decoded: HOOK_EVENTS_DECODED.load(Ordering::Relaxed),
+        events_swallowed: HOOK_EVENTS_SWALLOWED.load(Ordering::Relaxed),
+    }
 }
 
 impl LoopDiagnostics {
@@ -278,8 +298,10 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             || w_param.0 as u32 == WM_KEYUP
             || w_param.0 as u32 == WM_SYSKEYUP)
     {
+        HOOK_EVENTS_SEEN.fetch_add(1, Ordering::Relaxed);
         let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
         if let Some(event) = decode_key_event(w_param, kbd) {
+            HOOK_EVENTS_DECODED.fetch_add(1, Ordering::Relaxed);
             let swallow = {
                 let mut app_state = APP_STATE.write().unwrap();
                 let swallow = app_state.should_swallow_key(&event);
@@ -288,6 +310,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
             };
 
             if swallow {
+                HOOK_EVENTS_SWALLOWED.fetch_add(1, Ordering::Relaxed);
                 return LRESULT(1);
             }
         }
@@ -295,7 +318,21 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
     CallNextHookEx(None, code, w_param, l_param)
 }
 
-fn process_queued_key_events() -> LoopDiagnostics {
+fn should_log_routing_event(event: &KeyEvent, action: Option<Action>) -> bool {
+    action.is_some() || (event.is_down && event.key == VirtualKey::Escape)
+}
+
+fn routing_action_label(event: &KeyEvent, action: Option<Action>) -> String {
+    if event.is_down && event.key == VirtualKey::Escape {
+        "Exit".to_string()
+    } else if let Some(action) = action {
+        format!("{action:?}")
+    } else {
+        "None".to_string()
+    }
+}
+
+fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
     let mut diagnostics = LoopDiagnostics::default();
 
     loop {
@@ -310,6 +347,15 @@ fn process_queued_key_events() -> LoopDiagnostics {
 
         let action = KEY_ACTIONS.read().unwrap().get_action(event.key).copied();
 
+        if debug_diagnostics && should_log_routing_event(&event, action) {
+            println!(
+                "[routing] key={:?} state={} action={}",
+                event.key,
+                if event.is_down { "down" } else { "up" },
+                routing_action_label(&event, action)
+            );
+        }
+
         APP_STATE.write().unwrap().route_key_event(event, action);
         diagnostics.queued_key_events_processed += 1;
     }
@@ -321,14 +367,37 @@ fn process_queued_key_events() -> LoopDiagnostics {
             break;
         };
 
-        execute_app_command(command);
+        execute_app_command(command, debug_diagnostics);
         diagnostics.commands_executed += 1;
     }
 
     diagnostics
 }
 
-fn execute_app_command(command: AppCommand) {
+fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
+    if debug_diagnostics {
+        match command {
+            AppCommand::ToggleActiveMode => println!("[command] ToggleActiveMode"),
+            AppCommand::Exit => println!("[command] Exit"),
+            AppCommand::EnterJumpMode { activation_key } => {
+                println!("[command] EnterJumpMode activation_key={activation_key:?}")
+            }
+            AppCommand::KeyAction { action, is_down } => {
+                println!(
+                    "[command] KeyAction action={action:?} state={}",
+                    if is_down { "down" } else { "up" }
+                )
+            }
+            AppCommand::JumpInput(event) => {
+                println!(
+                    "[command] JumpInput key={:?} state={}",
+                    event.key,
+                    if event.is_down { "down" } else { "up" }
+                )
+            }
+        }
+    }
+
     match command {
         AppCommand::ToggleActiveMode => {
             let active_mode = {
@@ -407,14 +476,17 @@ fn debug_heartbeat_enabled() -> bool {
         .unwrap_or(false)
 }
 
-fn print_heartbeat(diagnostics: LoopDiagnostics) {
+fn print_heartbeat(diagnostics: LoopDiagnostics, hook_diagnostics: HookDiagnostics) {
     println!(
-        "[heartbeat] loops={} messages={} key_events={} commands={} movement_ticks={}",
-        diagnostics.loop_iterations,
-        diagnostics.messages_processed,
+        "[heartbeat] hook_seen={} hook_decoded={} hook_swallowed={} queue={} commands={} ticks={} loops={} messages={}",
+        hook_diagnostics.events_seen,
+        hook_diagnostics.events_decoded,
+        hook_diagnostics.events_swallowed,
         diagnostics.queued_key_events_processed,
         diagnostics.commands_executed,
-        diagnostics.movement_ticks
+        diagnostics.movement_ticks,
+        diagnostics.loop_iterations,
+        diagnostics.messages_processed
     );
 }
 
@@ -489,7 +561,7 @@ fn main() {
     }
 
     println!("🔄 Entering Main Event Loop...");
-    let debug_heartbeat = debug_heartbeat_enabled();
+    let debug_diagnostics = debug_heartbeat_enabled();
     let mut heartbeat = HeartbeatDiagnostics::default();
     let mut last_heartbeat_sample = Instant::now();
 
@@ -500,7 +572,7 @@ fn main() {
             ..LoopDiagnostics::default()
         };
 
-        loop_diagnostics.add(process_queued_key_events());
+        loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
 
         let movement_tick = ACTION_HANDLER.write().unwrap().tick_movement();
         if movement_tick.moving {
@@ -515,11 +587,11 @@ fn main() {
             }
         }
 
-        if debug_heartbeat {
+        if debug_diagnostics {
             let now = Instant::now();
             if let Some(snapshot) = heartbeat.record(loop_diagnostics, now - last_heartbeat_sample)
             {
-                print_heartbeat(snapshot);
+                print_heartbeat(snapshot, hook_diagnostics_snapshot());
             }
             last_heartbeat_sample = now;
         }
@@ -674,5 +746,38 @@ mod tests {
                 ..LoopDiagnostics::default()
             })
         );
+    }
+
+    #[test]
+    fn routing_log_filter_includes_bound_actions() {
+        let event = KeyEvent::new(VirtualKey::A, true);
+
+        assert!(should_log_routing_event(&event, Some(Action::MoveLeft)));
+        assert_eq!(
+            routing_action_label(&event, Some(Action::MoveLeft)),
+            "MoveLeft"
+        );
+    }
+
+    #[test]
+    fn routing_log_filter_includes_escape_down_as_exit() {
+        let event = KeyEvent::new(VirtualKey::Escape, true);
+
+        assert!(should_log_routing_event(&event, None));
+        assert_eq!(routing_action_label(&event, None), "Exit");
+    }
+
+    #[test]
+    fn routing_log_filter_excludes_unbound_non_exit_events() {
+        let event = KeyEvent::new(VirtualKey::B, true);
+
+        assert!(!should_log_routing_event(&event, None));
+    }
+
+    #[test]
+    fn routing_log_filter_excludes_escape_up_without_binding() {
+        let event = KeyEvent::new(VirtualKey::Escape, false);
+
+        assert!(!should_log_routing_event(&event, None));
     }
 }
