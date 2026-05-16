@@ -19,6 +19,49 @@ thread_local! {
 
 const OVERLAY_ALPHA: u8 = 255;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScreenRect {
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+}
+
+impl ScreenRect {
+    fn from_virtual_screen() -> Self {
+        unsafe {
+            Self {
+                left: GetSystemMetrics(SM_XVIRTUALSCREEN),
+                top: GetSystemMetrics(SM_YVIRTUALSCREEN),
+                width: GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                height: GetSystemMetrics(SM_CYVIRTUALSCREEN),
+            }
+        }
+    }
+}
+
+fn calculate_target_center(
+    screen_rect: ScreenRect,
+    grid_size: (u32, u32),
+    row: usize,
+    col: usize,
+) -> Option<(i32, i32)> {
+    let (cols, rows) = grid_size;
+    if cols == 0 || rows == 0 {
+        return None;
+    }
+    if row >= rows as usize || col >= cols as usize {
+        return None;
+    }
+
+    let x = screen_rect.left as f64
+        + (((col as f64) + 0.5f64) * screen_rect.width as f64 / cols as f64);
+    let y = screen_rect.top as f64
+        + (((row as f64) + 0.5f64) * screen_rect.height as f64 / rows as f64);
+
+    Some((x.round() as i32, y.round() as i32))
+}
+
 fn overlay_colorkey() -> COLORREF {
     RGB(0, 0, 0)
 }
@@ -121,17 +164,16 @@ impl JumpOverlay {
             if atom == 0 {
                 println!("RegisterClassW failed: {:?}", GetLastError());
             }
-            let width = GetSystemMetrics(SM_CXSCREEN);
-            let height = GetSystemMetrics(SM_CYSCREEN);
+            let screen_rect = ScreenRect::from_virtual_screen();
             let hwnd = CreateWindowExW(
                 overlay_ex_style(),
                 class,
                 w!("JumpOverlay"),
                 WS_POPUP,
-                0,
-                0,
-                width,
-                height,
+                screen_rect.left,
+                screen_rect.top,
+                screen_rect.width,
+                screen_rect.height,
                 None,
                 None,
                 Some(h_instance.into()),
@@ -274,18 +316,7 @@ impl JumpOverlay {
     }
 
     fn target_position(&self, row: usize, col: usize) -> Option<(i32, i32)> {
-        let width = unsafe { GetSystemMetrics(SM_CXSCREEN) } as i32;
-        let height = unsafe { GetSystemMetrics(SM_CYSCREEN) } as i32;
-        let cell_w = width / self.grid_size.0 as i32;
-        let cell_h = height / self.grid_size.1 as i32;
-        if row < self.grid_size.1 as usize && col < self.grid_size.0 as usize {
-            Some((
-                col as i32 * cell_w + cell_w / 2,
-                row as i32 * cell_h + cell_h / 2,
-            ))
-        } else {
-            None
-        }
+        calculate_target_center(ScreenRect::from_virtual_screen(), self.grid_size, row, col)
     }
 
     pub fn handle_key(&mut self, key: VirtualKey, is_keydown: bool) -> JumpKeyResult {
@@ -376,8 +407,8 @@ pub fn hide_jump_overlay() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_jump_indicator, overlay_ex_style, transparency_mode, JumpKeyResult, JumpOverlay,
-        TransparencyMode, OVERLAY_ALPHA,
+        calculate_target_center, format_jump_indicator, overlay_colorkey, overlay_ex_style, transparency_mode,
+        JumpKeyResult, JumpOverlay, ScreenRect, TransparencyMode, OVERLAY_ALPHA,
     };
     use crate::keyboard::VirtualKey;
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
@@ -414,5 +445,40 @@ mod tests {
             JumpKeyResult::Ignored
         );
         assert!(overlay.input.is_empty());
+    }
+
+    #[test]
+    fn target_center_handles_non_zero_virtual_screen_origin() {
+        let rect = ScreenRect {
+            left: -1920,
+            top: 120,
+            width: 3840,
+            height: 2160,
+        };
+        assert_eq!(calculate_target_center(rect, (4, 3), 1, 2), Some((480, 1200)));
+    }
+
+    #[test]
+    fn target_center_uses_edge_cell_centers() {
+        let rect = ScreenRect {
+            left: 100,
+            top: 200,
+            width: 1000,
+            height: 800,
+        };
+        assert_eq!(calculate_target_center(rect, (10, 8), 0, 0), Some((150, 250)));
+        assert_eq!(calculate_target_center(rect, (10, 8), 7, 9), Some((1050, 950)));
+    }
+
+    #[test]
+    fn target_center_rejects_invalid_row_or_col() {
+        let rect = ScreenRect {
+            left: 0,
+            top: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert_eq!(calculate_target_center(rect, (10, 10), 10, 0), None);
+        assert_eq!(calculate_target_center(rect, (10, 10), 0, 10), None);
     }
 }
