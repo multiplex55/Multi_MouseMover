@@ -7,7 +7,8 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::{
-    jump_grid::{code_to_index, expected_len, index_to_code, letters_needed, target_position},
+    jump_grid::{index_to_code, letters_needed, target_position},
+    jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage},
     keyboard::VirtualKey,
     overlay::RGB,
     Config,
@@ -121,7 +122,7 @@ pub struct JumpOverlay {
     hwnd: Option<HWND>,
     grid_size: (u32, u32),
     visible: bool,
-    input: String,
+    session: Option<JumpSession>,
     repaint_requested: bool,
 }
 
@@ -131,7 +132,7 @@ impl JumpOverlay {
             hwnd: None,
             grid_size: (10, 10),
             visible: false,
-            input: String::new(),
+            session: None,
             repaint_requested: false,
         }
     }
@@ -195,7 +196,11 @@ impl JumpOverlay {
     pub fn initialize(&mut self, config: &Config) {
         self.grid_size = (config.jump.coarse.width, config.jump.coarse.height);
         self.create_window();
-        self.input.clear();
+        let screen_rect = ScreenRect::from_virtual_screen();
+        self.session = JumpSession::new(screen_rect.into(), jump_stages(config));
+        if let Some(session) = &self.session {
+            self.grid_size = session.current_grid();
+        }
         self.repaint_requested = false;
     }
 
@@ -210,7 +215,7 @@ impl JumpOverlay {
     }
 
     pub fn hide(&mut self) {
-        self.input.clear();
+        self.session = None;
         if let Some(h) = self.hwnd {
             unsafe {
                 let _ = ShowWindow(h, SW_HIDE);
@@ -269,7 +274,7 @@ impl JumpOverlay {
                 }
 
                 let _ = SetTextColor(hdc, input_color());
-                let indicator = format_jump_indicator(&self.input);
+                let indicator = format_jump_indicator(self.input());
                 let indicator_utf16: Vec<u16> = indicator.encode_utf16().collect();
                 let indicator_x = rect.left + (width / 2) - 60;
                 let indicator_y = rect.top + 16;
@@ -284,58 +289,75 @@ impl JumpOverlay {
         }
     }
 
-    fn expected_len(&self) -> usize {
-        expected_len(self.grid_size)
-    }
-
-    fn target_position(&self, row: usize, col: usize) -> Option<(i32, i32)> {
-        calculate_target_center(ScreenRect::from_virtual_screen(), self.grid_size, row, col)
+    fn input(&self) -> &str {
+        self.session
+            .as_ref()
+            .map(|session| session.input.as_str())
+            .unwrap_or("")
     }
 
     pub fn handle_key(&mut self, key: VirtualKey, is_keydown: bool) -> JumpKeyResult {
-        if !is_keydown {
+        let Some(session) = &mut self.session else {
             return JumpKeyResult::Ignored;
-        }
-        match key {
-            VirtualKey::Escape => {
-                self.input.clear();
-                JumpKeyResult::Cancelled
-            }
-            VirtualKey::Backspace => {
-                self.input.pop();
+        };
+        let Some(update) = session.handle_key(key, is_keydown) else {
+            return JumpKeyResult::Ignored;
+        };
+
+        match update {
+            JumpSessionUpdate::Consumed => {
                 self.request_repaint();
                 JumpKeyResult::Consumed
             }
-            _ => {
-                if let Some(ch) = key.to_char() {
-                    self.input.push(ch);
-                    self.request_repaint();
-                    if self.input.len() >= self.expected_len() {
-                        let row_len = letters_needed(self.grid_size.1);
-                        let col_len = letters_needed(self.grid_size.0);
-                        let row_code: String = self.input.chars().take(row_len).collect();
-                        let col_code: String =
-                            self.input.chars().skip(row_len).take(col_len).collect();
-                        if let (Some(row), Some(col)) =
-                            (code_to_index(&row_code), code_to_index(&col_code))
-                        {
-                            if let Some((x, y)) = self.target_position(row, col) {
-                                self.input.clear();
-                                self.hide();
-                                return JumpKeyResult::Completed { x, y };
-                            }
-                        }
-                        self.input.clear();
-                        self.request_repaint();
-                        return JumpKeyResult::Invalid;
-                    }
-                    JumpKeyResult::Consumed
-                } else {
-                    JumpKeyResult::Ignored
+            JumpSessionUpdate::Invalid => {
+                self.request_repaint();
+                JumpKeyResult::Invalid
+            }
+            JumpSessionUpdate::Cancelled => JumpKeyResult::Cancelled,
+            JumpSessionUpdate::StageAdvanced { .. } => {
+                if let Some(session) = &self.session {
+                    self.grid_size = session.current_grid();
                 }
+                self.request_repaint();
+                JumpKeyResult::Consumed
+            }
+            JumpSessionUpdate::Completed { x, y, .. } => {
+                self.hide();
+                JumpKeyResult::Completed { x, y }
             }
         }
     }
+}
+
+impl From<ScreenRect> for JumpRegion {
+    fn from(rect: ScreenRect) -> Self {
+        Self {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+        }
+    }
+}
+
+fn jump_stages(config: &Config) -> Vec<JumpStage> {
+    let mut stages = vec![JumpStage::new(
+        config.jump.coarse.width,
+        config.jump.coarse.height,
+    )];
+    if config.jump.fine.enabled {
+        stages.push(JumpStage::new(
+            config.jump.fine.width,
+            config.jump.fine.height,
+        ));
+    }
+    if config.jump.precise.enabled {
+        stages.push(JumpStage::new(
+            config.jump.precise.width,
+            config.jump.precise.height,
+        ));
+    }
+    stages
 }
 
 extern "system" fn jump_window_proc(
@@ -382,6 +404,7 @@ mod tests {
         calculate_target_center, format_jump_indicator, overlay_colorkey, overlay_ex_style,
         transparency_mode, JumpKeyResult, JumpOverlay, ScreenRect, TransparencyMode, OVERLAY_ALPHA,
     };
+    use crate::jump_session::{JumpRegion, JumpSession, JumpStage};
     use crate::keyboard::VirtualKey;
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
 
@@ -416,13 +439,22 @@ mod tests {
             overlay.handle_key(VirtualKey::A, false),
             JumpKeyResult::Ignored
         );
-        assert!(overlay.input.is_empty());
+        assert_eq!(overlay.input(), "");
     }
 
     #[test]
     fn invalid_code_clears_input_and_keeps_session_active() {
         let mut overlay = JumpOverlay::new();
         overlay.grid_size = (10, 10);
+        overlay.session = JumpSession::new(
+            JumpRegion {
+                left: 0,
+                top: 0,
+                width: 100,
+                height: 100,
+            },
+            vec![JumpStage::new(10, 10)],
+        );
         overlay.visible = true;
 
         assert_eq!(
@@ -433,7 +465,7 @@ mod tests {
             overlay.handle_key(VirtualKey::A, true),
             JumpKeyResult::Invalid
         );
-        assert!(overlay.input.is_empty());
+        assert_eq!(overlay.input(), "");
         assert!(overlay.visible);
     }
 
