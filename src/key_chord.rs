@@ -144,34 +144,61 @@ fn set_modifier(input: &str, modifier: &str, target: &mut bool) -> Result<(), Ke
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_modifier_aliases() {
-        assert_eq!(
-            KeyChord::parse("Control+Shift+J").unwrap(),
-            KeyChord {
-                key: VirtualKey::J,
-                ctrl: true,
-                alt: false,
-                shift: true,
-                win: false,
-            }
-        );
-
-        assert!(KeyChord::parse("Meta+F").unwrap().win);
-        assert!(KeyChord::parse("Super+F").unwrap().win);
+    fn chord(key: VirtualKey, ctrl: bool, alt: bool, shift: bool, win: bool) -> KeyChord {
+        KeyChord {
+            key,
+            ctrl,
+            alt,
+            shift,
+            win,
+        }
     }
 
     #[test]
-    fn parses_plain_key() {
+    fn parses_supported_chords() {
+        assert_eq!(
+            KeyChord::parse("Ctrl+E").unwrap(),
+            chord(VirtualKey::E, true, false, false, false)
+        );
+        assert_eq!(
+            KeyChord::parse("Alt+E").unwrap(),
+            chord(VirtualKey::E, false, true, false, false)
+        );
+        assert_eq!(
+            KeyChord::parse("Ctrl+Shift+J").unwrap(),
+            chord(VirtualKey::J, true, false, true, false)
+        );
         assert_eq!(
             KeyChord::parse("Escape").unwrap(),
-            KeyChord {
-                key: VirtualKey::Escape,
-                ctrl: false,
-                alt: false,
-                shift: false,
-                win: false,
-            }
+            chord(VirtualKey::Escape, false, false, false, false)
+        );
+    }
+
+    #[test]
+    fn parses_modifier_aliases() {
+        assert_eq!(
+            KeyChord::parse("Control+E").unwrap(),
+            chord(VirtualKey::E, true, false, false, false)
+        );
+        assert_eq!(
+            KeyChord::parse("Super+E").unwrap(),
+            chord(VirtualKey::E, false, false, false, true)
+        );
+        assert_eq!(
+            KeyChord::parse("Meta+E").unwrap(),
+            chord(VirtualKey::E, false, false, false, true)
+        );
+    }
+
+    #[test]
+    fn parses_case_insensitively() {
+        assert_eq!(
+            KeyChord::parse("ctrl+shift+j").unwrap(),
+            chord(VirtualKey::J, true, false, true, false)
+        );
+        assert_eq!(
+            KeyChord::parse("eScApE").unwrap(),
+            chord(VirtualKey::Escape, false, false, false, false)
         );
     }
 
@@ -182,6 +209,9 @@ mod tests {
         event.ctrl_down = true;
 
         assert!(chord.matches_event(&event));
+        assert!(!event.alt_down);
+        assert!(!event.shift_down);
+        assert!(!event.win_down);
 
         event.shift_down = true;
         assert!(!chord.matches_event(&event));
@@ -194,7 +224,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_non_modifier_token() {
-        assert!(KeyChord::parse("Ctrl+E+F").is_err());
+        assert!(KeyChord::parse("Ctrl+E+E").is_err());
     }
 
     #[test]
