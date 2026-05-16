@@ -18,7 +18,6 @@ use std::time::Duration;
 use std::{env, fs, error::Error, io};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// RAII guard for the installed keyboard hook.
