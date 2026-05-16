@@ -17,11 +17,23 @@ thread_local! {
     pub static JUMP_OVERLAY: RefCell<JumpOverlay> = RefCell::new(JumpOverlay::new());
 }
 
-const OVERLAY_COLORKEY: COLORREF = RGB(0, 0, 0);
 const OVERLAY_ALPHA: u8 = 255;
-const GRID_COLOR: COLORREF = RGB(255, 255, 255);
-const LABEL_COLOR: COLORREF = RGB(255, 255, 0);
-const INPUT_COLOR: COLORREF = RGB(0, 255, 255);
+
+fn overlay_colorkey() -> COLORREF {
+    RGB(0, 0, 0)
+}
+
+fn grid_color() -> COLORREF {
+    RGB(255, 255, 255)
+}
+
+fn label_color() -> COLORREF {
+    RGB(255, 255, 0)
+}
+
+fn input_color() -> COLORREF {
+    RGB(0, 255, 255)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransparencyMode {
@@ -34,7 +46,7 @@ fn overlay_ex_style() -> WINDOW_EX_STYLE {
 
 fn transparency_mode() -> TransparencyMode {
     TransparencyMode::ColorKey {
-        color: OVERLAY_COLORKEY,
+        color: overlay_colorkey(),
         alpha: OVERLAY_ALPHA,
     }
 }
@@ -180,13 +192,13 @@ impl JumpOverlay {
                 let cell_w = width / self.grid_size.0 as i32;
                 let cell_h = height / self.grid_size.1 as i32;
 
-                let bg_brush = CreateSolidBrush(OVERLAY_COLORKEY);
+                let bg_brush = CreateSolidBrush(overlay_colorkey());
                 let _ = FillRect(hdc, &rect, bg_brush);
 
                 let old_bk_mode = SetBkMode(hdc, TRANSPARENT);
-                let old_text_color = SetTextColor(hdc, LABEL_COLOR);
+                let old_text_color = SetTextColor(hdc, label_color());
 
-                let pen = CreatePen(PS_SOLID, 1, GRID_COLOR);
+                let pen = CreatePen(PS_SOLID, 1, grid_color());
                 let old_pen = SelectObject(hdc, pen.into());
 
                 for x in 0..=self.grid_size.0 {
@@ -214,7 +226,7 @@ impl JumpOverlay {
                     }
                 }
 
-                let _ = SetTextColor(hdc, INPUT_COLOR);
+                let _ = SetTextColor(hdc, input_color());
                 let indicator = format_jump_indicator(&self.input);
                 let indicator_utf16: Vec<u16> = indicator.encode_utf16().collect();
                 let indicator_x = rect.left + (width / 2) - 60;
@@ -222,7 +234,7 @@ impl JumpOverlay {
                 let _ = TextOutW(hdc, indicator_x, indicator_y, &indicator_utf16);
 
                 let _ = SetTextColor(hdc, old_text_color);
-                let _ = SetBkMode(hdc, old_bk_mode);
+                let _ = SetBkMode(hdc, BACKGROUND_MODE(old_bk_mode));
                 let _ = SelectObject(hdc, old_pen);
                 let _ = DeleteObject(pen.into());
                 let _ = DeleteObject(bg_brush.into());
@@ -365,7 +377,7 @@ pub fn hide_jump_overlay() {
 mod tests {
     use super::{
         format_jump_indicator, overlay_ex_style, transparency_mode, JumpKeyResult, JumpOverlay,
-        TransparencyMode, OVERLAY_ALPHA, OVERLAY_COLORKEY,
+        TransparencyMode, OVERLAY_ALPHA,
     };
     use crate::keyboard::VirtualKey;
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
@@ -388,7 +400,7 @@ mod tests {
         assert_eq!(
             transparency_mode(),
             TransparencyMode::ColorKey {
-                color: OVERLAY_COLORKEY,
+                color: overlay_colorkey(),
                 alpha: OVERLAY_ALPHA
             }
         );
