@@ -2,6 +2,8 @@ use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+#[cfg(debug_assertions)]
+use std::time::Instant;
 use windows::core::{w, Error};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -23,11 +25,44 @@ lazy_static::lazy_static! {
             None
         }
     }));
+
+    #[cfg(debug_assertions)]
+    static ref PAINT_SMOKE_LOG: Mutex<PaintSmokeLog> = Mutex::new(PaintSmokeLog::new());
 }
 
 pub struct OverlayWindow {
     hwnd: Arc<Mutex<Option<isize>>>, // ✅ Store HWND as `isize`
     is_green: bool,
+}
+
+#[cfg(debug_assertions)]
+struct PaintSmokeLog {
+    window_start: Instant,
+    count: u32,
+}
+
+#[cfg(debug_assertions)]
+impl PaintSmokeLog {
+    fn new() -> Self {
+        Self {
+            window_start: Instant::now(),
+            count: 0,
+        }
+    }
+
+    fn record_paint(&mut self) {
+        self.count += 1;
+        let elapsed = self.window_start.elapsed();
+
+        if elapsed >= Duration::from_secs(1) {
+            println!(
+                "[overlay] WM_PAINT smoke: {} paints/sec",
+                self.count as f64 / elapsed.as_secs_f64()
+            );
+            self.window_start = Instant::now();
+            self.count = 0;
+        }
+    }
 }
 
 impl OverlayWindow {
@@ -81,8 +116,6 @@ impl OverlayWindow {
             unsafe {
                 println!("🔹 Overlay: Showing Window...");
                 let _ = ShowWindow(HWND(h as *mut _), SW_SHOW);
-                println!("🔹 Overlay: Updating Window...");
-                let _ = UpdateWindow(HWND(h as *mut _));
                 println!("🔹 Overlay: Setting Layered Window Attributes...");
                 let _ = SetLayeredWindowAttributes(HWND(h as *mut _), COLORREF(0), 255, LWA_ALPHA);
             }
@@ -93,6 +126,7 @@ impl OverlayWindow {
             hwnd: Arc::new(Mutex::new(hwnd_ptr)),
             is_green: false,
         };
+        overlay.request_repaint();
 
         // ✅ **Add this line to start tracking the mouse!**
 
@@ -127,35 +161,41 @@ impl OverlayWindow {
             // ✅ Fix flickering: Only repaint if state actually changes
             if self.is_green != is_left_click_held {
                 self.is_green = is_left_click_held; // Green when clicking, Red when released
-                self.repaint();
+                self.request_repaint();
             }
         }
     }
 
-    /// Repaints the square
-    pub fn repaint(&self) {
-        let hwnd_lock = self.hwnd.lock().unwrap();
-        if let Some(h) = *hwnd_lock {
-            let hwnd = HWND(h as *mut _); // ✅ Convert `isize` back to `HWND`
-            unsafe {
-                let hdc = GetDC(Some(hwnd));
-                let color = if self.is_green {
-                    RGB(0, 255, 0) // Green when left-click is pressed
-                } else {
-                    RGB(255, 0, 0) // Red otherwise
-                };
-                let hbrush = CreateSolidBrush(color);
+    /// Draws the square into the caller-provided paint device context.
+    pub fn draw(&self, hdc: HDC) {
+        let color = if self.is_green {
+            RGB(0, 255, 0) // Green when left-click is pressed
+        } else {
+            RGB(255, 0, 0) // Red otherwise
+        };
 
+        unsafe {
+            let hbrush = CreateSolidBrush(color);
+            if !hbrush.0.is_null() {
                 let rect = RECT {
                     left: 0,
                     top: 0,
                     right: 100,
                     bottom: 100,
                 };
-                FillRect(hdc, &rect, hbrush);
-
+                let _ = FillRect(hdc, &rect, hbrush);
                 let _ = DeleteObject(hbrush.into());
-                ReleaseDC(Some(hwnd), hdc);
+            }
+        }
+    }
+
+    /// Requests a repaint by invalidating the client region.
+    pub fn request_repaint(&self) {
+        let hwnd_lock = self.hwnd.lock().unwrap();
+        if let Some(h) = *hwnd_lock {
+            let hwnd = HWND(h as *mut _); // ✅ Convert `isize` back to `HWND`
+            unsafe {
+                let _ = InvalidateRect(Some(hwnd), None, false);
             }
         }
     }
@@ -231,7 +271,7 @@ impl OverlayWindow {
     /// Updates the color of the square and moves it
     pub fn update_color(&mut self, is_green: bool) {
         self.is_green = is_green;
-        self.repaint();
+        self.request_repaint();
         self.move_to_mouse(); // 🟢 Move the overlay when color updates
     }
 }
@@ -246,9 +286,25 @@ pub fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
 extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: LPARAM) -> LRESULT {
     match msg {
         WM_PAINT => {
-            // println!("🖌 Overlay WM_PAINT triggered!");
+            let mut ps = PAINTSTRUCT::default();
+            // BeginPaint must be paired with EndPaint so Windows validates the
+            // dirty region; otherwise the same region remains invalid and can
+            // dispatch WM_PAINT repeatedly.
+            let hdc = unsafe { BeginPaint(hwnd, &mut ps) };
+            #[cfg(debug_assertions)]
+            {
+                PAINT_SMOKE_LOG
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .record_paint();
+            }
             if let Some(ref mut ov) = *OVERLAY.lock().unwrap_or_else(|e| e.into_inner()) {
-                ov.repaint();
+                ov.draw(hdc);
+            }
+            // EndPaint completes the validation started by BeginPaint; keep all
+            // rendering for this message inside that pair.
+            unsafe {
+                let _ = EndPaint(hwnd, &ps);
             }
             LRESULT(0)
         }

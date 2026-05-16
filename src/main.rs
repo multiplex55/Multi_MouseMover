@@ -381,7 +381,7 @@ fn main() {
         Ok(mut maybe_ov) => {
             if let Some(ref mut ov) = *maybe_ov {
                 println!("✅ Overlay Initialized Successfully");
-                ov.repaint();
+                ov.request_repaint();
             } else {
                 eprintln!("Overlay disabled due to initialization failure");
             }
