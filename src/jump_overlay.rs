@@ -407,7 +407,7 @@ pub fn hide_jump_overlay() {
 #[cfg(test)]
 mod tests {
     use super::{
-        calculate_target_center, format_jump_indicator, overlay_ex_style, transparency_mode,
+        calculate_target_center, format_jump_indicator, overlay_colorkey, overlay_ex_style, transparency_mode,
         JumpKeyResult, JumpOverlay, ScreenRect, TransparencyMode, OVERLAY_ALPHA,
     };
     use crate::keyboard::VirtualKey;
