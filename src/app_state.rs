@@ -410,6 +410,12 @@ mod tests {
         event
     }
 
+    fn ctrl_w_down() -> KeyEvent {
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.ctrl_down = true;
+        event
+    }
+
     fn lookup_test_action(event: KeyEvent) -> Option<Action> {
         match event.key {
             VirtualKey::Left => Some(Action::MoveLeft),
@@ -556,6 +562,55 @@ mod tests {
     }
 
     #[test]
+    fn toggle_binding_key_down_queues_toggle_active_mode() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+
+        state.route_key_event(ctrl_e_down(), Some(Action::MoveLeft));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
+        );
+    }
+
+    #[test]
+    fn toggle_binding_key_up_does_not_queue_toggle_command() {
+        let mut state = AppState::default();
+        let mut event = KeyEvent::new(VirtualKey::E, false);
+        event.ctrl_down = true;
+
+        state.route_key_event(event, None);
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn toggle_binding_still_queues_while_active_mode_is_false() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.set_active_mode(false);
+
+        state.route_key_event(ctrl_e_down(), Some(Action::MoveLeft));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
+        );
+    }
+
+    #[test]
+    fn movement_key_down_while_disabled_does_not_queue_movement_command() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+        state.set_active_mode(false);
+
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Left, true),
+            Some(Action::MoveLeft),
+        );
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
     fn jump_mode_routes_escape_to_jump_input_before_exit_binding() {
         let mut state = AppState::default();
         enter_jump_mode(&mut state, VirtualKey::J);
@@ -628,6 +683,81 @@ mod tests {
         assert_eq!(view.input, "");
         assert_eq!(view.preview_margin_percent, 0);
         assert_eq!(view.stages.len(), 1);
+    }
+
+    #[test]
+    fn preserved_ctrl_w_passes_through_when_not_configured_as_system_binding() {
+        let mut state = state_with_bound_key(VirtualKey::W);
+        let ctrl_w = ctrl_w_down();
+
+        assert!(!state.should_swallow_key(&ctrl_w));
+
+        state.route_key_event(ctrl_w, Some(Action::MoveLeft));
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn toggle_active_ctrl_w_is_swallowed_and_routed_as_toggle() {
+        let mut state = state_with_bound_key(VirtualKey::W);
+        state.set_system_bindings(RuntimeSystemBindings::new(
+            KeyChord::parse("Ctrl+W").unwrap(),
+            KeyChord::parse("Escape").unwrap(),
+        ));
+        let ctrl_w = ctrl_w_down();
+
+        assert!(state.should_swallow_key(&ctrl_w));
+
+        state.route_key_event(ctrl_w, Some(Action::MoveLeft));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
+        );
+    }
+
+    #[test]
+    fn escape_outside_jump_queues_exit() {
+        let mut state = AppState::default();
+
+        state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), None);
+
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::Exit]);
+    }
+
+    #[test]
+    fn escape_inside_jump_queues_jump_input_cancel_path_not_exit() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::J);
+        let event = KeyEvent::new(VirtualKey::Escape, true);
+
+        state.route_key_event(event, None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::JumpInput(event)]
+        );
+    }
+
+    #[test]
+    fn system_binding_routing_order_precedes_preserved_shortcut_filter() {
+        let mut state = state_with_bound_key(VirtualKey::W);
+        state.set_system_bindings(RuntimeSystemBindings::new(
+            KeyChord::parse("Ctrl+W").unwrap(),
+            KeyChord::parse("Escape").unwrap(),
+        ));
+        let ctrl_w = ctrl_w_down();
+
+        assert!(!state.is_jump_active());
+        assert!(state.is_preserved_shortcut(&ctrl_w));
+        assert!(state.is_system_binding(&ctrl_w));
+
+        state.route_key_event(ctrl_w, Some(Action::MoveLeft));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
+        );
     }
 
     #[test]
