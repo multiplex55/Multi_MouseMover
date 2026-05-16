@@ -12,6 +12,11 @@ key_bindings = [
     ["F", "jump_mode"],
     ["W", "move_up"]
 ]
+
+[system_bindings]
+toggle_active = "Ctrl+E"
+exit = "Escape"
+
 polling_rate = 8
 
 # Grid size

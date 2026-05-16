@@ -3,6 +3,7 @@ mod action_handler;
 mod app_state;
 mod jump_grid;
 mod jump_overlay;
+mod key_chord;
 mod keyboard;
 mod overlay;
 
@@ -10,6 +11,7 @@ use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, KeyEvent};
 use jump_overlay::{hide_jump_overlay, show_jump_overlay, JumpKeyResult, JUMP_OVERLAY};
+use key_chord::{KeyChord, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::OVERLAY;
@@ -145,6 +147,7 @@ thread_local! {
 #[serde(default)]
 struct Config {
     key_bindings: Vec<(String, String)>,
+    system_bindings: SystemBindings,
     polling_rate: u64,
     grid_size: GridSize,
     starting_speed: i32,    // Initial speed in pixels
@@ -157,12 +160,29 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             key_bindings: Vec::new(),
+            system_bindings: SystemBindings::default(),
             polling_rate: DEFAULT_POLLING_RATE_MS,
             grid_size: GridSize::default(),
             starting_speed: 1,
             acceleration: 2,
             acceleration_rate: 1,
             top_speed: 6,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+struct SystemBindings {
+    toggle_active: String,
+    exit: String,
+}
+
+impl Default for SystemBindings {
+    fn default() -> Self {
+        Self {
+            toggle_active: "Ctrl+E".to_string(),
+            exit: "Escape".to_string(),
         }
     }
 }
@@ -184,11 +204,12 @@ impl Default for GridSize {
 }
 
 impl Config {
-    fn normalize(mut self) -> Self {
+    fn normalize(mut self) -> Result<Self, Box<dyn Error>> {
         if self.polling_rate == 0 {
             self.polling_rate = DEFAULT_POLLING_RATE_MS;
         }
-        self
+        self.runtime_system_bindings()?;
+        Ok(self)
     }
 
     fn load_from_file(path: &str) -> Result<Self, Box<dyn Error>> {
@@ -213,7 +234,7 @@ impl Config {
         // First attempt: path relative to current directory
         println!("[DEBUG] trying path: {}", path);
         match fs::read_to_string(path) {
-            Ok(config_str) => return Ok(toml::from_str::<Self>(&config_str)?.normalize()),
+            Ok(config_str) => return toml::from_str::<Self>(&config_str)?.normalize(),
             Err(e) => {
                 if e.kind() != io::ErrorKind::NotFound {
                     return Err(e.into());
@@ -227,7 +248,7 @@ impl Config {
             exe_path.push(path);
             println!("[DEBUG] trying exe path: {}", exe_path.display());
             match fs::read_to_string(&exe_path) {
-                Ok(config_str) => return Ok(toml::from_str::<Self>(&config_str)?.normalize()),
+                Ok(config_str) => return toml::from_str::<Self>(&config_str)?.normalize(),
                 Err(e) => {
                     if e.kind() != io::ErrorKind::NotFound {
                         return Err(e.into());
@@ -237,8 +258,18 @@ impl Config {
         }
 
         eprintln!("Config file not found, using defaults");
-        Ok(Self::default().normalize())
+        Self::default().normalize()
     }
+
+    fn runtime_system_bindings(&self) -> Result<RuntimeSystemBindings, Box<dyn Error>> {
+        Ok(RuntimeSystemBindings::new(
+            KeyChord::parse(&self.system_bindings.toggle_active)
+                .map_err(|e| format!("system_bindings.toggle_active: {e}"))?,
+            KeyChord::parse(&self.system_bindings.exit)
+                .map_err(|e| format!("system_bindings.exit: {e}"))?,
+        ))
+    }
+
     fn initialize_bindings(&self) {
         let mut key_actions = KEY_ACTIONS.write().unwrap(); // Acquire write lock
 
@@ -262,6 +293,22 @@ impl Config {
             .write()
             .unwrap()
             .set_bound_keys(key_actions.bound_keys());
+    }
+
+    fn initialize_system_bindings(&self) -> Result<(), Box<dyn Error>> {
+        let system_bindings = self.runtime_system_bindings()?;
+
+        println!(
+            "✅ System bindings resolved: toggle_active={:?}, exit={:?}",
+            system_bindings.toggle_active, system_bindings.exit
+        );
+
+        APP_STATE
+            .write()
+            .unwrap()
+            .set_system_bindings(system_bindings);
+
+        Ok(())
     }
 }
 
@@ -319,12 +366,18 @@ unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPA
 }
 
 fn should_log_routing_event(event: &KeyEvent, action: Option<Action>) -> bool {
-    action.is_some() || (event.is_down && event.key == VirtualKey::Escape)
+    action.is_some() || APP_STATE.read().unwrap().is_system_key_down_event(event)
 }
 
 fn routing_action_label(event: &KeyEvent, action: Option<Action>) -> String {
-    if event.is_down && event.key == VirtualKey::Escape {
+    if APP_STATE.read().unwrap().is_exit_key_down_event(event) {
         "Exit".to_string()
+    } else if APP_STATE
+        .read()
+        .unwrap()
+        .is_toggle_active_key_down_event(event)
+    {
+        "ToggleActiveMode".to_string()
     } else if let Some(action) = action {
         format!("{action:?}")
     } else {
@@ -538,6 +591,10 @@ fn main() {
 
     config.initialize_bindings();
     println!("✅ Key Bindings Initialized");
+    if let Err(e) = config.initialize_system_bindings() {
+        eprintln!("❌ System Binding Initialization Failed: {e}");
+        std::process::exit(1);
+    }
 
     if let Err(e) = unsafe { install_keyboard_hook() } {
         eprintln!("❌ Keyboard Hook Failed to Install: {e}");
@@ -605,7 +662,7 @@ mod tests {
     use super::*;
 
     fn parse_config(toml: &str) -> Config {
-        toml::from_str::<Config>(toml).unwrap().normalize()
+        toml::from_str::<Config>(toml).unwrap().normalize().unwrap()
     }
 
     #[test]
@@ -634,7 +691,27 @@ mod tests {
         assert_eq!(config.acceleration, defaults.acceleration);
         assert_eq!(config.acceleration_rate, defaults.acceleration_rate);
         assert_eq!(config.top_speed, defaults.top_speed);
+        assert_eq!(
+            config.system_bindings.toggle_active,
+            defaults.system_bindings.toggle_active
+        );
+        assert_eq!(config.system_bindings.exit, defaults.system_bindings.exit);
         assert!(config.key_bindings.is_empty());
+    }
+
+    #[test]
+    fn invalid_system_binding_fails_normalization() {
+        let config = toml::from_str::<Config>(
+            r#"
+            [system_bindings]
+            toggle_active = "Ctrl+Nope"
+            "#,
+        )
+        .unwrap();
+
+        let err = config.normalize().unwrap_err().to_string();
+        assert!(err.contains("system_bindings.toggle_active"));
+        assert!(err.contains("invalid key token"));
     }
 
     #[test]
@@ -761,6 +838,10 @@ mod tests {
 
     #[test]
     fn routing_log_filter_includes_escape_down_as_exit() {
+        APP_STATE
+            .write()
+            .unwrap()
+            .set_system_bindings(RuntimeSystemBindings::default());
         let event = KeyEvent::new(VirtualKey::Escape, true);
 
         assert!(should_log_routing_event(&event, None));

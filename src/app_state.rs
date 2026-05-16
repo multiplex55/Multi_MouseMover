@@ -1,4 +1,5 @@
 use crate::action::Action;
+use crate::key_chord::RuntimeSystemBindings;
 use crate::keyboard::VirtualKey;
 use std::collections::{HashSet, VecDeque};
 
@@ -46,6 +47,7 @@ pub struct AppState {
     activation_key_released: bool,
     active_mode: bool,
     preserve_global_shortcuts: bool,
+    system_bindings: RuntimeSystemBindings,
 }
 
 impl Default for AppState {
@@ -60,6 +62,7 @@ impl Default for AppState {
             activation_key_released: true,
             active_mode: true,
             preserve_global_shortcuts: true,
+            system_bindings: RuntimeSystemBindings::default(),
         }
     }
 }
@@ -95,6 +98,22 @@ impl AppState {
         }
     }
 
+    pub fn set_system_bindings(&mut self, system_bindings: RuntimeSystemBindings) {
+        self.system_bindings = system_bindings;
+    }
+
+    pub fn is_toggle_active_key_down_event(&self, event: &KeyEvent) -> bool {
+        event.is_down && self.system_bindings.toggle_active.matches_event(event)
+    }
+
+    pub fn is_exit_key_down_event(&self, event: &KeyEvent) -> bool {
+        event.is_down && self.system_bindings.exit.matches_event(event)
+    }
+
+    pub fn is_system_key_down_event(&self, event: &KeyEvent) -> bool {
+        self.is_toggle_active_key_down_event(event) || self.is_exit_key_down_event(event)
+    }
+
     #[cfg(test)]
     pub fn set_preserve_global_shortcuts(&mut self, preserve: bool) {
         self.preserve_global_shortcuts = preserve;
@@ -121,9 +140,7 @@ impl AppState {
             return true;
         }
 
-        if event.is_down
-            && ((event.alt_down && event.key == VirtualKey::E) || event.key == VirtualKey::Escape)
-        {
+        if self.is_system_key_down_event(event) {
             return true;
         }
 
@@ -144,26 +161,12 @@ impl AppState {
             return;
         }
 
-        if event.is_down && event.alt_down && event.key == VirtualKey::E {
+        if self.is_toggle_active_key_down_event(&event) {
             self.enqueue_command(AppCommand::ToggleActiveMode);
             return;
         }
 
-        // Escape is intentionally hardwired as an emergency exit while the
-        // system binding model is still implicit. Configured key-action
-        // bindings are resolved by the caller and passed in as `action`, so a
-        // config entry such as `["Escape", "exit"]` can also arrive here as
-        // `Some(Action::Exit)`. This branch takes precedence and returns before
-        // generic action routing, guaranteeing one Exit command per key-down.
-        //
-        // Future config proposal:
-        // [system_bindings]
-        // toggle_active = "Alt+E"
-        // exit = "Escape"
-        //
-        // Keep system bindings separate from movement/action bindings so
-        // emergency controls remain available even when active mode is off.
-        if event.is_down && event.key == VirtualKey::Escape {
+        if self.is_exit_key_down_event(&event) {
             self.enqueue_command(AppCommand::Exit);
             return;
         }
@@ -269,9 +272,9 @@ mod tests {
         commands
     }
 
-    fn alt_e_down() -> KeyEvent {
+    fn ctrl_e_down() -> KeyEvent {
         let mut event = KeyEvent::new(VirtualKey::E, true);
-        event.alt_down = true;
+        event.ctrl_down = true;
         event
     }
 
@@ -402,14 +405,31 @@ mod tests {
     }
 
     #[test]
-    fn alt_e_key_down_toggles_active_mode_without_movement_action() {
+    fn ctrl_e_key_down_toggles_active_mode_without_movement_action() {
         let mut state = state_with_bound_key(VirtualKey::E);
 
-        state.route_key_event(alt_e_down(), Some(Action::MoveLeft));
+        state.route_key_event(ctrl_e_down(), Some(Action::MoveLeft));
 
         assert_eq!(
             collect_commands(&mut state),
             vec![AppCommand::ToggleActiveMode]
+        );
+    }
+
+    #[test]
+    fn toggle_active_requires_exact_modifiers() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        let mut event = ctrl_e_down();
+        event.shift_down = true;
+
+        state.route_key_event(event, Some(Action::MoveLeft));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveLeft,
+                is_down: true,
+            }]
         );
     }
 
@@ -461,7 +481,7 @@ mod tests {
     #[test]
     fn queued_mixed_system_and_movement_commands_preserve_fifo_order() {
         let mut state = state_with_bound_key(VirtualKey::Left);
-        state.enqueue_key_event(alt_e_down());
+        state.enqueue_key_event(ctrl_e_down());
         state.enqueue_key_event(KeyEvent::new(VirtualKey::Escape, true));
         state.enqueue_key_event(KeyEvent::new(VirtualKey::Left, true));
 
