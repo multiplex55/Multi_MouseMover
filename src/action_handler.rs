@@ -125,6 +125,7 @@ impl MouseMaster {
     }
 
     /// Detect when left click is released
+    #[allow(dead_code)]
     fn release_left_click(&mut self) {
         println!("[DEBUG] Left Click Released!");
         self.left_click_held = false; // ✅ Reset state
@@ -199,6 +200,7 @@ impl MouseMaster {
     }
 
     /// Displays a grid on the screen (for future extensions)
+    #[allow(dead_code)]
     pub fn display_grid(&self) {
         println!(
             "Displaying grid of size {}x{}",
@@ -208,6 +210,7 @@ impl MouseMaster {
     }
 
     /// Switches to a different mode
+    #[allow(dead_code)]
     pub fn switch_mode(&mut self, mode: &str) {
         if self.current_mode == ModeState::Active {
             self.current_mode = ModeState::Idle;

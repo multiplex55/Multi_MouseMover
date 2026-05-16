@@ -82,8 +82,8 @@ impl JumpOverlay {
             );
             match hwnd {
                 Ok(h) => {
-                    SetLayeredWindowAttributes(h, COLORREF(0), 180, LWA_ALPHA);
-                    ShowWindow(h, SW_HIDE);
+                    let _ = SetLayeredWindowAttributes(h, COLORREF(0), 180, LWA_ALPHA);
+                    let _ = ShowWindow(h, SW_HIDE);
                     self.hwnd = Some(h);
                 }
                 Err(e) => {
@@ -104,7 +104,7 @@ impl JumpOverlay {
         if let Some(h) = self.hwnd {
             unsafe {
                 // Use non-activating show mode so jump overlay never steals focus.
-                ShowWindow(h, SW_SHOWNOACTIVATE);
+                let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
             }
             self.request_repaint();
             self.visible = true;
@@ -115,7 +115,7 @@ impl JumpOverlay {
         self.input.clear();
         if let Some(h) = self.hwnd {
             unsafe {
-                ShowWindow(h, SW_HIDE);
+                let _ = ShowWindow(h, SW_HIDE);
             }
         }
         self.visible = false;
@@ -145,22 +145,22 @@ impl JumpOverlay {
                 let old_pen = SelectObject(hdc, pen.into());
                 if old_pen.0.is_null() {
                     println!("SelectObject failed: {:?}", GetLastError());
-                    DeleteObject(pen.into());
+                    let _ = DeleteObject(pen.into());
                     return;
                 }
 
                 // draw vertical lines
                 for x in 0..=self.grid_size.0 {
                     let pos = rect.left + (x as i32 * cell_w);
-                    MoveToEx(hdc, pos, rect.top, None);
-                    LineTo(hdc, pos, rect.bottom);
+                    let _ = MoveToEx(hdc, pos, rect.top, None);
+                    let _ = LineTo(hdc, pos, rect.bottom);
                 }
 
                 // draw horizontal lines
                 for y in 0..=self.grid_size.1 {
                     let pos = rect.top + (y as i32 * cell_h);
-                    MoveToEx(hdc, rect.left, pos, None);
-                    LineTo(hdc, rect.right, pos);
+                    let _ = MoveToEx(hdc, rect.left, pos, None);
+                    let _ = LineTo(hdc, rect.right, pos);
                 }
 
                 // draw labels
@@ -175,12 +175,12 @@ impl JumpOverlay {
                             code.encode_utf16().chain(std::iter::once(0)).collect();
                         let x = rect.left + col as i32 * cell_w + cell_w / 2 - 8;
                         let y = rect.top + row as i32 * cell_h + cell_h / 2 - 8;
-                        TextOutW(hdc, x, y, &text[..text.len() - 1]);
+                        let _ = TextOutW(hdc, x, y, &text[..text.len() - 1]);
                     }
                 }
 
                 SelectObject(hdc, old_pen);
-                DeleteObject(pen.into());
+                let _ = DeleteObject(pen.into());
             }
         }
     }
@@ -270,7 +270,9 @@ extern "system" fn jump_window_proc(
                 ov.draw(hdc);
                 ov.repaint_requested = false;
             });
-            unsafe { EndPaint(hwnd, ps) };
+            unsafe {
+                let _ = EndPaint(hwnd, ps);
+            };
             LRESULT(0)
         }
         WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
