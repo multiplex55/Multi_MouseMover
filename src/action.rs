@@ -85,6 +85,11 @@ impl ActionHandler {
         }
     }
 
+    pub fn clear_active_keys(&mut self) {
+        self.active_keys.clear();
+        self.mouse_master.reset_speed();
+    }
+
     pub fn tick_movement(&mut self) -> MovementTick {
         self.mouse_master
             .tick_movement(&self.active_keys, Duration::from_millis(0))

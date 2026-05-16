@@ -477,6 +477,72 @@ mod tests {
     }
 
     #[test]
+    fn inactive_mode_ignores_normal_movement_key_up_without_mutating_active_keys() {
+        let mut state = state_with_bound_key(VirtualKey::Left);
+        state.active_keys.insert(VirtualKey::Left);
+        state.set_active_mode(false);
+
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Left, false),
+            Some(Action::MoveLeft),
+        );
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(state.active_keys.is_empty());
+    }
+
+    #[test]
+    fn inactive_mode_ignores_click_and_jump_bindings() {
+        let mut state = state_with_bound_key(VirtualKey::J);
+        state.set_bound_keys([VirtualKey::J, VirtualKey::A]);
+        state.set_active_mode(false);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::A, true), Some(Action::LeftClick));
+        state.route_key_event(KeyEvent::new(VirtualKey::J, true), Some(Action::JumpMode));
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(!state.jump_active);
+    }
+
+    #[test]
+    fn inactive_mode_still_routes_system_commands() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.set_active_mode(false);
+
+        state.route_key_event(ctrl_e_down(), Some(Action::MoveLeft));
+        state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), Some(Action::Exit));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode, AppCommand::Exit]
+        );
+    }
+
+    #[test]
+    fn inactive_mode_preserves_os_shortcuts_unless_configured_as_system_bindings() {
+        let mut state = state_with_bound_key(VirtualKey::S);
+        state.set_active_mode(false);
+        let mut ctrl_s = KeyEvent::new(VirtualKey::S, true);
+        ctrl_s.ctrl_down = true;
+
+        assert!(!state.should_swallow_key(&ctrl_s));
+        state.route_key_event(ctrl_s, Some(Action::MoveLeft));
+        assert_eq!(collect_commands(&mut state), Vec::new());
+
+        state.set_system_bindings(RuntimeSystemBindings::new(
+            KeyChord::parse("Ctrl+S").unwrap(),
+            KeyChord::parse("Escape").unwrap(),
+        ));
+
+        assert!(state.should_swallow_key(&ctrl_s));
+        state.route_key_event(ctrl_s, Some(Action::MoveLeft));
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
+        );
+    }
+
+    #[test]
     fn ctrl_e_key_down_toggles_active_mode_without_movement_action() {
         let mut state = state_with_bound_key(VirtualKey::E);
 

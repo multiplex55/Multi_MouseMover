@@ -456,9 +456,18 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             let active_mode = {
                 let mut action_handler = ACTION_HANDLER.write().unwrap();
                 action_handler.mouse_master.toggle_mode();
-                action_handler.mouse_master.current_mode == ModeState::Active
+                let active_mode = action_handler.mouse_master.current_mode == ModeState::Active;
+                if !active_mode {
+                    action_handler.clear_active_keys();
+                }
+                active_mode
             };
-            APP_STATE.write().unwrap().set_active_mode(active_mode);
+            let mut app_state = APP_STATE.write().unwrap();
+            app_state.set_active_mode(active_mode);
+            if !active_mode {
+                app_state.exit_jump_mode();
+                hide_jump_overlay();
+            }
         }
         AppCommand::Exit => {
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
@@ -470,6 +479,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::KeyAction { action, is_down } => {
             let mut action_handler = ACTION_HANDLER.write().unwrap();
+            if action_handler.mouse_master.current_mode != ModeState::Active {
+                return;
+            }
             action_handler.process_active_keys(action, is_down);
 
             if is_down && !ActionHandler::is_movement_action(action) {
