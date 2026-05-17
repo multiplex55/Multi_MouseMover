@@ -146,6 +146,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_action_strings_case_insensitively() {
+        let cases = [
+            ("MOVE_UP", Action::MoveUp),
+            ("Move_Left", Action::MoveLeft),
+            ("cLiCk_ThEn_DiSaBlE", Action::ClickThenDisable),
+            ("WHEEL_SPEED_DOWN", Action::WheelSpeedDown),
+            ("Jump_Mode", Action::JumpMode),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(Action::from_string(input), Some(expected), "{input}");
+        }
+    }
+
+    #[test]
     fn unknown_action_strings_do_not_parse() {
         assert_eq!(Action::from_string("unknown_action"), None);
     }

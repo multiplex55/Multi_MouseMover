@@ -445,6 +445,9 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::indicator::{
+        resolve_indicator_state, IndicatorInput, IndicatorState, WheelIndicatorInput,
+    };
     use crate::key_chord::KeyChord;
 
     fn jump_region() -> JumpRegion {
@@ -679,6 +682,30 @@ mod tests {
         );
 
         assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn disabled_mode_suppresses_movement_and_resolves_hidden_indicator() {
+        let mut state = state_with_bound_key(VirtualKey::W);
+        state.set_active_mode(false);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::W, true), Some(Action::MoveUp));
+
+        let active_actions = HashSet::from([Action::MoveUp]);
+        let indicator = resolve_indicator_state(IndicatorInput {
+            app_active: state.active_mode(),
+            jump_active: state.is_jump_active(),
+            active_actions: &active_actions,
+            wheel: WheelIndicatorInput {
+                active: true,
+                current_speed: 12,
+                default_speed: 3,
+            },
+            left_button_held: true,
+        });
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert_eq!(indicator, IndicatorState::Hidden);
     }
 
     #[test]

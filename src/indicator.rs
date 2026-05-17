@@ -123,6 +123,14 @@ mod tests {
     }
 
     #[test]
+    fn jump_mode_overrides_normal_active_indicator_state() {
+        assert_eq!(
+            resolve(true, true, HashSet::new(), false, 3, 3),
+            IndicatorState::JumpMode
+        );
+    }
+
+    #[test]
     fn wheel_takes_priority_over_slow_and_classifies_speed() {
         assert_eq!(
             resolve(true, false, actions(&[Action::SlowMouse]), true, 1, 3),

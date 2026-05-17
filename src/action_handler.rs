@@ -670,6 +670,20 @@ mod tests {
     }
 
     #[test]
+    fn enabled_mode_movement_key_moves_backend_on_tick() {
+        let mut backend = FakeBackend::default();
+        backend.location = (50, 60);
+        let mouse_master = MouseMaster::new_with_backend(test_config(), backend);
+        let mut handler = crate::action::ActionHandler::new(mouse_master);
+
+        handler.process_active_keys(Action::MoveRight, true);
+        let tick = handler.tick_movement();
+
+        assert!(tick.moving);
+        assert_eq!(handler.mouse_master.backend.moves, vec![(52, 60)]);
+    }
+
+    #[test]
     fn edge_target_coordinates_use_one_pixel_monitor_inset() {
         let rect = MonitorRect {
             left: 10,

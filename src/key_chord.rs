@@ -250,6 +250,77 @@ mod tests {
     }
 
     #[test]
+    fn parses_punctuation_key_aliases_in_chords() {
+        let cases = [
+            ("Ctrl+;", VirtualKey::Oem1),
+            ("Alt+Semicolon", VirtualKey::Oem1),
+            ("Shift+Comma", VirtualKey::OemComma),
+            ("Win+Period", VirtualKey::OemPeriod),
+            ("Meta+Dot", VirtualKey::OemPeriod),
+            ("Ctrl+Forward_Slash", VirtualKey::Oem2),
+            ("Alt+Backtick", VirtualKey::Oem3),
+            ("Shift+Left_Bracket", VirtualKey::Oem4),
+            ("Ctrl+Backslash", VirtualKey::Oem5),
+            ("Alt+Right_Bracket", VirtualKey::Oem6),
+            ("Shift+Apostrophe", VirtualKey::Oem7),
+        ];
+
+        for (input, expected_key) in cases {
+            assert_eq!(KeyChord::parse(input).unwrap().key, expected_key, "{input}");
+        }
+    }
+
+    #[test]
+    fn parses_modifier_aliases_table_driven() {
+        let cases = [
+            (
+                "Ctrl+E",
+                chord(VirtualKey::E, true, false, false, false, false),
+            ),
+            (
+                "Control+E",
+                chord(VirtualKey::E, true, false, false, false, false),
+            ),
+            (
+                "Alt+E",
+                chord(VirtualKey::E, false, true, false, false, false),
+            ),
+            (
+                "RightAlt+E",
+                chord(VirtualKey::E, false, true, true, false, false),
+            ),
+            (
+                "RAlt+E",
+                chord(VirtualKey::E, false, true, true, false, false),
+            ),
+            (
+                "RIGHT_ALT+E",
+                chord(VirtualKey::E, false, true, true, false, false),
+            ),
+            (
+                "Shift+E",
+                chord(VirtualKey::E, false, false, false, true, false),
+            ),
+            (
+                "Win+E",
+                chord(VirtualKey::E, false, false, false, false, true),
+            ),
+            (
+                "Super+E",
+                chord(VirtualKey::E, false, false, false, false, true),
+            ),
+            (
+                "Meta+E",
+                chord(VirtualKey::E, false, false, false, false, true),
+            ),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(KeyChord::parse(input).unwrap(), expected, "{input}");
+        }
+    }
+
+    #[test]
     fn matches_exact_modifiers() {
         let chord = KeyChord::parse("Ctrl+E").unwrap();
         let mut event = KeyEvent::new(VirtualKey::E, true);

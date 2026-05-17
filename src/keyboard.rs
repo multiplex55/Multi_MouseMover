@@ -687,17 +687,50 @@ mod tests {
     fn parses_optional_oem_punctuation_aliases() {
         let cases = [
             ("/", VirtualKey::Oem2),
+            ("SLASH", VirtualKey::Oem2),
+            ("FORWARD_SLASH", VirtualKey::Oem2),
             ("`", VirtualKey::Oem3),
+            ("BACKTICK", VirtualKey::Oem3),
+            ("GRAVE", VirtualKey::Oem3),
             ("[", VirtualKey::Oem4),
+            ("LEFT_BRACKET", VirtualKey::Oem4),
+            ("LBRACKET", VirtualKey::Oem4),
             ("\\", VirtualKey::Oem5),
+            ("BACKSLASH", VirtualKey::Oem5),
             ("]", VirtualKey::Oem6),
+            ("RIGHT_BRACKET", VirtualKey::Oem6),
+            ("RBRACKET", VirtualKey::Oem6),
             ("'", VirtualKey::Oem7),
+            ("QUOTE", VirtualKey::Oem7),
+            ("APOSTROPHE", VirtualKey::Oem7),
             ("-", VirtualKey::OemMinus),
+            ("MINUS", VirtualKey::OemMinus),
             ("=", VirtualKey::OemPlus),
+            ("PLUS", VirtualKey::OemPlus),
+            ("EQUALS", VirtualKey::OemPlus),
         ];
 
         for (input, expected) in cases {
             assert_eq!(VirtualKey::from_string(input), Some(expected));
+        }
+    }
+
+    #[test]
+    fn parses_modifier_key_aliases_case_insensitively() {
+        let cases = [
+            ("ctrl", VirtualKey::Ctrl),
+            ("ALT", VirtualKey::Alt),
+            ("leftshift", VirtualKey::LeftShift),
+            ("RIGHTSHIFT", VirtualKey::RightShift),
+            ("leftctrl", VirtualKey::LeftCtrl),
+            ("RIGHTCTRL", VirtualKey::RightCtrl),
+            ("leftalt", VirtualKey::LeftAlt),
+            ("RIGHT_ALT", VirtualKey::RightAlt),
+            ("ralt", VirtualKey::RightAlt),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(VirtualKey::from_string(input), Some(expected), "{input}");
         }
     }
 
