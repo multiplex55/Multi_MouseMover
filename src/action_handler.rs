@@ -90,6 +90,7 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     pub top_speed: i32,
     pub left_button_held: bool,
     last_wheel_tick: Option<Instant>,
+    wheel_speed_flash_until: Option<Instant>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -117,6 +118,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             top_speed: config.top_speed,
             left_button_held: false,
             last_wheel_tick: None,
+            wheel_speed_flash_until: None,
         }
     }
 
@@ -270,11 +272,31 @@ impl<B: MouseBackend> MouseMaster<B> {
     pub fn increase_wheel_speed(&mut self) {
         self.current_wheel_speed = (self.current_wheel_speed + self.config.wheel.speed_step)
             .min(self.config.wheel.max_speed);
+        self.flash_wheel_speed_indicator();
     }
 
     pub fn decrease_wheel_speed(&mut self) {
         self.current_wheel_speed = (self.current_wheel_speed - self.config.wheel.speed_step)
             .max(self.config.wheel.min_speed);
+        self.flash_wheel_speed_indicator();
+    }
+
+    pub fn flash_wheel_speed_indicator(&mut self) {
+        self.flash_wheel_speed_indicator_at(Instant::now());
+    }
+
+    pub fn flash_wheel_speed_indicator_at(&mut self, now: Instant) {
+        self.wheel_speed_flash_until =
+            Some(now + Duration::from_millis(self.config.wheel.speed_indicator_ms));
+    }
+
+    pub fn wheel_speed_indicator_active(&self) -> bool {
+        self.wheel_speed_indicator_active_at(Instant::now())
+    }
+
+    pub fn wheel_speed_indicator_active_at(&self, now: Instant) -> bool {
+        self.wheel_speed_flash_until
+            .is_some_and(|flash_until| now < flash_until)
     }
 
     pub fn tick_movement(
@@ -869,6 +891,7 @@ mod tests {
                 max_speed: 10,
                 speed_step: 4,
                 tick_interval: 8,
+                speed_indicator_ms: 700,
             },
             ..Config::default()
         };
@@ -880,6 +903,16 @@ mod tests {
     }
 
     #[test]
+    fn wheel_speed_increase_triggers_flash_indicator() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+        let now = Instant::now();
+
+        mouse.increase_wheel_speed();
+
+        assert!(mouse.wheel_speed_indicator_active_at(now));
+    }
+
+    #[test]
     fn wheel_speed_decrease_clamps_to_min() {
         let config = Config {
             wheel: crate::WheelConfig {
@@ -888,6 +921,7 @@ mod tests {
                 max_speed: 10,
                 speed_step: 4,
                 tick_interval: 8,
+                speed_indicator_ms: 700,
             },
             ..Config::default()
         };
@@ -896,6 +930,30 @@ mod tests {
         mouse.decrease_wheel_speed();
 
         assert_eq!(mouse.current_wheel_speed, 1);
+    }
+
+    #[test]
+    fn wheel_speed_decrease_triggers_flash_indicator() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+        let now = Instant::now();
+
+        mouse.decrease_wheel_speed();
+
+        assert!(mouse.wheel_speed_indicator_active_at(now));
+    }
+
+    #[test]
+    fn wheel_speed_flash_expires_at_configured_time() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+        let now = Instant::now();
+        let flash_duration = Duration::from_millis(mouse.config.wheel.speed_indicator_ms);
+
+        mouse.flash_wheel_speed_indicator_at(now);
+
+        assert!(
+            mouse.wheel_speed_indicator_active_at(now + flash_duration - Duration::from_millis(1))
+        );
+        assert!(!mouse.wheel_speed_indicator_active_at(now + flash_duration));
     }
 
     #[test]

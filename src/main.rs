@@ -39,6 +39,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const DEFAULT_POLLING_RATE_MS: u64 = 8;
+const DEFAULT_WHEEL_SPEED_INDICATOR_MS: u64 = 700;
 const MAX_MESSAGES_PER_TICK: usize = 64;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const DEBUG_HEARTBEAT_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
@@ -265,6 +266,7 @@ pub struct WheelConfig {
     max_speed: i32,
     speed_step: i32,
     tick_interval: u64,
+    speed_indicator_ms: u64,
 }
 
 impl Default for WheelConfig {
@@ -275,6 +277,7 @@ impl Default for WheelConfig {
             max_speed: 12,
             speed_step: 1,
             tick_interval: DEFAULT_POLLING_RATE_MS,
+            speed_indicator_ms: DEFAULT_WHEEL_SPEED_INDICATOR_MS,
         }
     }
 }
@@ -825,6 +828,11 @@ impl Config {
         if self.wheel.tick_interval == 0 {
             warn_config_normalized("wheel.tick_interval is 0; using polling_rate");
             self.wheel.tick_interval = self.polling_rate;
+        }
+
+        if self.wheel.speed_indicator_ms == 0 {
+            warn_config_normalized("wheel.speed_indicator_ms is 0; using default");
+            self.wheel.speed_indicator_ms = DEFAULT_WHEEL_SPEED_INDICATOR_MS;
         }
     }
 
@@ -1671,15 +1679,17 @@ fn main() {
         let indicator_state = {
             let action_handler = ACTION_HANDLER.read().unwrap();
             let app_state = APP_STATE.read().unwrap();
+            let wheel_direction_active = action_handler
+                .active_keys
+                .iter()
+                .any(|action| action.is_wheel_direction());
             resolve_indicator_state(IndicatorInput {
                 app_active: app_state.active_mode(),
                 jump_active: app_state.is_jump_active(),
                 active_actions: &action_handler.active_keys,
                 wheel: WheelIndicatorInput {
-                    active: action_handler
-                        .active_keys
-                        .iter()
-                        .any(|action| action.is_wheel_direction()),
+                    active: wheel_direction_active
+                        || action_handler.mouse_master.wheel_speed_indicator_active(),
                     current_speed: action_handler.mouse_master.current_wheel_speed,
                     default_speed: action_handler.mouse_master.config.wheel.default_speed,
                 },
@@ -2363,6 +2373,7 @@ mod tests {
             max_speed = 8
             speed_step = 0
             tick_interval = 0
+            speed_indicator_ms = 0
             "#,
         );
 
@@ -2371,6 +2382,10 @@ mod tests {
         assert_eq!(config.wheel.max_speed, 8);
         assert_eq!(config.wheel.speed_step, 1);
         assert_eq!(config.wheel.tick_interval, config.polling_rate);
+        assert_eq!(
+            config.wheel.speed_indicator_ms,
+            DEFAULT_WHEEL_SPEED_INDICATOR_MS
+        );
     }
 
     #[test]
@@ -2393,6 +2408,10 @@ mod tests {
         assert_eq!(
             config.wheel.tick_interval,
             WheelConfig::default().tick_interval
+        );
+        assert_eq!(
+            config.wheel.speed_indicator_ms,
+            WheelConfig::default().speed_indicator_ms
         );
         assert_eq!(config.edge_jump.offset_px, 4);
         assert!(config.edge_jump.use_work_area);

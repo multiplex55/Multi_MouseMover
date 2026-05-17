@@ -364,6 +364,7 @@ fn indicator_color(state: IndicatorState) -> COLORREF {
         IndicatorState::Hidden => RGB(0, 0, 0),
         IndicatorState::ActiveNormal => RGB(255, 0, 0),
         IndicatorState::ActiveSlow => RGB(0, 255, 0),
+        IndicatorState::DraggingLeft => RGB(0, 255, 255),
         IndicatorState::JumpMode => RGB(0, 120, 255),
         IndicatorState::WheelScrollingSlow => RGB(255, 180, 0),
         IndicatorState::WheelScrollingNormal => RGB(255, 255, 0),

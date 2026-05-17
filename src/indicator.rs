@@ -6,6 +6,7 @@ pub enum IndicatorState {
     Hidden,
     ActiveNormal,
     ActiveSlow,
+    DraggingLeft,
     JumpMode,
     WheelScrollingSlow,
     WheelScrollingNormal,
@@ -35,6 +36,10 @@ pub fn resolve_indicator_state(input: IndicatorInput<'_>) -> IndicatorState {
 
     if input.jump_active {
         return IndicatorState::JumpMode;
+    }
+
+    if input.left_button_held {
+        return IndicatorState::DraggingLeft;
     }
 
     if input.wheel.active
@@ -78,6 +83,7 @@ mod tests {
         wheel_active: bool,
         current_wheel_speed: i32,
         default_wheel_speed: i32,
+        left_button_held: bool,
     ) -> IndicatorState {
         resolve_indicator_state(IndicatorInput {
             app_active,
@@ -88,7 +94,7 @@ mod tests {
                 current_speed: current_wheel_speed,
                 default_speed: default_wheel_speed,
             },
-            left_button_held: false,
+            left_button_held,
         })
     }
 
@@ -102,13 +108,14 @@ mod tests {
                 true,
                 12,
                 3,
+                true,
             ),
             IndicatorState::Hidden
         );
     }
 
     #[test]
-    fn jump_mode_takes_priority_over_wheel_and_slow() {
+    fn jump_mode_takes_priority_over_wheel_drag_and_slow() {
         assert_eq!(
             resolve(
                 true,
@@ -117,6 +124,7 @@ mod tests {
                 true,
                 1,
                 3,
+                true,
             ),
             IndicatorState::JumpMode
         );
@@ -125,23 +133,63 @@ mod tests {
     #[test]
     fn jump_mode_overrides_normal_active_indicator_state() {
         assert_eq!(
-            resolve(true, true, HashSet::new(), false, 3, 3),
+            resolve(true, true, HashSet::new(), false, 3, 3, false),
             IndicatorState::JumpMode
+        );
+    }
+
+    #[test]
+    fn dragging_left_takes_priority_over_wheel_and_slow() {
+        assert_eq!(
+            resolve(
+                true,
+                false,
+                actions(&[Action::SlowMouse, Action::WheelDown]),
+                true,
+                1,
+                3,
+                true,
+            ),
+            IndicatorState::DraggingLeft
         );
     }
 
     #[test]
     fn wheel_takes_priority_over_slow_and_classifies_speed() {
         assert_eq!(
-            resolve(true, false, actions(&[Action::SlowMouse]), true, 1, 3),
+            resolve(
+                true,
+                false,
+                actions(&[Action::SlowMouse]),
+                true,
+                1,
+                3,
+                false
+            ),
             IndicatorState::WheelScrollingSlow
         );
         assert_eq!(
-            resolve(true, false, actions(&[Action::WheelDown]), false, 3, 3),
+            resolve(
+                true,
+                false,
+                actions(&[Action::WheelDown]),
+                false,
+                3,
+                3,
+                false,
+            ),
             IndicatorState::WheelScrollingNormal
         );
         assert_eq!(
-            resolve(true, false, actions(&[Action::WheelDown]), false, 5, 3),
+            resolve(
+                true,
+                false,
+                actions(&[Action::WheelDown]),
+                false,
+                5,
+                3,
+                false,
+            ),
             IndicatorState::WheelScrollingFast
         );
     }
@@ -149,7 +197,15 @@ mod tests {
     #[test]
     fn slow_action_takes_priority_over_default_active() {
         assert_eq!(
-            resolve(true, false, actions(&[Action::SlowMouse]), false, 3, 3),
+            resolve(
+                true,
+                false,
+                actions(&[Action::SlowMouse]),
+                false,
+                3,
+                3,
+                false,
+            ),
             IndicatorState::ActiveSlow
         );
     }
@@ -157,7 +213,7 @@ mod tests {
     #[test]
     fn active_without_more_specific_state_is_normal() {
         assert_eq!(
-            resolve(true, false, HashSet::new(), false, 3, 3),
+            resolve(true, false, HashSet::new(), false, 3, 3, false),
             IndicatorState::ActiveNormal
         );
     }
