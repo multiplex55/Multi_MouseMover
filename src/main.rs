@@ -273,6 +273,30 @@ impl Default for JumpMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JumpTargetRegionMode {
+    ExactRegion,
+    RegionWithContext,
+    ExpandedTarget,
+    CursorCenteredZoom,
+}
+
+impl Default for JumpTargetRegionMode {
+    fn default() -> Self {
+        Self::ExactRegion
+    }
+}
+
+fn parse_jump_target_region_mode(value: &str) -> Option<JumpTargetRegionMode> {
+    match value {
+        "exact_region" => Some(JumpTargetRegionMode::ExactRegion),
+        "region_with_context" => Some(JumpTargetRegionMode::RegionWithContext),
+        "expanded_target" => Some(JumpTargetRegionMode::ExpandedTarget),
+        "cursor_centered_zoom" => Some(JumpTargetRegionMode::CursorCenteredZoom),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 struct JumpConfig {
@@ -295,7 +319,9 @@ impl Default for JumpConfig {
                 height: 5,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 10,
+                target_region_mode: JumpTargetRegionMode::ExactRegion,
                 legacy_preview_margin_percent: None,
+                target_region_mode_invalid: false,
             },
             precise: JumpStageConfig {
                 enabled: false,
@@ -303,22 +329,81 @@ impl Default for JumpConfig {
                 height: 3,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 5,
+                target_region_mode: JumpTargetRegionMode::ExactRegion,
                 legacy_preview_margin_percent: None,
+                target_region_mode_invalid: false,
             },
         }
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-#[serde(default)]
+#[derive(Debug, Clone)]
 struct JumpStageConfig {
     enabled: bool,
     width: u32,
     height: u32,
     target_margin_percent: u8,
     visual_context_margin_percent: u8,
+    target_region_mode: JumpTargetRegionMode,
+    legacy_preview_margin_percent: Option<u8>,
+    target_region_mode_invalid: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+struct JumpStageConfigToml {
+    enabled: bool,
+    width: u32,
+    height: u32,
+    target_margin_percent: u8,
+    visual_context_margin_percent: u8,
+    target_region_mode: Option<String>,
     #[serde(default, rename = "preview_margin_percent")]
     legacy_preview_margin_percent: Option<u8>,
+}
+
+impl Default for JumpStageConfigToml {
+    fn default() -> Self {
+        let default = JumpStageConfig::default();
+        Self {
+            enabled: default.enabled,
+            width: default.width,
+            height: default.height,
+            target_margin_percent: default.target_margin_percent,
+            visual_context_margin_percent: default.visual_context_margin_percent,
+            target_region_mode: None,
+            legacy_preview_margin_percent: default.legacy_preview_margin_percent,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for JumpStageConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let fields = JumpStageConfigToml::deserialize(deserializer)?;
+        let (target_region_mode, target_region_mode_invalid) = fields
+            .target_region_mode
+            .as_deref()
+            .map(|value| {
+                parse_jump_target_region_mode(value)
+                    .map(|mode| (mode, false))
+                    .unwrap_or((JumpTargetRegionMode::ExactRegion, true))
+            })
+            .unwrap_or((JumpTargetRegionMode::ExactRegion, false));
+
+        Ok(Self {
+            enabled: fields.enabled,
+            width: fields.width,
+            height: fields.height,
+            target_margin_percent: fields.target_margin_percent,
+            visual_context_margin_percent: fields.visual_context_margin_percent,
+            target_region_mode,
+            legacy_preview_margin_percent: fields.legacy_preview_margin_percent,
+            target_region_mode_invalid,
+        })
+    }
 }
 
 impl JumpStageConfig {
@@ -329,7 +414,9 @@ impl JumpStageConfig {
             height: 0,
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
+            target_region_mode: JumpTargetRegionMode::ExactRegion,
             legacy_preview_margin_percent: None,
+            target_region_mode_invalid: false,
         }
     }
 }
@@ -342,7 +429,9 @@ impl Default for JumpStageConfig {
             height: 1,
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
+            target_region_mode: JumpTargetRegionMode::ExactRegion,
             legacy_preview_margin_percent: None,
+            target_region_mode_invalid: false,
         }
     }
 }
@@ -545,6 +634,13 @@ fn warn_config_normalized(message: &str) {
 fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
     stage.width = normalize_jump_stage_size(name, "width", stage.width);
     stage.height = normalize_jump_stage_size(name, "height", stage.height);
+    if stage.target_region_mode_invalid {
+        warn_config_normalized(&format!(
+            "{name}.target_region_mode is invalid; using exact_region"
+        ));
+        stage.target_region_mode = JumpTargetRegionMode::ExactRegion;
+        stage.target_region_mode_invalid = false;
+    }
     if let Some(legacy_preview_margin_percent) = stage.legacy_preview_margin_percent {
         stage.visual_context_margin_percent = legacy_preview_margin_percent;
     }
@@ -1329,6 +1425,48 @@ mod tests {
         );
 
         assert!(config.jump.move_cursor_after_each_stage);
+    }
+
+    #[test]
+    fn jump_target_region_modes_parse_from_config() {
+        let cases = [
+            ("exact_region", JumpTargetRegionMode::ExactRegion),
+            (
+                "region_with_context",
+                JumpTargetRegionMode::RegionWithContext,
+            ),
+            ("expanded_target", JumpTargetRegionMode::ExpandedTarget),
+            (
+                "cursor_centered_zoom",
+                JumpTargetRegionMode::CursorCenteredZoom,
+            ),
+        ];
+
+        for (value, expected) in cases {
+            let config = parse_config(&format!(
+                r#"
+                [jump.coarse]
+                target_region_mode = "{value}"
+                "#
+            ));
+
+            assert_eq!(config.jump.coarse.target_region_mode, expected);
+        }
+    }
+
+    #[test]
+    fn invalid_jump_target_region_mode_falls_back_to_exact_region() {
+        let config = parse_config(
+            r#"
+            [jump.coarse]
+            target_region_mode = "legacy_zoom"
+            "#,
+        );
+
+        assert_eq!(
+            config.jump.coarse.target_region_mode,
+            JumpTargetRegionMode::ExactRegion
+        );
     }
 
     #[test]

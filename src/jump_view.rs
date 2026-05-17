@@ -1,4 +1,4 @@
-use crate::jump_session::JumpRegion;
+use crate::{jump_session::JumpRegion, JumpTargetRegionMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JumpStageMetadata {
@@ -6,6 +6,7 @@ pub struct JumpStageMetadata {
     pub grid_size: (u32, u32),
     pub target_margin_percent: u8,
     pub visual_context_margin_percent: u8,
+    pub target_region_mode: JumpTargetRegionMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

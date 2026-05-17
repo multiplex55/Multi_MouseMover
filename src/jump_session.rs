@@ -1,6 +1,7 @@
 use crate::{
     jump_grid::{code_to_index, expected_len, letters_needed},
     keyboard::VirtualKey,
+    JumpTargetRegionMode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,8 @@ pub struct JumpStage {
     pub width: u32,
     pub height: u32,
     pub target_margin_percent: u8,
+    pub visual_context_margin_percent: u8,
+    pub target_region_mode: JumpTargetRegionMode,
 }
 
 impl JumpStage {
@@ -37,6 +40,8 @@ impl JumpStage {
             width,
             height,
             target_margin_percent: 0,
+            visual_context_margin_percent: 0,
+            target_region_mode: JumpTargetRegionMode::ExactRegion,
         }
     }
 
@@ -45,6 +50,24 @@ impl JumpStage {
             width,
             height,
             target_margin_percent,
+            visual_context_margin_percent: 0,
+            target_region_mode: JumpTargetRegionMode::ExpandedTarget,
+        }
+    }
+
+    pub fn with_target_region_mode(
+        width: u32,
+        height: u32,
+        target_margin_percent: u8,
+        visual_context_margin_percent: u8,
+        target_region_mode: JumpTargetRegionMode,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            target_margin_percent,
+            visual_context_margin_percent,
+            target_region_mode,
         }
     }
 
@@ -150,7 +173,7 @@ impl JumpSession {
         if !region.is_valid() || stages.is_empty() || stages.iter().any(|stage| !stage.is_valid()) {
             return None;
         }
-        let current_region = expand_region_within(region, stages[0].target_margin_percent, region)?;
+        let current_region = target_region_for_stage(region, stages[0], region)?;
 
         Some(Self {
             stages,
@@ -225,14 +248,11 @@ impl JumpSession {
 
         if self.stage_index + 1 < self.stages.len() {
             self.stage_index += 1;
-            let region = match expand_region_within(
-                region,
-                self.current_stage().target_margin_percent,
-                self.session_region,
-            ) {
-                Some(region) => region,
-                None => return JumpSessionUpdate::Invalid,
-            };
+            let region =
+                match target_region_for_stage(region, self.current_stage(), self.session_region) {
+                    Some(region) => region,
+                    None => return JumpSessionUpdate::Invalid,
+                };
             self.current_region = region;
             self.region_history.push(region);
             JumpSessionUpdate::StageAdvanced {
@@ -244,6 +264,24 @@ impl JumpSession {
             self.region_history.push(region);
             let (x, y) = region.center();
             JumpSessionUpdate::Completed { x, y, region }
+        }
+    }
+}
+
+fn target_region_for_stage(
+    selected_region: JumpRegion,
+    stage: JumpStage,
+    session_region: JumpRegion,
+) -> Option<JumpRegion> {
+    match stage.target_region_mode {
+        JumpTargetRegionMode::ExactRegion => Some(selected_region),
+        JumpTargetRegionMode::RegionWithContext => expand_region_within(
+            selected_region,
+            stage.visual_context_margin_percent,
+            session_region,
+        ),
+        JumpTargetRegionMode::ExpandedTarget | JumpTargetRegionMode::CursorCenteredZoom => {
+            expand_region_within(selected_region, stage.target_margin_percent, session_region)
         }
     }
 }

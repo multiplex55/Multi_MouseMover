@@ -188,15 +188,13 @@ impl AppState {
         let stages = stage_metadata
             .iter()
             .map(|stage| {
-                if stage.target_margin_percent == 0 {
-                    JumpStage::new(stage.grid_size.0, stage.grid_size.1)
-                } else {
-                    JumpStage::with_target_margin(
-                        stage.grid_size.0,
-                        stage.grid_size.1,
-                        stage.target_margin_percent,
-                    )
-                }
+                JumpStage::with_target_region_mode(
+                    stage.grid_size.0,
+                    stage.grid_size.1,
+                    stage.target_margin_percent,
+                    stage.visual_context_margin_percent,
+                    stage.target_region_mode,
+                )
             })
             .collect();
 
@@ -450,6 +448,7 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
         grid_size: (config.jump.coarse.width, config.jump.coarse.height),
         target_margin_percent: config.jump.coarse.target_margin_percent,
         visual_context_margin_percent: config.jump.coarse.visual_context_margin_percent,
+        target_region_mode: config.jump.coarse.target_region_mode,
     }];
 
     if config.jump.fine.enabled {
@@ -458,6 +457,7 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
             grid_size: (config.jump.fine.width, config.jump.fine.height),
             target_margin_percent: config.jump.fine.target_margin_percent,
             visual_context_margin_percent: config.jump.fine.visual_context_margin_percent,
+            target_region_mode: config.jump.fine.target_region_mode,
         });
     }
 
@@ -467,6 +467,7 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
             grid_size: (config.jump.precise.width, config.jump.precise.height),
             target_margin_percent: config.jump.precise.target_margin_percent,
             visual_context_margin_percent: config.jump.precise.visual_context_margin_percent,
+            target_region_mode: config.jump.precise.target_region_mode,
         });
     }
 
@@ -822,6 +823,34 @@ mod tests {
         assert_eq!(view.grid_size, (10, 10));
         assert_eq!(view.input, "");
         assert_eq!(view.stages.len(), 1);
+        assert_eq!(
+            view.stages[0].target_region_mode,
+            crate::JumpTargetRegionMode::ExactRegion
+        );
+    }
+
+    #[test]
+    fn jump_view_propagates_configured_target_region_modes_to_metadata() {
+        let mut config = Config::default();
+        config.jump.mode = crate::JumpMode::Precision;
+        config.jump.coarse.target_region_mode = crate::JumpTargetRegionMode::RegionWithContext;
+        config.jump.fine.enabled = true;
+        config.jump.fine.target_region_mode = crate::JumpTargetRegionMode::ExpandedTarget;
+        let config = config.normalize().unwrap();
+
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+
+        let view = state.jump_view().unwrap();
+        assert_eq!(view.stages.len(), 2);
+        assert_eq!(
+            view.stages[0].target_region_mode,
+            crate::JumpTargetRegionMode::RegionWithContext
+        );
+        assert_eq!(
+            view.stages[1].target_region_mode,
+            crate::JumpTargetRegionMode::ExpandedTarget
+        );
     }
 
     #[test]
