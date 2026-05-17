@@ -68,7 +68,7 @@ mod tests {
     use super::*;
 
     fn actions(actions: &[Action]) -> HashSet<Action> {
-        actions.iter().copied().collect()
+        actions.iter().cloned().collect()
     }
 
     fn resolve(

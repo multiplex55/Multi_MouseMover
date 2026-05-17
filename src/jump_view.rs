@@ -1,4 +1,4 @@
-use crate::{jump_session::JumpRegion, JumpAimPoint, JumpTargetRegionMode};
+use crate::{jump_session::JumpRegion, JumpAimPoint, JumpTargetRegionMode, PreviewEdgeBehavior};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JumpVisuals {
@@ -20,6 +20,16 @@ pub struct JumpStageMetadata {
     pub visual_context_margin_percent: u8,
     pub zoom_scale: f32,
     pub target_region_mode: JumpTargetRegionMode,
+    pub preview_edge_behavior: PreviewEdgeBehavior,
+    pub labels: JumpLabelMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JumpLabelMetadata {
+    pub font_scale: f32,
+    pub center_marker: bool,
+    pub separators: bool,
+    pub hide_threshold_px: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -20,13 +20,14 @@ use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
 };
 use jump_session::JumpSessionUpdate;
-use jump_view::JumpVisuals;
+use jump_view::{JumpLabelMetadata, JumpVisuals};
 use key_chord::{KeyChord, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::OVERLAY;
 use serde::Deserialize;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::thread::sleep;
@@ -338,6 +339,36 @@ impl Default for CursorBetweenStagesMode {
     }
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewEdgeBehavior {
+    Clamp,
+    ShiftIntoBounds,
+    AllowAsymmetricContext,
+    DisableContextNearEdges,
+}
+
+impl Default for PreviewEdgeBehavior {
+    fn default() -> Self {
+        Self::Clamp
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum JumpStartRegion {
+    VirtualScreen,
+    CurrentMonitor,
+    ActiveWindowMonitor,
+    ActiveWindowBounds,
+}
+
+impl Default for JumpStartRegion {
+    fn default() -> Self {
+        Self::VirtualScreen
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JumpTargetRegionMode {
     ExactRegion,
@@ -366,10 +397,13 @@ fn parse_jump_target_region_mode(value: &str) -> Option<JumpTargetRegionMode> {
 struct JumpConfig {
     mode: JumpMode,
     cursor_between_stages: CursorBetweenStagesMode,
+    start_region: JumpStartRegion,
+    preview_edge_behavior: PreviewEdgeBehavior,
     visuals: JumpVisualsConfig,
     coarse: JumpStageConfig,
     fine: JumpStageConfig,
     precise: JumpStageConfig,
+    profiles: HashMap<String, JumpProfileConfig>,
 }
 
 impl Default for JumpConfig {
@@ -377,6 +411,8 @@ impl Default for JumpConfig {
         Self {
             mode: JumpMode::Single,
             cursor_between_stages: CursorBetweenStagesMode::None,
+            start_region: JumpStartRegion::VirtualScreen,
+            preview_edge_behavior: PreviewEdgeBehavior::Clamp,
             visuals: JumpVisualsConfig::default(),
             coarse: JumpStageConfig::missing_coarse(),
             fine: JumpStageConfig {
@@ -390,6 +426,8 @@ impl Default for JumpConfig {
                 visual_context_margin_percent: 10,
                 zoom_scale: 1.5,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
+                preview_edge_behavior: None,
+                labels: JumpLabelConfig::default(),
                 legacy_preview_margin_percent: None,
                 legacy_preview_margin_percent_used: false,
                 target_region_mode_invalid: false,
@@ -405,10 +443,13 @@ impl Default for JumpConfig {
                 visual_context_margin_percent: 5,
                 zoom_scale: 2.5,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
+                preview_edge_behavior: None,
+                labels: JumpLabelConfig::default(),
                 legacy_preview_margin_percent: None,
                 legacy_preview_margin_percent_used: false,
                 target_region_mode_invalid: false,
             },
+            profiles: HashMap::new(),
         }
     }
 }
@@ -419,10 +460,13 @@ struct JumpConfigToml {
     mode: JumpMode,
     cursor_between_stages: Option<CursorBetweenStagesMode>,
     move_cursor_after_each_stage: Option<bool>,
+    start_region: JumpStartRegion,
+    preview_edge_behavior: PreviewEdgeBehavior,
     visuals: JumpVisualsConfig,
     coarse: JumpStageConfig,
     fine: JumpStageConfig,
     precise: JumpStageConfig,
+    profiles: HashMap<String, JumpProfileConfig>,
 }
 
 impl Default for JumpConfigToml {
@@ -432,10 +476,13 @@ impl Default for JumpConfigToml {
             mode: default.mode,
             cursor_between_stages: None,
             move_cursor_after_each_stage: None,
+            start_region: default.start_region,
+            preview_edge_behavior: default.preview_edge_behavior,
             visuals: default.visuals,
             coarse: default.coarse,
             fine: default.fine,
             precise: default.precise,
+            profiles: default.profiles,
         }
     }
 }
@@ -457,12 +504,28 @@ impl<'de> Deserialize<'de> for JumpConfig {
         Ok(Self {
             mode: fields.mode,
             cursor_between_stages,
+            start_region: fields.start_region,
+            preview_edge_behavior: fields.preview_edge_behavior,
             visuals: fields.visuals,
             coarse: fields.coarse,
             fine: fields.fine,
             precise: fields.precise,
+            profiles: fields.profiles,
         })
     }
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(default)]
+struct JumpProfileConfig {
+    mode: Option<JumpMode>,
+    cursor_between_stages: Option<CursorBetweenStagesMode>,
+    start_region: Option<JumpStartRegion>,
+    preview_edge_behavior: Option<PreviewEdgeBehavior>,
+    visuals: Option<JumpVisualsConfig>,
+    coarse: Option<JumpStageConfig>,
+    fine: Option<JumpStageConfig>,
+    precise: Option<JumpStageConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -473,6 +536,37 @@ pub struct JumpVisualsConfig {
     active_grid_outline: bool,
     cell_centers: bool,
     final_crosshair: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(default)]
+pub struct JumpLabelConfig {
+    font_scale: f32,
+    center_marker: bool,
+    separators: bool,
+    hide_threshold_px: i32,
+}
+
+impl Default for JumpLabelConfig {
+    fn default() -> Self {
+        Self {
+            font_scale: 1.0,
+            center_marker: false,
+            separators: true,
+            hide_threshold_px: 0,
+        }
+    }
+}
+
+impl From<JumpLabelConfig> for JumpLabelMetadata {
+    fn from(config: JumpLabelConfig) -> Self {
+        Self {
+            font_scale: config.font_scale,
+            center_marker: config.center_marker,
+            separators: config.separators,
+            hide_threshold_px: config.hide_threshold_px,
+        }
+    }
 }
 
 impl Default for JumpVisualsConfig {
@@ -511,6 +605,8 @@ struct JumpStageConfig {
     visual_context_margin_percent: u8,
     zoom_scale: f32,
     target_region_mode: JumpTargetRegionMode,
+    preview_edge_behavior: Option<PreviewEdgeBehavior>,
+    labels: JumpLabelConfig,
     legacy_preview_margin_percent: Option<u8>,
     legacy_preview_margin_percent_used: bool,
     target_region_mode_invalid: bool,
@@ -529,6 +625,8 @@ struct JumpStageConfigToml {
     visual_context_margin_percent: Option<u8>,
     zoom_scale: f32,
     target_region_mode: Option<String>,
+    preview_edge_behavior: Option<PreviewEdgeBehavior>,
+    labels: JumpLabelConfig,
     #[serde(default, rename = "preview_margin_percent")]
     legacy_preview_margin_percent: Option<u8>,
 }
@@ -547,6 +645,8 @@ impl Default for JumpStageConfigToml {
             visual_context_margin_percent: None,
             zoom_scale: default.zoom_scale,
             target_region_mode: None,
+            preview_edge_behavior: default.preview_edge_behavior,
+            labels: default.labels,
             legacy_preview_margin_percent: default.legacy_preview_margin_percent,
         }
     }
@@ -585,6 +685,8 @@ impl<'de> Deserialize<'de> for JumpStageConfig {
             visual_context_margin_percent,
             zoom_scale: fields.zoom_scale,
             target_region_mode,
+            preview_edge_behavior: fields.preview_edge_behavior,
+            labels: fields.labels,
             legacy_preview_margin_percent: fields.legacy_preview_margin_percent,
             legacy_preview_margin_percent_used,
             target_region_mode_invalid,
@@ -605,6 +707,8 @@ impl JumpStageConfig {
             visual_context_margin_percent: 0,
             zoom_scale: 1.0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
+            preview_edge_behavior: None,
+            labels: JumpLabelConfig::default(),
             legacy_preview_margin_percent: None,
             legacy_preview_margin_percent_used: false,
             target_region_mode_invalid: false,
@@ -625,6 +729,8 @@ impl Default for JumpStageConfig {
             visual_context_margin_percent: 0,
             zoom_scale: 1.0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
+            preview_edge_behavior: None,
+            labels: JumpLabelConfig::default(),
             legacy_preview_margin_percent: None,
             legacy_preview_margin_percent_used: false,
             target_region_mode_invalid: false,
@@ -759,6 +865,58 @@ impl Config {
             width: self.jump.coarse.width,
             height: self.jump.coarse.height,
         };
+
+        let profile_names: Vec<String> = self.jump.profiles.keys().cloned().collect();
+        for name in profile_names {
+            if let Some(profile) = self.jump.profiles.get_mut(&name) {
+                if let Some(stage) = &mut profile.coarse {
+                    normalize_jump_stage(&format!("jump.profiles.{name}.coarse"), stage);
+                }
+                if let Some(stage) = &mut profile.fine {
+                    normalize_jump_stage(&format!("jump.profiles.{name}.fine"), stage);
+                }
+                if let Some(stage) = &mut profile.precise {
+                    normalize_jump_stage(&format!("jump.profiles.{name}.precise"), stage);
+                }
+            }
+        }
+    }
+
+    fn resolved_jump_config(&self, profile_name: Option<&str>) -> Result<JumpConfig, String> {
+        let Some(profile_name) = profile_name else {
+            return Ok(self.jump.clone());
+        };
+        let Some(profile) = self.jump.profiles.get(profile_name) else {
+            return Err(format!("jump profile '{profile_name}' does not exist"));
+        };
+
+        let mut jump = self.jump.clone();
+        jump.profiles.clear();
+        if let Some(mode) = profile.mode {
+            jump.mode = mode;
+        }
+        if let Some(cursor_between_stages) = profile.cursor_between_stages {
+            jump.cursor_between_stages = cursor_between_stages;
+        }
+        if let Some(start_region) = profile.start_region {
+            jump.start_region = start_region;
+        }
+        if let Some(preview_edge_behavior) = profile.preview_edge_behavior {
+            jump.preview_edge_behavior = preview_edge_behavior;
+        }
+        if let Some(visuals) = profile.visuals {
+            jump.visuals = visuals;
+        }
+        if let Some(stage) = &profile.coarse {
+            jump.coarse = stage.clone();
+        }
+        if let Some(stage) = &profile.fine {
+            jump.fine = stage.clone();
+        }
+        if let Some(stage) = &profile.precise {
+            jump.precise = stage.clone();
+        }
+        Ok(jump)
     }
 
     fn load_from_file(path: &str) -> Result<Self, Box<dyn Error>> {
@@ -909,6 +1067,22 @@ fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
         stage.visual_context_margin_percent = MAX_JUMP_REGION_MARGIN_PERCENT;
     }
     stage.zoom_scale = normalize_jump_zoom_scale(name, stage.zoom_scale);
+    stage.labels.font_scale = normalize_jump_label_font_scale(name, stage.labels.font_scale);
+    if stage.labels.hide_threshold_px < 0 {
+        warn_config_normalized(&format!(
+            "{name}.labels.hide_threshold_px is below 0; clamping to 0"
+        ));
+        stage.labels.hide_threshold_px = 0;
+    }
+}
+
+fn normalize_jump_label_font_scale(name: &str, value: f32) -> f32 {
+    if !value.is_finite() || value <= 0.0 {
+        warn_config_normalized(&format!("{name}.labels.font_scale is invalid; using 1.0"));
+        1.0
+    } else {
+        value.clamp(0.25, 4.0)
+    }
 }
 
 fn normalize_jump_aim_offset(name: &str, field: &str, value: i32) -> i32 {
@@ -1082,12 +1256,12 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
 
         let action = KEY_ACTIONS.read().unwrap().get_action_for_event(&event);
 
-        if debug_diagnostics && should_log_routing_event(&event, action) {
+        if debug_diagnostics && should_log_routing_event(&event, action.clone()) {
             println!(
                 "[routing] key={:?} state={} action={}",
                 event.key,
                 if event.is_down { "down" } else { "up" },
-                routing_action_label(&event, action)
+                routing_action_label(&event, action.clone())
             );
         }
 
@@ -1185,19 +1359,24 @@ fn execute_key_action_command<B: MouseBackend>(
 
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
     if debug_diagnostics {
-        match command {
+        match &command {
             AppCommand::ToggleActiveMode => println!("[command] ToggleActiveMode"),
             AppCommand::SetActiveMode { active } => {
                 println!("[command] SetActiveMode active={active}")
             }
             AppCommand::Exit => println!("[command] Exit"),
-            AppCommand::EnterJumpMode { activation_key } => {
-                println!("[command] EnterJumpMode activation_key={activation_key:?}")
+            AppCommand::EnterJumpMode {
+                activation_key,
+                profile,
+            } => {
+                println!(
+                    "[command] EnterJumpMode activation_key={activation_key:?} profile={profile:?}"
+                )
             }
             AppCommand::KeyAction { action, is_down } => {
                 println!(
                     "[command] KeyAction action={action:?} state={}",
-                    if is_down { "down" } else { "up" }
+                    if *is_down { "down" } else { "up" }
                 )
             }
             AppCommand::JumpInput(event, action) => {
@@ -1231,13 +1410,31 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         AppCommand::Exit => {
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
         }
-        AppCommand::EnterJumpMode { activation_key } => {
+        AppCommand::EnterJumpMode {
+            activation_key,
+            profile,
+        } => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
-            let region = virtual_screen_region();
+            let jump_config = match config.resolved_jump_config(profile.as_deref()) {
+                Ok(jump_config) => jump_config,
+                Err(err) => {
+                    eprintln!("[jump] {err}; using default jump settings");
+                    config.jump.clone()
+                }
+            };
+            let fallback_region = virtual_screen_region();
+            let region =
+                monitor::resolve_jump_start_region(jump_config.start_region, fallback_region)
+                    .unwrap_or(fallback_region);
             let view = {
                 let mut app_state = APP_STATE.write().unwrap();
                 app_state
-                    .enter_jump_mode(&config, region, activation_key)
+                    .enter_jump_mode(
+                        &jump_config,
+                        config.final_adjust.clone(),
+                        region,
+                        activation_key,
+                    )
                     .then(|| app_state.jump_view())
                     .flatten()
             };
@@ -1898,6 +2095,110 @@ mod tests {
     }
 
     #[test]
+    fn jump_start_region_and_preview_edge_modes_parse_from_config() {
+        let start_regions = [
+            ("virtual_screen", JumpStartRegion::VirtualScreen),
+            ("current_monitor", JumpStartRegion::CurrentMonitor),
+            (
+                "active_window_monitor",
+                JumpStartRegion::ActiveWindowMonitor,
+            ),
+            ("active_window_bounds", JumpStartRegion::ActiveWindowBounds),
+        ];
+        for (value, expected) in start_regions {
+            let config = parse_config(&format!(
+                r#"
+                [jump]
+                start_region = "{value}"
+                "#
+            ));
+            assert_eq!(config.jump.start_region, expected);
+        }
+
+        let edge_behaviors = [
+            ("clamp", PreviewEdgeBehavior::Clamp),
+            ("shift_into_bounds", PreviewEdgeBehavior::ShiftIntoBounds),
+            (
+                "allow_asymmetric_context",
+                PreviewEdgeBehavior::AllowAsymmetricContext,
+            ),
+            (
+                "disable_context_near_edges",
+                PreviewEdgeBehavior::DisableContextNearEdges,
+            ),
+        ];
+        for (value, expected) in edge_behaviors {
+            let config = parse_config(&format!(
+                r#"
+                [jump]
+                preview_edge_behavior = "{value}"
+
+                [jump.coarse]
+                preview_edge_behavior = "{value}"
+                "#
+            ));
+            assert_eq!(config.jump.preview_edge_behavior, expected);
+            assert_eq!(config.jump.coarse.preview_edge_behavior, Some(expected));
+        }
+    }
+
+    #[test]
+    fn jump_profiles_resolve_overrides_and_report_missing_profiles() {
+        let config = parse_config(
+            r#"
+            [jump]
+            start_region = "virtual_screen"
+            preview_edge_behavior = "clamp"
+
+            [jump.profiles.window]
+            start_region = "active_window_bounds"
+            preview_edge_behavior = "shift_into_bounds"
+
+            [jump.profiles.window.coarse]
+            width = 7
+            height = 6
+            [jump.profiles.window.coarse.labels]
+            hide_threshold_px = 18
+            "#,
+        );
+
+        let default_jump = config.resolved_jump_config(None).unwrap();
+        assert_eq!(default_jump.start_region, JumpStartRegion::VirtualScreen);
+
+        let profile = config.resolved_jump_config(Some("window")).unwrap();
+        assert_eq!(profile.start_region, JumpStartRegion::ActiveWindowBounds);
+        assert_eq!(
+            profile.preview_edge_behavior,
+            PreviewEdgeBehavior::ShiftIntoBounds
+        );
+        assert_eq!(profile.coarse.width, 7);
+        assert_eq!(profile.coarse.labels.hide_threshold_px, 18);
+
+        assert!(config
+            .resolved_jump_config(Some("missing"))
+            .unwrap_err()
+            .contains("missing"));
+    }
+
+    #[test]
+    fn nested_label_config_normalizes() {
+        let config = parse_config(
+            r#"
+            [jump.coarse.labels]
+            font_scale = -2.0
+            center_marker = true
+            separators = false
+            hide_threshold_px = -5
+            "#,
+        );
+
+        assert_eq!(config.jump.coarse.labels.font_scale, 1.0);
+        assert!(config.jump.coarse.labels.center_marker);
+        assert!(!config.jump.coarse.labels.separators);
+        assert_eq!(config.jump.coarse.labels.hide_threshold_px, 0);
+    }
+
+    #[test]
     fn invalid_jump_target_region_mode_falls_back_to_exact_region() {
         let config = parse_config(
             r#"
@@ -2271,7 +2572,12 @@ mod tests {
             );
             if start_in_jump_mode {
                 let config = Config::default().normalize().unwrap();
-                assert!(app_state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+                assert!(app_state.enter_jump_mode(
+                    &config.jump,
+                    config.final_adjust.clone(),
+                    jump_region(),
+                    VirtualKey::J
+                ));
             }
 
             let mouse_master =

@@ -9,10 +9,10 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use crate::{
     jump_grid::{index_to_code, letters_needed},
     jump_session::{expand_region_within, JumpRegion},
-    jump_view::{JumpOverlayView, JumpStageMetadata},
+    jump_view::{JumpLabelMetadata, JumpOverlayView, JumpStageMetadata},
     overlay::RGB,
     screen_capture::{capture_virtual_screen, ScreenSnapshot},
-    JumpTargetRegionMode,
+    JumpTargetRegionMode, PreviewEdgeBehavior,
 };
 
 thread_local! {
@@ -161,15 +161,75 @@ fn format_jump_indicator(view: &JumpOverlayView) -> String {
 }
 
 fn preview_source_rect(view: &JumpOverlayView, snapshot: &ScreenSnapshot) -> RECT {
-    let snapshot_right = snapshot.left + snapshot.width;
-    let snapshot_bottom = snapshot.top + snapshot.height;
     let preview_source_region = preview_source_region_for_view(view);
+    let target_region = view.target_region;
+    let behavior = active_stage_metadata(view)
+        .map(|stage| stage.preview_edge_behavior)
+        .unwrap_or_default();
 
-    RECT {
-        left: preview_source_region.left.max(snapshot.left),
-        top: preview_source_region.top.max(snapshot.top),
-        right: (preview_source_region.left + preview_source_region.width).min(snapshot_right),
-        bottom: (preview_source_region.top + preview_source_region.height).min(snapshot_bottom),
+    let region = match behavior {
+        PreviewEdgeBehavior::Clamp | PreviewEdgeBehavior::AllowAsymmetricContext => {
+            clamp_region_to_snapshot(preview_source_region, snapshot)
+        }
+        PreviewEdgeBehavior::ShiftIntoBounds => {
+            shift_region_into_snapshot(preview_source_region, snapshot)
+        }
+        PreviewEdgeBehavior::DisableContextNearEdges => {
+            if active_stage_metadata(view).is_some_and(|stage| {
+                !context_would_exceed_bounds(
+                    view.target_region,
+                    stage.visual_context_margin_percent,
+                    snapshot,
+                )
+            }) {
+                preview_source_region
+            } else {
+                clamp_region_to_snapshot(target_region, snapshot)
+            }
+        }
+    };
+
+    region_to_rect(region)
+}
+
+fn context_would_exceed_bounds(
+    region: JumpRegion,
+    margin_percent: u8,
+    snapshot: &ScreenSnapshot,
+) -> bool {
+    let margin_x = region.width * margin_percent as i32 / 100;
+    let margin_y = region.height * margin_percent as i32 / 100;
+    region.left - margin_x < snapshot.left
+        || region.top - margin_y < snapshot.top
+        || region.left + region.width + margin_x > snapshot.left + snapshot.width
+        || region.top + region.height + margin_y > snapshot.top + snapshot.height
+}
+
+fn clamp_region_to_snapshot(region: JumpRegion, snapshot: &ScreenSnapshot) -> JumpRegion {
+    let left = region.left.max(snapshot.left);
+    let top = region.top.max(snapshot.top);
+    let right = (region.left + region.width).min(snapshot.left + snapshot.width);
+    let bottom = (region.top + region.height).min(snapshot.top + snapshot.height);
+    JumpRegion {
+        left,
+        top,
+        width: (right - left).max(0),
+        height: (bottom - top).max(0),
+    }
+}
+
+fn shift_region_into_snapshot(region: JumpRegion, snapshot: &ScreenSnapshot) -> JumpRegion {
+    let width = region.width.min(snapshot.width).max(0);
+    let height = region.height.min(snapshot.height).max(0);
+    let min_left = snapshot.left;
+    let max_left = snapshot.left + snapshot.width - width;
+    let min_top = snapshot.top;
+    let max_top = snapshot.top + snapshot.height - height;
+    JumpRegion {
+        left: region.left.clamp(min_left, max_left),
+        top: region.top.clamp(min_top, max_top),
+        width,
+        height,
     }
 }
 
@@ -250,6 +310,23 @@ struct JumpRenderBranches {
     active_grid_outline: bool,
     cell_centers: bool,
     final_crosshair: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LabelRenderPlan {
+    labels: bool,
+    center_markers: bool,
+    separators: bool,
+}
+
+fn label_render_plan(labels: JumpLabelMetadata, cell_w: i32, cell_h: i32) -> LabelRenderPlan {
+    let large_enough = labels.hide_threshold_px <= 0
+        || (cell_w >= labels.hide_threshold_px && cell_h >= labels.hide_threshold_px);
+    LabelRenderPlan {
+        labels: large_enough,
+        center_markers: large_enough && labels.center_marker,
+        separators: labels.separators,
+    }
 }
 
 fn render_branches_for_view(view: &JumpOverlayView) -> JumpRenderBranches {
@@ -709,6 +786,10 @@ impl JumpOverlay {
                 if cell_w <= 0 || cell_h <= 0 {
                     return;
                 }
+                let labels = active_stage_metadata(view)
+                    .map(|stage| stage.labels)
+                    .unwrap_or(crate::JumpLabelConfig::default().into());
+                let label_plan = label_render_plan(labels, cell_w, cell_h);
 
                 let old_bk_mode = SetBkMode(hdc, TRANSPARENT);
                 let old_text_color = SetTextColor(hdc, label_color());
@@ -716,34 +797,39 @@ impl JumpOverlay {
                 let pen = CreatePen(PS_SOLID, 1, grid_color());
                 let old_pen = SelectObject(hdc, pen.into());
 
-                for x in 0..=grid_size.0 {
-                    let pos = grid_rect.left + (x as i32 * cell_w);
-                    let _ = MoveToEx(hdc, pos, grid_rect.top, None);
-                    let _ = LineTo(hdc, pos, grid_rect.bottom);
-                }
-                for y in 0..=grid_size.1 {
-                    let pos = grid_rect.top + (y as i32 * cell_h);
-                    let _ = MoveToEx(hdc, grid_rect.left, pos, None);
-                    let _ = LineTo(hdc, grid_rect.right, pos);
+                if label_plan.separators {
+                    for x in 0..=grid_size.0 {
+                        let pos = grid_rect.left + (x as i32 * cell_w);
+                        let _ = MoveToEx(hdc, pos, grid_rect.top, None);
+                        let _ = LineTo(hdc, pos, grid_rect.bottom);
+                    }
+                    for y in 0..=grid_size.1 {
+                        let pos = grid_rect.top + (y as i32 * cell_h);
+                        let _ = MoveToEx(hdc, grid_rect.left, pos, None);
+                        let _ = LineTo(hdc, grid_rect.right, pos);
+                    }
                 }
                 if branches.active_grid_outline {
                     self.draw_active_grid_outline(hdc, grid_rect);
                 }
-                if branches.cell_centers {
+                if branches.cell_centers || label_plan.center_markers {
                     self.draw_cell_centers(hdc, grid_rect, grid_size, cell_w, cell_h);
                 }
 
-                let row_len = letters_needed(grid_size.1);
-                let col_len = letters_needed(grid_size.0);
-                for row in 0..grid_size.1 {
-                    let row_code = index_to_code(row as usize, row_len);
-                    for col in 0..grid_size.0 {
-                        let col_code = index_to_code(col as usize, col_len);
-                        let code = format!("{}{}", row_code, col_code);
-                        let text: Vec<u16> = code.encode_utf16().collect();
-                        let x = grid_rect.left + col as i32 * cell_w + cell_w / 2 - 8;
-                        let y = grid_rect.top + row as i32 * cell_h + cell_h / 2 - 8;
-                        let _ = TextOutW(hdc, x, y, &text);
+                if label_plan.labels {
+                    let row_len = letters_needed(grid_size.1);
+                    let col_len = letters_needed(grid_size.0);
+                    for row in 0..grid_size.1 {
+                        let row_code = index_to_code(row as usize, row_len);
+                        for col in 0..grid_size.0 {
+                            let col_code = index_to_code(col as usize, col_len);
+                            let code = format!("{}{}", row_code, col_code);
+                            let text: Vec<u16> = code.encode_utf16().collect();
+                            let offset = (8.0 * labels.font_scale).round() as i32;
+                            let x = grid_rect.left + col as i32 * cell_w + cell_w / 2 - offset;
+                            let y = grid_rect.top + row as i32 * cell_h + cell_h / 2 - offset;
+                            let _ = TextOutW(hdc, x, y, &text);
+                        }
                     }
                 }
 
@@ -835,16 +921,18 @@ pub fn hide_jump_overlay() {
 mod tests {
     use super::{
         bounded_region_centered_on, draw_mode_for_view, format_jump_indicator, grid_target_region,
-        overlay_colorkey, overlay_ex_style, preview_source_region_for_view,
-        project_source_rect_to_client, render_branches_for_view, source_screen_to_client,
-        target_region_client_rect, transparency_mode, DrawMode, JumpRenderBranches,
-        TransparencyMode, OVERLAY_ALPHA,
+        label_render_plan, overlay_colorkey, overlay_ex_style, preview_source_rect,
+        preview_source_region_for_view, project_source_rect_to_client, render_branches_for_view,
+        source_screen_to_client, target_region_client_rect, transparency_mode, DrawMode,
+        JumpRenderBranches, TransparencyMode, OVERLAY_ALPHA,
     };
     use crate::jump_session::JumpRegion;
     use crate::jump_view::{
-        FinalAdjustOverlayView, JumpOverlayView, JumpStageMetadata, JumpVisuals,
+        FinalAdjustOverlayView, JumpLabelMetadata, JumpOverlayView, JumpStageMetadata, JumpVisuals,
     };
-    use crate::{JumpAimPoint, JumpTargetRegionMode};
+    use crate::screen_capture::ScreenSnapshot;
+    use crate::{JumpAimPoint, JumpLabelConfig, JumpTargetRegionMode, PreviewEdgeBehavior};
+    use windows::Win32::Foundation::RECT;
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
 
     #[test]
@@ -1090,6 +1178,8 @@ mod tests {
                 visual_context_margin_percent: 20,
                 zoom_scale: 1.0,
                 target_region_mode: JumpTargetRegionMode::RegionWithContext,
+                preview_edge_behavior: PreviewEdgeBehavior::Clamp,
+                labels: JumpLabelConfig::default().into(),
             },
         ];
 
@@ -1124,6 +1214,8 @@ mod tests {
                 visual_context_margin_percent: 20,
                 zoom_scale: 1.0,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
+                preview_edge_behavior: PreviewEdgeBehavior::Clamp,
+                labels: JumpLabelConfig::default().into(),
             },
         ];
 
@@ -1165,6 +1257,8 @@ mod tests {
                 visual_context_margin_percent: 50,
                 zoom_scale: 1.0,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
+                preview_edge_behavior: PreviewEdgeBehavior::Clamp,
+                labels: JumpLabelConfig::default().into(),
             },
         ];
         let mut high_zoom = low_zoom.clone();
@@ -1192,6 +1286,105 @@ mod tests {
                 top: 100,
                 width: 100,
                 height: 80,
+            }
+        );
+    }
+
+    #[test]
+    fn preview_edge_behavior_shifts_source_into_snapshot() {
+        let mut view = view(1, 2, "");
+        view.target_region = JumpRegion {
+            left: 5,
+            top: 5,
+            width: 20,
+            height: 20,
+        };
+        view.session_region = JumpRegion {
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+        };
+        view.stages = vec![
+            stage_metadata(0, JumpTargetRegionMode::ExactRegion),
+            JumpStageMetadata {
+                preview_edge_behavior: PreviewEdgeBehavior::ShiftIntoBounds,
+                visual_context_margin_percent: 50,
+                ..stage_metadata(1, JumpTargetRegionMode::ExactRegion)
+            },
+        ];
+        let snapshot = ScreenSnapshot::test_bounds(0, 0, 100, 100);
+
+        assert_eq!(
+            preview_source_rect(&view, &snapshot),
+            RECT {
+                left: 0,
+                top: 0,
+                right: 35,
+                bottom: 35
+            }
+        );
+    }
+
+    #[test]
+    fn preview_edge_behavior_disables_context_near_edges() {
+        let mut view = view(1, 2, "");
+        view.target_region = JumpRegion {
+            left: 5,
+            top: 5,
+            width: 20,
+            height: 20,
+        };
+        view.session_region = JumpRegion {
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+        };
+        view.stages = vec![
+            stage_metadata(0, JumpTargetRegionMode::ExactRegion),
+            JumpStageMetadata {
+                preview_edge_behavior: PreviewEdgeBehavior::DisableContextNearEdges,
+                visual_context_margin_percent: 50,
+                ..stage_metadata(1, JumpTargetRegionMode::ExactRegion)
+            },
+        ];
+        let snapshot = ScreenSnapshot::test_bounds(0, 0, 100, 100);
+
+        assert_eq!(
+            preview_source_rect(&view, &snapshot),
+            RECT {
+                left: 5,
+                top: 5,
+                right: 25,
+                bottom: 25
+            }
+        );
+    }
+
+    #[test]
+    fn label_plan_hides_labels_below_threshold_but_keeps_separators_configurable() {
+        let labels = JumpLabelMetadata {
+            font_scale: 1.0,
+            center_marker: true,
+            separators: false,
+            hide_threshold_px: 20,
+        };
+
+        assert_eq!(
+            label_render_plan(labels, 10, 30),
+            super::LabelRenderPlan {
+                labels: false,
+                center_markers: false,
+                separators: false
+            }
+        );
+        assert_eq!(
+            label_render_plan(labels, 20, 30),
+            super::LabelRenderPlan {
+                labels: true,
+                center_markers: true,
+                separators: false
             }
         );
     }
@@ -1234,6 +1427,8 @@ mod tests {
             visual_context_margin_percent: 20,
             zoom_scale: 1.0,
             target_region_mode,
+            preview_edge_behavior: PreviewEdgeBehavior::Clamp,
+            labels: JumpLabelConfig::default().into(),
         }
     }
 

@@ -1,8 +1,10 @@
 use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
-use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowRect};
+
+use crate::{jump_session::JumpRegion, JumpStartRegion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MonitorRect {
@@ -61,8 +63,76 @@ pub fn current_monitor_rect_for_cursor(use_work_area: bool) -> Option<MonitorRec
     }
 }
 
+pub fn resolve_jump_start_region(
+    mode: JumpStartRegion,
+    virtual_screen: JumpRegion,
+) -> Option<JumpRegion> {
+    let cursor_monitor = current_monitor_rect_for_cursor(false).map(Into::into);
+    let active_window_bounds = active_window_bounds();
+    let active_window_monitor = active_window_monitor_rect(false).map(Into::into);
+
+    resolve_jump_start_region_from_parts(
+        mode,
+        virtual_screen,
+        cursor_monitor,
+        active_window_monitor,
+        active_window_bounds,
+    )
+}
+
+pub fn resolve_jump_start_region_from_parts(
+    mode: JumpStartRegion,
+    virtual_screen: JumpRegion,
+    cursor_monitor: Option<JumpRegion>,
+    active_window_monitor: Option<JumpRegion>,
+    active_window_bounds: Option<JumpRegion>,
+) -> Option<JumpRegion> {
+    match mode {
+        JumpStartRegion::VirtualScreen => Some(virtual_screen),
+        JumpStartRegion::CurrentMonitor => cursor_monitor.or(Some(virtual_screen)),
+        JumpStartRegion::ActiveWindowMonitor => active_window_monitor
+            .or(cursor_monitor)
+            .or(Some(virtual_screen)),
+        JumpStartRegion::ActiveWindowBounds => active_window_bounds
+            .filter(|region| region.is_valid())
+            .or(active_window_monitor)
+            .or(cursor_monitor)
+            .or(Some(virtual_screen)),
+    }
+}
+
+fn active_window_bounds() -> Option<JumpRegion> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() {
+            return None;
+        }
+        let mut rect = RECT::default();
+        GetWindowRect(hwnd, &mut rect).ok()?;
+        Some(MonitorRect::from(rect).into())
+    }
+}
+
+fn active_window_monitor_rect(use_work_area: bool) -> Option<MonitorRect> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() {
+            return None;
+        }
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        monitor_rect_from_handle(monitor, use_work_area)
+    }
+}
+
 unsafe fn monitor_rect_for_point(point: POINT, use_work_area: bool) -> Option<MonitorRect> {
     let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+    monitor_rect_from_handle(monitor, use_work_area)
+}
+
+unsafe fn monitor_rect_from_handle(
+    monitor: windows::Win32::Graphics::Gdi::HMONITOR,
+    use_work_area: bool,
+) -> Option<MonitorRect> {
     if monitor.is_invalid() {
         return None;
     }
@@ -79,6 +149,17 @@ unsafe fn monitor_rect_for_point(point: POINT, use_work_area: bool) -> Option<Mo
             info.rcMonitor.into()
         }
     })
+}
+
+impl From<MonitorRect> for JumpRegion {
+    fn from(rect: MonitorRect) -> Self {
+        Self {
+            left: rect.left,
+            top: rect.top,
+            width: rect.right - rect.left,
+            height: rect.bottom - rect.top,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -107,5 +188,91 @@ mod tests {
         assert_eq!(rect.edge_midpoint(MonitorEdge::Bottom, 8), (300, 791));
         assert_eq!(rect.edge_midpoint(MonitorEdge::Left, 8), (108, 500));
         assert_eq!(rect.edge_midpoint(MonitorEdge::Right, 8), (491, 500));
+    }
+
+    fn region(left: i32, top: i32, width: i32, height: i32) -> JumpRegion {
+        JumpRegion {
+            left,
+            top,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn start_region_resolver_uses_requested_region_with_fallbacks() {
+        let virtual_screen = region(0, 0, 300, 200);
+        let cursor_monitor = region(10, 10, 100, 100);
+        let window_monitor = region(150, 0, 150, 200);
+        let window_bounds = region(170, 20, 50, 60);
+
+        assert_eq!(
+            resolve_jump_start_region_from_parts(
+                JumpStartRegion::VirtualScreen,
+                virtual_screen,
+                Some(cursor_monitor),
+                Some(window_monitor),
+                Some(window_bounds),
+            ),
+            Some(virtual_screen)
+        );
+        assert_eq!(
+            resolve_jump_start_region_from_parts(
+                JumpStartRegion::CurrentMonitor,
+                virtual_screen,
+                Some(cursor_monitor),
+                Some(window_monitor),
+                Some(window_bounds),
+            ),
+            Some(cursor_monitor)
+        );
+        assert_eq!(
+            resolve_jump_start_region_from_parts(
+                JumpStartRegion::ActiveWindowMonitor,
+                virtual_screen,
+                Some(cursor_monitor),
+                Some(window_monitor),
+                Some(window_bounds),
+            ),
+            Some(window_monitor)
+        );
+        assert_eq!(
+            resolve_jump_start_region_from_parts(
+                JumpStartRegion::ActiveWindowBounds,
+                virtual_screen,
+                Some(cursor_monitor),
+                Some(window_monitor),
+                Some(window_bounds),
+            ),
+            Some(window_bounds)
+        );
+    }
+
+    #[test]
+    fn start_region_resolver_falls_back_when_window_data_is_missing_or_invalid() {
+        let virtual_screen = region(0, 0, 300, 200);
+        let cursor_monitor = region(10, 10, 100, 100);
+        let window_monitor = region(150, 0, 150, 200);
+
+        assert_eq!(
+            resolve_jump_start_region_from_parts(
+                JumpStartRegion::ActiveWindowBounds,
+                virtual_screen,
+                Some(cursor_monitor),
+                Some(window_monitor),
+                Some(region(0, 0, 0, 10)),
+            ),
+            Some(window_monitor)
+        );
+        assert_eq!(
+            resolve_jump_start_region_from_parts(
+                JumpStartRegion::ActiveWindowMonitor,
+                virtual_screen,
+                Some(cursor_monitor),
+                None,
+                None,
+            ),
+            Some(cursor_monitor)
+        );
     }
 }

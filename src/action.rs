@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 /// Enum representing all possible actions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Action {
     // Continuous cursor movement actions.
     MoveUp,
@@ -40,6 +40,7 @@ pub enum Action {
     Exit,
     SlowMouse,
     JumpMode,
+    JumpModeProfile(String),
 }
 
 impl Action {
@@ -72,11 +73,21 @@ impl Action {
             "exit" => Some(Self::Exit),
             "slow_mouse" => Some(Self::SlowMouse),
             "jump_mode" => Some(Self::JumpMode),
+            action if action.starts_with("jump_mode_profile:") => {
+                action.split_once(':').and_then(|(_, profile)| {
+                    (!profile.is_empty()).then(|| Self::JumpModeProfile(profile.to_string()))
+                })
+            }
+            action if action.starts_with("jump_mode_profile.") => {
+                action.split_once('.').and_then(|(_, profile)| {
+                    (!profile.is_empty()).then(|| Self::JumpModeProfile(profile.to_string()))
+                })
+            }
             _ => None,
         }
     }
 
-    pub fn is_movement(self) -> bool {
+    pub fn is_movement(&self) -> bool {
         matches!(
             self,
             Self::MoveUp
@@ -90,15 +101,15 @@ impl Action {
         )
     }
 
-    pub fn is_wheel_direction(self) -> bool {
+    pub fn is_wheel_direction(&self) -> bool {
         matches!(
             self,
             Self::WheelUp | Self::WheelDown | Self::WheelLeft | Self::WheelRight
         )
     }
 
-    pub fn is_continuous(self) -> bool {
-        self.is_movement() || self == Self::SlowMouse || self.is_wheel_direction()
+    pub fn is_continuous(&self) -> bool {
+        self.is_movement() || self == &Self::SlowMouse || self.is_wheel_direction()
     }
 }
 
@@ -292,7 +303,7 @@ impl<B: crate::action_handler::MouseBackend> ActionHandler<B> {
             callback();
         } else {
             // Fallback to MouseMaster's handling
-            self.mouse_master.handle_action(*action);
+            self.mouse_master.handle_action(action.clone());
         }
     }
     pub fn process_active_keys(&mut self, key: Action, is_keydown: bool) {

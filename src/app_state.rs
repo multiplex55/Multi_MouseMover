@@ -6,7 +6,7 @@ use crate::jump_session::{
 use crate::jump_view::{FinalAdjustOverlayView, JumpOverlayView, JumpStageMetadata};
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
 use crate::keyboard::VirtualKey;
-use crate::Config;
+use crate::{Config, JumpConfig};
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,13 +35,21 @@ impl KeyEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
     ToggleActiveMode,
-    SetActiveMode { active: bool },
+    SetActiveMode {
+        active: bool,
+    },
     Exit,
-    EnterJumpMode { activation_key: VirtualKey },
-    KeyAction { action: Action, is_down: bool },
+    EnterJumpMode {
+        activation_key: VirtualKey,
+        profile: Option<String>,
+    },
+    KeyAction {
+        action: Action,
+        is_down: bool,
+    },
     JumpInput(KeyEvent, Option<Action>),
 }
 
@@ -183,7 +191,8 @@ impl AppState {
 
     pub fn enter_jump_mode(
         &mut self,
-        config: &Config,
+        config: &JumpConfig,
+        final_adjust_config: crate::FinalAdjustConfig,
         virtual_screen_region: JumpRegion,
         activation_key: VirtualKey,
     ) -> bool {
@@ -214,8 +223,8 @@ impl AppState {
             activation_key,
             activation_key_released: false,
             stage_metadata,
-            visuals: config.jump.visuals,
-            final_adjust_config: config.final_adjust.clone(),
+            visuals: config.visuals,
+            final_adjust_config,
         };
         true
     }
@@ -390,9 +399,19 @@ impl AppState {
             self.active_keys.remove(&event.key);
         }
 
-        if event.is_down && action == Some(Action::JumpMode) {
+        if event.is_down
+            && matches!(
+                action.as_ref(),
+                Some(Action::JumpMode | Action::JumpModeProfile(_))
+            )
+        {
+            let profile = match action.as_ref() {
+                Some(Action::JumpModeProfile(profile)) => Some(profile.clone()),
+                _ => None,
+            };
             self.enqueue_command(AppCommand::EnterJumpMode {
                 activation_key: event.key,
+                profile,
             });
             return;
         }
@@ -489,44 +508,59 @@ impl AppState {
     }
 }
 
-fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
+fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
     let mut stages = vec![JumpStageMetadata {
         index: 0,
-        grid_size: (config.jump.coarse.width, config.jump.coarse.height),
-        aim_point: config.jump.coarse.aim_point,
-        aim_offset_x_px: config.jump.coarse.aim_offset_x_px,
-        aim_offset_y_px: config.jump.coarse.aim_offset_y_px,
-        target_margin_percent: config.jump.coarse.target_margin_percent,
-        visual_context_margin_percent: config.jump.coarse.visual_context_margin_percent,
-        zoom_scale: config.jump.coarse.zoom_scale,
-        target_region_mode: config.jump.coarse.target_region_mode,
+        grid_size: (config.coarse.width, config.coarse.height),
+        aim_point: config.coarse.aim_point,
+        aim_offset_x_px: config.coarse.aim_offset_x_px,
+        aim_offset_y_px: config.coarse.aim_offset_y_px,
+        target_margin_percent: config.coarse.target_margin_percent,
+        visual_context_margin_percent: config.coarse.visual_context_margin_percent,
+        zoom_scale: config.coarse.zoom_scale,
+        target_region_mode: config.coarse.target_region_mode,
+        preview_edge_behavior: config
+            .coarse
+            .preview_edge_behavior
+            .unwrap_or(config.preview_edge_behavior),
+        labels: config.coarse.labels.into(),
     }];
 
-    if config.jump.fine.enabled {
+    if config.fine.enabled {
         stages.push(JumpStageMetadata {
             index: stages.len(),
-            grid_size: (config.jump.fine.width, config.jump.fine.height),
-            aim_point: config.jump.fine.aim_point,
-            aim_offset_x_px: config.jump.fine.aim_offset_x_px,
-            aim_offset_y_px: config.jump.fine.aim_offset_y_px,
-            target_margin_percent: config.jump.fine.target_margin_percent,
-            visual_context_margin_percent: config.jump.fine.visual_context_margin_percent,
-            zoom_scale: config.jump.fine.zoom_scale,
-            target_region_mode: config.jump.fine.target_region_mode,
+            grid_size: (config.fine.width, config.fine.height),
+            aim_point: config.fine.aim_point,
+            aim_offset_x_px: config.fine.aim_offset_x_px,
+            aim_offset_y_px: config.fine.aim_offset_y_px,
+            target_margin_percent: config.fine.target_margin_percent,
+            visual_context_margin_percent: config.fine.visual_context_margin_percent,
+            zoom_scale: config.fine.zoom_scale,
+            target_region_mode: config.fine.target_region_mode,
+            preview_edge_behavior: config
+                .fine
+                .preview_edge_behavior
+                .unwrap_or(config.preview_edge_behavior),
+            labels: config.fine.labels.into(),
         });
     }
 
-    if config.jump.precise.enabled {
+    if config.precise.enabled {
         stages.push(JumpStageMetadata {
             index: stages.len(),
-            grid_size: (config.jump.precise.width, config.jump.precise.height),
-            aim_point: config.jump.precise.aim_point,
-            aim_offset_x_px: config.jump.precise.aim_offset_x_px,
-            aim_offset_y_px: config.jump.precise.aim_offset_y_px,
-            target_margin_percent: config.jump.precise.target_margin_percent,
-            visual_context_margin_percent: config.jump.precise.visual_context_margin_percent,
-            zoom_scale: config.jump.precise.zoom_scale,
-            target_region_mode: config.jump.precise.target_region_mode,
+            grid_size: (config.precise.width, config.precise.height),
+            aim_point: config.precise.aim_point,
+            aim_offset_x_px: config.precise.aim_offset_x_px,
+            aim_offset_y_px: config.precise.aim_offset_y_px,
+            target_margin_percent: config.precise.target_margin_percent,
+            visual_context_margin_percent: config.precise.visual_context_margin_percent,
+            zoom_scale: config.precise.zoom_scale,
+            target_region_mode: config.precise.target_region_mode,
+            preview_edge_behavior: config
+                .precise
+                .preview_edge_behavior
+                .unwrap_or(config.preview_edge_behavior),
+            labels: config.precise.labels.into(),
         });
     }
 
@@ -552,7 +586,12 @@ mod tests {
 
     fn enter_jump_mode(state: &mut AppState, activation_key: VirtualKey) {
         let config = Config::default().normalize().unwrap();
-        assert!(state.enter_jump_mode(&config, jump_region(), activation_key));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            activation_key
+        ));
     }
 
     fn final_adjust_config(enabled: bool) -> Config {
@@ -654,7 +693,26 @@ mod tests {
         assert_eq!(
             state.pop_command(),
             Some(AppCommand::EnterJumpMode {
-                activation_key: VirtualKey::J
+                activation_key: VirtualKey::J,
+                profile: None
+            })
+        );
+    }
+
+    #[test]
+    fn profile_jump_binding_routes_profile_name() {
+        let mut state = state_with_bound_key(VirtualKey::J);
+
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::J, true),
+            Some(Action::JumpModeProfile("wide".to_string())),
+        );
+
+        assert_eq!(
+            state.pop_command(),
+            Some(AppCommand::EnterJumpMode {
+                activation_key: VirtualKey::J,
+                profile: Some("wide".to_string())
             })
         );
     }
@@ -849,7 +907,12 @@ mod tests {
     fn completed_jump_finishes_immediately_when_final_adjust_is_disabled() {
         let config = final_adjust_config(false);
         let mut state = AppState::default();
-        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::F));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::F
+        ));
 
         assert_eq!(
             state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None),
@@ -875,7 +938,12 @@ mod tests {
     fn completed_jump_enters_final_adjust_when_enabled() {
         let config = final_adjust_config(true);
         let mut state = AppState::default();
-        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::F));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::F
+        ));
 
         state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None);
 
@@ -903,7 +971,12 @@ mod tests {
     fn final_adjust_nudge_and_confirm_complete_at_candidate_point() {
         let config = final_adjust_config(true);
         let mut state = AppState::default();
-        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::F));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::F
+        ));
         state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None);
         state.handle_jump_input(KeyEvent::new(VirtualKey::J, true), None);
 
@@ -1019,7 +1092,12 @@ mod tests {
         let config = config.normalize().unwrap();
 
         let mut state = AppState::default();
-        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::J
+        ));
 
         let view = state.jump_view().unwrap();
         assert_eq!(view.stages.len(), 2);
@@ -1037,7 +1115,12 @@ mod tests {
         let config = config.normalize().unwrap();
 
         let mut state = AppState::default();
-        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::J
+        ));
 
         let view = state.jump_view().unwrap();
         assert_eq!(view.stages.len(), 2);
@@ -1062,7 +1145,12 @@ mod tests {
         let config = config.normalize().unwrap();
 
         let mut state = AppState::default();
-        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::J
+        ));
 
         let view = state.jump_view().unwrap();
         assert!(!view.visuals.selected_region_outline);
@@ -1086,7 +1174,12 @@ mod tests {
         let config = config.normalize().unwrap();
 
         let mut state = AppState::default();
-        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::J
+        ));
         assert_eq!(
             state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
             Some(JumpSessionUpdate::Consumed)
@@ -1130,7 +1223,12 @@ mod tests {
         let config = config.normalize().unwrap();
 
         let mut state = AppState::default();
-        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::J
+        ));
         assert_eq!(
             state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
             Some(JumpSessionUpdate::Consumed)
@@ -1194,8 +1292,18 @@ mod tests {
         let high_zoom = high_zoom.normalize().unwrap();
         let mut low_state = AppState::default();
         let mut high_state = AppState::default();
-        assert!(low_state.enter_jump_mode(&low_zoom, jump_region(), VirtualKey::J));
-        assert!(high_state.enter_jump_mode(&high_zoom, jump_region(), VirtualKey::J));
+        assert!(low_state.enter_jump_mode(
+            &low_zoom.jump,
+            low_zoom.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::J
+        ));
+        assert!(high_state.enter_jump_mode(
+            &high_zoom.jump,
+            high_zoom.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::J
+        ));
 
         for key in [VirtualKey::B, VirtualKey::B] {
             assert_eq!(

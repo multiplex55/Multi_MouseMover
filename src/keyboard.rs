@@ -646,7 +646,7 @@ impl KeyBindings {
         let exact_match = self
             .bindings
             .iter()
-            .find_map(|(chord, action)| chord.matches_event(event).then_some(*action));
+            .find_map(|(chord, action)| chord.matches_event(event).then(|| action.clone()));
 
         if exact_match.is_some() || event.is_down {
             return exact_match;
@@ -654,7 +654,7 @@ impl KeyBindings {
 
         self.bindings
             .iter()
-            .find_map(|(chord, action)| (chord.key == event.key).then_some(*action))
+            .find_map(|(chord, action)| (chord.key == event.key).then(|| action.clone()))
     }
 
     pub fn bound_chords(&self) -> impl Iterator<Item = KeyChord> + '_ {

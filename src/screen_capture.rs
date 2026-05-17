@@ -26,6 +26,19 @@ impl ScreenSnapshot {
     pub fn source_y(&self, virtual_y: i32) -> i32 {
         virtual_y - self.top
     }
+
+    #[cfg(test)]
+    pub fn test_bounds(left: i32, top: i32, width: i32, height: i32) -> Self {
+        Self {
+            left,
+            top,
+            width,
+            height,
+            hdc: HDC::default(),
+            bitmap: HBITMAP::default(),
+            old_bitmap: HGDIOBJ::default(),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -138,7 +138,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
-            Action::JumpMode => {}
+            Action::JumpMode | Action::JumpModeProfile(_) => {}
         }
     }
     /// Toggles between `Idle` and `Active` mode
@@ -262,7 +262,7 @@ impl<B: MouseBackend> MouseMaster<B> {
         let Some(wheel_action) = active_actions
             .iter()
             .find(|action| action.is_wheel_direction())
-            .copied()
+            .cloned()
         else {
             self.last_wheel_tick = None;
             return;
@@ -464,7 +464,7 @@ fn calculate_movement(
     let mut dx = 0;
     let mut dy = 0;
 
-    for &action in active_actions {
+    for action in active_actions {
         match action {
             Action::MoveUp => dy -= 1,
             Action::MoveDown => dy += 1,
@@ -585,7 +585,7 @@ mod tests {
     }
 
     fn actions(actions: &[Action]) -> HashSet<Action> {
-        actions.iter().copied().collect()
+        actions.iter().cloned().collect()
     }
 
     fn final_adjust_config() -> FinalAdjustConfig {
