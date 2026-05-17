@@ -3,14 +3,26 @@
 key_bindings = [
     ["A", "move_left"],
     ["D", "move_right"],
-    ["Escape", "exit"],
     ["L", "right_click"],
     ["LeftShift", "slow_mouse"],
     ["RightShift", "slow_mouse"],
     ["S", "move_down"],
     ["SPACE", "left_click"],
     ["F", "jump_mode"],
-    ["W", "move_up"]
+    ["W", "move_up"],
+    [";", "middle_click"],
+    [",", "wheel_up"],
+    ["M", "wheel_down"],
+    ["I", "wheel_left"],
+    ["O", "wheel_right"],
+    ["H", "center_current_monitor"],
+    [".", "click_then_disable"],
+    ["RightAlt+W", "move_to_top_edge"],
+    ["RightAlt+A", "move_to_left_edge"],
+    ["RightAlt+S", "move_to_bottom_edge"],
+    ["RightAlt+D", "move_to_right_edge"],
+    ["V", "wheel_speed_up"],
+    ["B", "wheel_speed_down"]
 ]
 
 [system_bindings]
@@ -56,4 +68,8 @@ min_speed = 1
 max_speed = 12
 speed_step = 1
 tick_interval = 8
+
+[edge_jump]
+offset_px = 1
+use_work_area = false
 

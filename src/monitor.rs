@@ -52,16 +52,16 @@ impl From<RECT> for MonitorRect {
     }
 }
 
-pub fn current_monitor_rect_for_cursor() -> Option<MonitorRect> {
+pub fn current_monitor_rect_for_cursor(use_work_area: bool) -> Option<MonitorRect> {
     let mut point = POINT::default();
 
     unsafe {
         GetCursorPos(&mut point).ok()?;
-        monitor_rect_for_point(point)
+        monitor_rect_for_point(point, use_work_area)
     }
 }
 
-unsafe fn monitor_rect_for_point(point: POINT) -> Option<MonitorRect> {
+unsafe fn monitor_rect_for_point(point: POINT, use_work_area: bool) -> Option<MonitorRect> {
     let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
     if monitor.is_invalid() {
         return None;
@@ -72,9 +72,13 @@ unsafe fn monitor_rect_for_point(point: POINT) -> Option<MonitorRect> {
         ..MONITORINFO::default()
     };
 
-    GetMonitorInfoW(monitor, &mut info)
-        .as_bool()
-        .then_some(info.rcMonitor.into())
+    GetMonitorInfoW(monitor, &mut info).as_bool().then(|| {
+        if use_work_area {
+            info.rcWork.into()
+        } else {
+            info.rcMonitor.into()
+        }
+    })
 }
 
 #[cfg(test)]

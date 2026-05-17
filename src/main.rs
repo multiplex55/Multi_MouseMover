@@ -43,6 +43,7 @@ const DEBUG_HEARTBEAT_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
 const MIN_JUMP_STAGE_SIZE: u32 = 1;
 const MAX_JUMP_STAGE_SIZE: u32 = 26;
 const MAX_PREVIEW_MARGIN_PERCENT: u8 = 50;
+const MAX_EDGE_JUMP_OFFSET_PX: i32 = 10_000;
 
 static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_DECODED: AtomicU64 = AtomicU64::new(0);
@@ -164,6 +165,7 @@ struct Config {
     grid_size: GridSize,
     jump: JumpConfig,
     wheel: WheelConfig,
+    edge_jump: EdgeJumpConfig,
     starting_speed: i32,    // Initial speed in pixels
     acceleration: i32,      // Increment value for acceleration
     acceleration_rate: u32, // Polling cycles before applying acceleration
@@ -179,10 +181,27 @@ impl Default for Config {
             grid_size: GridSize::default(),
             jump: JumpConfig::default(),
             wheel: WheelConfig::default(),
+            edge_jump: EdgeJumpConfig::default(),
             starting_speed: 1,
             acceleration: 2,
             acceleration_rate: 1,
             top_speed: 6,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct EdgeJumpConfig {
+    offset_px: i32,
+    use_work_area: bool,
+}
+
+impl Default for EdgeJumpConfig {
+    fn default() -> Self {
+        Self {
+            offset_px: 1,
+            use_work_area: false,
         }
     }
 }
@@ -324,8 +343,22 @@ impl Config {
         }
         self.normalize_jump_config();
         self.normalize_wheel_config();
+        self.normalize_edge_jump_config();
         self.runtime_system_bindings()?;
         Ok(self)
+    }
+
+    fn normalize_edge_jump_config(&mut self) {
+        if self.edge_jump.offset_px < 0 {
+            warn_config_normalized("edge_jump.offset_px is below 0; clamping to 0");
+            self.edge_jump.offset_px = 0;
+        } else if self.edge_jump.offset_px > MAX_EDGE_JUMP_OFFSET_PX {
+            warn_config_normalized(&format!(
+                "edge_jump.offset_px is above {}; clamping to {}",
+                MAX_EDGE_JUMP_OFFSET_PX, MAX_EDGE_JUMP_OFFSET_PX
+            ));
+            self.edge_jump.offset_px = MAX_EDGE_JUMP_OFFSET_PX;
+        }
     }
 
     fn normalize_wheel_config(&mut self) {
@@ -1099,6 +1132,7 @@ mod tests {
         assert_eq!(config.jump.coarse.width, defaults.grid_size.width);
         assert_eq!(config.jump.coarse.height, defaults.grid_size.height);
         assert_eq!(config.wheel, defaults.wheel);
+        assert_eq!(config.edge_jump, defaults.edge_jump);
         assert_eq!(config.starting_speed, defaults.starting_speed);
         assert_eq!(config.acceleration, defaults.acceleration);
         assert_eq!(config.acceleration_rate, defaults.acceleration_rate);
@@ -1109,6 +1143,82 @@ mod tests {
         );
         assert_eq!(config.system_bindings.exit, defaults.system_bindings.exit);
         assert!(config.key_bindings.is_empty());
+    }
+
+    #[test]
+    fn new_default_action_bindings_parse_from_config() {
+        let config = parse_config(
+            r#"
+            key_bindings = [
+                ["A", "move_left"],
+                ["D", "move_right"],
+                [";", "middle_click"],
+                [",", "wheel_up"],
+                ["M", "wheel_down"],
+                ["I", "wheel_left"],
+                ["O", "wheel_right"],
+                ["H", "center_current_monitor"],
+                [".", "click_then_disable"],
+                ["RightAlt+W", "move_to_top_edge"],
+                ["RightAlt+A", "move_to_left_edge"],
+                ["RightAlt+S", "move_to_bottom_edge"],
+                ["RightAlt+D", "move_to_right_edge"],
+                ["V", "wheel_speed_up"],
+                ["B", "wheel_speed_down"]
+            ]
+            "#,
+        );
+
+        let expected = [
+            ("A", Action::MoveLeft),
+            ("D", Action::MoveRight),
+            (";", Action::MiddleClick),
+            (",", Action::WheelUp),
+            ("M", Action::WheelDown),
+            ("I", Action::WheelLeft),
+            ("O", Action::WheelRight),
+            ("H", Action::CenterCurrentMonitor),
+            (".", Action::ClickThenDisable),
+            ("RightAlt+W", Action::MoveToTopEdge),
+            ("RightAlt+A", Action::MoveToLeftEdge),
+            ("RightAlt+S", Action::MoveToBottomEdge),
+            ("RightAlt+D", Action::MoveToRightEdge),
+            ("V", Action::WheelSpeedUp),
+            ("B", Action::WheelSpeedDown),
+        ];
+
+        assert_eq!(config.key_bindings.len(), expected.len());
+        for (key, action) in expected {
+            let parsed = config
+                .key_bindings
+                .iter()
+                .find(|(bound_key, _)| bound_key == key)
+                .unwrap_or_else(|| panic!("missing binding for {key}"));
+            assert!(KeyChord::parse(&parsed.0).is_ok(), "{key}");
+            assert_eq!(Action::from_string(&parsed.1), Some(action));
+        }
+    }
+
+    #[test]
+    fn exit_binding_is_owned_by_system_bindings() {
+        let config = parse_config(
+            r#"
+            key_bindings = [
+                ["A", "move_left"],
+                ["D", "move_right"]
+            ]
+
+            [system_bindings]
+            toggle_active = "Ctrl+E"
+            exit = "Escape"
+            "#,
+        );
+
+        assert_eq!(config.system_bindings.exit, "Escape");
+        assert!(!config
+            .key_bindings
+            .iter()
+            .any(|(_, action)| action == "exit"));
     }
 
     #[test]
@@ -1255,6 +1365,50 @@ mod tests {
         assert_eq!(config.wheel.max_speed, 8);
         assert_eq!(config.wheel.speed_step, 1);
         assert_eq!(config.wheel.tick_interval, config.polling_rate);
+    }
+
+    #[test]
+    fn wheel_and_edge_jump_sections_parse_with_sane_defaults() {
+        let config = parse_config(
+            r#"
+            [wheel]
+            default_speed = 5
+
+            [edge_jump]
+            offset_px = 4
+            use_work_area = true
+            "#,
+        );
+
+        assert_eq!(config.wheel.default_speed, 5);
+        assert_eq!(config.wheel.min_speed, WheelConfig::default().min_speed);
+        assert_eq!(config.wheel.max_speed, WheelConfig::default().max_speed);
+        assert_eq!(config.wheel.speed_step, WheelConfig::default().speed_step);
+        assert_eq!(
+            config.wheel.tick_interval,
+            WheelConfig::default().tick_interval
+        );
+        assert_eq!(config.edge_jump.offset_px, 4);
+        assert!(config.edge_jump.use_work_area);
+    }
+
+    #[test]
+    fn edge_jump_offset_is_clamped_to_supported_range() {
+        let negative = parse_config(
+            r#"
+            [edge_jump]
+            offset_px = -4
+            "#,
+        );
+        let oversized = parse_config(
+            r#"
+            [edge_jump]
+            offset_px = 20000
+            "#,
+        );
+
+        assert_eq!(negative.edge_jump.offset_px, 0);
+        assert_eq!(oversized.edge_jump.offset_px, MAX_EDGE_JUMP_OFFSET_PX);
     }
 
     #[test]

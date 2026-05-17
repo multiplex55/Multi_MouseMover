@@ -302,15 +302,15 @@ impl<B: MouseBackend> MouseMaster<B> {
     }
 
     pub fn center_current_monitor(&mut self) {
-        if let Some(rect) = current_monitor_rect_for_cursor() {
+        if let Some(rect) = current_monitor_rect_for_cursor(self.config.edge_jump.use_work_area) {
             let (x, y) = rect.center();
             self.move_mouse_to(x, y);
         }
     }
 
     pub fn move_to_monitor_edge(&mut self, edge: MonitorEdge) {
-        if let Some(rect) = current_monitor_rect_for_cursor() {
-            let (x, y) = edge_target(rect, edge);
+        if let Some(rect) = current_monitor_rect_for_cursor(self.config.edge_jump.use_work_area) {
+            let (x, y) = edge_target(rect, edge, self.config.edge_jump.offset_px);
             self.move_mouse_to(x, y);
         }
     }
@@ -351,8 +351,8 @@ impl<B: MouseBackend> MouseMaster<B> {
     }
 }
 
-pub fn edge_target(rect: MonitorRect, edge: MonitorEdge) -> (i32, i32) {
-    rect.edge_midpoint(edge, 1)
+pub fn edge_target(rect: MonitorRect, edge: MonitorEdge, offset_px: i32) -> (i32, i32) {
+    rect.edge_midpoint(edge, offset_px)
 }
 
 fn debug_diagnostics_enabled() -> bool {
@@ -678,9 +678,10 @@ mod tests {
             bottom: 120,
         };
 
-        assert_eq!(edge_target(rect, MonitorEdge::Top), (110, 21));
-        assert_eq!(edge_target(rect, MonitorEdge::Bottom), (110, 118));
-        assert_eq!(edge_target(rect, MonitorEdge::Left), (11, 70));
-        assert_eq!(edge_target(rect, MonitorEdge::Right), (208, 70));
+        assert_eq!(edge_target(rect, MonitorEdge::Top, 1), (110, 21));
+        assert_eq!(edge_target(rect, MonitorEdge::Bottom, 1), (110, 118));
+        assert_eq!(edge_target(rect, MonitorEdge::Left, 1), (11, 70));
+        assert_eq!(edge_target(rect, MonitorEdge::Right, 1), (208, 70));
+        assert_eq!(edge_target(rect, MonitorEdge::Top, 7), (110, 27));
     }
 }
