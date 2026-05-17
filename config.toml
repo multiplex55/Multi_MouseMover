@@ -1,51 +1,160 @@
+# Multi MouseMover configuration
+#
+# Key names are parsed by src/keyboard.rs and chords use "+" between modifiers and
+# keys, for example "RightAlt+R". Action names are parsed by src/action.rs.
 
-# Key bindings map keyboard keys to actions
+# ---------------------------------------------------------------------------
+# Action bindings
+# ---------------------------------------------------------------------------
+# These bindings are handled only while active mode is enabled.
 key_bindings = [
+    ["W", "move_up"],
     ["A", "move_left"],
+    ["S", "move_down"],
     ["D", "move_right"],
-    ["L", "right_click"],
     ["LeftShift", "slow_mouse"],
     ["RightShift", "slow_mouse"],
-    ["S", "move_down"],
+
     ["SPACE", "left_click"],
-    ["N", "toggle_drag_mode"],
-    ["F", "jump_mode"],
-    ["W", "move_up"],
+    ["L", "right_click"],
     [";", "middle_click"],
+    ["N", "toggle_drag_mode"],
+    [".", "click_then_disable"],
+
     [",", "wheel_up"],
     ["M", "wheel_down"],
     ["I", "wheel_left"],
     ["O", "wheel_right"],
-    ["H", "center_current_monitor"],
-    [".", "click_then_disable"],
-    ["RightAlt+W", "move_to_top_edge"],
-    ["RightAlt+A", "move_to_left_edge"],
-    ["RightAlt+S", "move_to_bottom_edge"],
-    ["RightAlt+D", "move_to_right_edge"],
-    ["V", "wheel_speed_up"],
-    ["B", "wheel_speed_down"],
-    ["G", "wheel_speed_reset"],
+
     ["C", "mouse_speed_up"],
     ["X", "mouse_speed_down"],
     ["Z", "mouse_speed_reset"],
+    ["V", "wheel_speed_up"],
+    ["B", "wheel_speed_down"],
+    ["G", "wheel_speed_reset"],
     ["RightAlt+C", "movement_profile_next"],
     ["RightAlt+X", "movement_profile_previous"],
     ["RightAlt+V", "wheel_profile_next"],
     ["RightAlt+B", "wheel_profile_previous"],
+
+    ["F", "jump_mode"],
+    ["H", "center_current_monitor"],
+    ["RightAlt+W", "move_to_top_edge"],
+    ["RightAlt+A", "move_to_left_edge"],
+    ["RightAlt+S", "move_to_bottom_edge"],
+    ["RightAlt+D", "move_to_right_edge"],
+
     ["RightAlt+R", "reload_config"],
     ["RightAlt+Escape", "panic_reset"],
     ["Slash", "show_help"]
 ]
 
+# ---------------------------------------------------------------------------
+# System bindings
+# ---------------------------------------------------------------------------
+# These bindings remain available in both active and idle mode.
 [system_bindings]
 toggle_active = "Ctrl+E"
 exit = "Escape"
 
+# ---------------------------------------------------------------------------
+# Movement
+# ---------------------------------------------------------------------------
 polling_rate = 8
 
-# Grid size
-grid_size = {width = 10, height = 10}
+# Legacy coarse-grid fallback. Prefer [jump.coarse] for new configs.
+grid_size = { width = 10, height = 10 }
 
+# Held movement starts at [mouse_speed].default_speed, then ramps with these
+# legacy acceleration settings.
+acceleration = 2
+acceleration_rate = 1
+starting_speed = 1
+top_speed = 6
+
+[mouse_speed]
+default_speed = 1
+min_speed = 1
+max_speed = 12
+speed_step = 1
+flash_indicator_ms = 700
+
+# Preset examples. Cycle them with RightAlt+C / RightAlt+X or bind
+# movement_profile:<name> directly.
+[movement_profiles.fast]
+default_speed = 5
+min_speed = 2
+max_speed = 18
+speed_step = 2
+flash_indicator_ms = 700
+
+[movement_profiles.precise]
+default_speed = 1
+min_speed = 1
+max_speed = 4
+speed_step = 1
+flash_indicator_ms = 700
+
+[movement_profiles.window]
+default_speed = 3
+min_speed = 1
+max_speed = 10
+speed_step = 1
+flash_indicator_ms = 700
+
+# ---------------------------------------------------------------------------
+# Click
+# ---------------------------------------------------------------------------
+# Click actions are bound above:
+# - SPACE: left_click
+# - L: right_click
+# - ;: middle_click
+# - N: toggle_drag_mode
+# - .: click_then_disable
+
+# ---------------------------------------------------------------------------
+# Wheel
+# ---------------------------------------------------------------------------
+[wheel]
+default_speed = 3
+min_speed = 1
+max_speed = 12
+speed_step = 1
+tick_interval = 8
+speed_indicator_ms = 700
+vertical_multiplier = 1
+horizontal_multiplier = 1
+
+# Preset examples. Cycle them with RightAlt+V / RightAlt+B or bind
+# wheel_profile:<name> directly.
+[wheel_profiles.fast]
+default_speed = 6
+min_speed = 1
+max_speed = 18
+speed_step = 2
+tick_interval = 8
+speed_indicator_ms = 700
+vertical_multiplier = 1
+horizontal_multiplier = 1
+
+[wheel_profiles.precise]
+default_speed = 1
+min_speed = 1
+max_speed = 5
+speed_step = 1
+tick_interval = 12
+speed_indicator_ms = 700
+vertical_multiplier = 1
+horizontal_multiplier = 1
+
+[wheel_profiles.horizontal]
+default_speed = 3
+horizontal_multiplier = 3
+vertical_multiplier = 1
+
+# ---------------------------------------------------------------------------
+# Jump
+# ---------------------------------------------------------------------------
 [jump]
 mode = "precision"
 cursor_between_stages = "none"
@@ -80,10 +189,10 @@ height = 10
 aim_point = "center"
 aim_offset_x_px = 0
 aim_offset_y_px = 0
+target_region_mode = "exact_region"
 target_margin_percent = 0
 visual_context_margin_percent = 0
 zoom_scale = 1.0
-target_region_mode = "exact_region"
 
 [jump.coarse.labels]
 font_scale = 1.0
@@ -98,10 +207,10 @@ height = 8
 aim_point = "center"
 aim_offset_x_px = 0
 aim_offset_y_px = 0
+target_region_mode = "exact_region"
 target_margin_percent = 0
 visual_context_margin_percent = 1
 zoom_scale = 1.5
-target_region_mode = "exact_region"
 
 [jump.fine.labels]
 font_scale = 1.0
@@ -116,10 +225,10 @@ height = 5
 aim_point = "center"
 aim_offset_x_px = 0
 aim_offset_y_px = 0
+target_region_mode = "exact_region"
 target_margin_percent = 0
 visual_context_margin_percent = 5
 zoom_scale = 2.5
-target_region_mode = "exact_region"
 
 [jump.precise.labels]
 font_scale = 1.0
@@ -127,6 +236,51 @@ center_marker = false
 separators = true
 hide_threshold_px = 0
 
+# ---------------------------------------------------------------------------
+# Final adjust
+# ---------------------------------------------------------------------------
+# When enabled, completed jumps pause for keyboard nudging before committing.
+[final_adjust]
+enabled = false
+small_step_px = 1
+large_step_px = 10
+modifier_key = "Shift"
+confirm_key = "Enter"
+cancel_key = "Escape"
+back_key = "Backspace"
+show_hint = true
+
+# ---------------------------------------------------------------------------
+# Overlays
+# ---------------------------------------------------------------------------
+[status_overlay]
+visibility = "visible"
+mode = "minimal"
+positioning = "cursor"
+flash_duration_ms = 700
+
+[status_overlay.fields]
+active = true
+drag = true
+slow = true
+jump = true
+mouse_speed = true
+wheel_speed = true
+flash = true
+final_adjust = true
+
+# ---------------------------------------------------------------------------
+# Safety
+# ---------------------------------------------------------------------------
+[edge_jump]
+offset_px = 1
+use_work_area = false
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+# Jump profiles merge over [jump] for one launch. Bind with either
+# jump_mode_profile:<name> or jump_mode_profile.<name>.
 [jump.profiles.fast]
 mode = "single"
 cursor_between_stages = "none"
@@ -185,103 +339,3 @@ width = 10
 height = 8
 visual_context_margin_percent = 0
 zoom_scale = 1.0
-
-[final_adjust]
-enabled = false
-small_step_px = 1
-large_step_px = 10
-modifier_key = "Shift"
-confirm_key = "Enter"
-cancel_key = "Escape"
-back_key = "Backspace"
-show_hint = true
-
-[status_overlay]
-visibility = "visible"
-mode = "minimal"
-positioning = "cursor"
-flash_duration_ms = 700
-
-[status_overlay.fields]
-active = true
-drag = true
-slow = true
-jump = true
-mouse_speed = true
-wheel_speed = true
-flash = true
-final_adjust = true
-
-# Mouse movement parameters
-acceleration      = 2 # Pixels per acceleration step
-acceleration_rate = 1 # Polling cycles before applying acceleration
-starting_speed    = 1 # Initial speed in pixels
-top_speed         = 6
-
-[mouse_speed]
-default_speed = 1
-min_speed = 1
-max_speed = 12
-speed_step = 1
-flash_indicator_ms = 700
-
-[movement_profiles.fast]
-default_speed = 5
-min_speed = 2
-max_speed = 18
-speed_step = 2
-flash_indicator_ms = 700
-
-[movement_profiles.precise]
-default_speed = 1
-min_speed = 1
-max_speed = 4
-speed_step = 1
-flash_indicator_ms = 700
-
-[movement_profiles.window]
-default_speed = 3
-min_speed = 1
-max_speed = 10
-speed_step = 1
-flash_indicator_ms = 700
-
-[wheel]
-default_speed = 3
-min_speed = 1
-max_speed = 12
-speed_step = 1
-tick_interval = 8
-speed_indicator_ms = 700
-vertical_multiplier = 1
-horizontal_multiplier = 1
-
-[wheel_profiles.fast]
-default_speed = 6
-min_speed = 1
-max_speed = 18
-speed_step = 2
-tick_interval = 8
-speed_indicator_ms = 700
-vertical_multiplier = 1
-horizontal_multiplier = 1
-
-[wheel_profiles.precise]
-default_speed = 1
-min_speed = 1
-max_speed = 5
-speed_step = 1
-tick_interval = 12
-speed_indicator_ms = 700
-vertical_multiplier = 1
-horizontal_multiplier = 1
-
-[wheel_profiles.horizontal]
-default_speed = 3
-horizontal_multiplier = 3
-vertical_multiplier = 1
-
-[edge_jump]
-offset_px = 1
-use_work_area = false
-

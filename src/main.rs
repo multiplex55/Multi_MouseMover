@@ -2216,6 +2216,39 @@ mod tests {
         }
     }
 
+    fn checked_in_config() -> Config {
+        parse_config(include_str!("../config.toml"))
+    }
+
+    fn readme_section(heading: &str, next_heading: &str) -> &'static str {
+        let readme = include_str!("../README.md");
+        let start = readme
+            .find(heading)
+            .unwrap_or_else(|| panic!("missing README heading {heading}"));
+        let after_start = &readme[start..];
+        let end = after_start
+            .find(next_heading)
+            .unwrap_or_else(|| panic!("missing README heading {next_heading}"));
+        &after_start[..end]
+    }
+
+    fn readme_toml_block_after(marker: &str) -> &'static str {
+        let readme = include_str!("../README.md");
+        let marker_start = readme
+            .find(marker)
+            .unwrap_or_else(|| panic!("missing README marker {marker}"));
+        let after_marker = &readme[marker_start..];
+        let block_start = after_marker
+            .find("```toml")
+            .unwrap_or_else(|| panic!("missing TOML block after {marker}"))
+            + "```toml".len();
+        let after_fence = &after_marker[block_start..];
+        let block_end = after_fence
+            .find("```")
+            .unwrap_or_else(|| panic!("unterminated TOML block after {marker}"));
+        after_fence[..block_end].trim()
+    }
+
     fn jump_region() -> crate::jump_session::JumpRegion {
         crate::jump_session::JumpRegion {
             left: 0,
@@ -2293,6 +2326,55 @@ mod tests {
                 final_crosshair: false,
             }
         );
+    }
+
+    #[test]
+    fn checked_in_config_parses_and_all_default_bindings_are_known() {
+        let config = checked_in_config();
+
+        assert_eq!(config.system_bindings.toggle_active, "Ctrl+E");
+        assert_eq!(config.system_bindings.exit, "Escape");
+        assert_eq!(config.key_bindings.len(), 34);
+        for (key, action) in &config.key_bindings {
+            assert!(KeyChord::parse(key).is_ok(), "{key}");
+            assert!(Action::from_string(action).is_some(), "{key} -> {action}");
+        }
+    }
+
+    #[test]
+    fn readme_default_binding_keys_match_checked_in_config() {
+        let config = checked_in_config();
+        let section = readme_section("## Default Bindings", "## Active And Idle");
+
+        for key in [
+            &config.system_bindings.toggle_active,
+            &config.system_bindings.exit,
+        ] {
+            let token = format!("`{key}`");
+            assert!(section.contains(&token), "README missing {token}");
+        }
+
+        for (key, _) in &config.key_bindings {
+            let token = format!("`{key}`");
+            assert!(section.contains(&token), "README missing {token}");
+        }
+
+        assert!(
+            !section.contains("`Alt+E`") && !section.contains("Alt + E"),
+            "README should not document stale Alt+E active toggle"
+        );
+    }
+
+    #[test]
+    fn readme_copy_paste_jump_snippet_parses() {
+        let snippet = readme_toml_block_after("Copy-pasteable jump configuration:");
+        let config = parse_config(snippet);
+
+        assert_eq!(config.jump.mode, JumpMode::Precision);
+        assert_eq!(config.jump.coarse.width, 10);
+        assert_eq!(config.jump.fine.width, 8);
+        assert_eq!(config.jump.precise.width, 5);
+        assert_eq!(config.jump.precise.visual_context_margin_percent, 5);
     }
 
     #[test]

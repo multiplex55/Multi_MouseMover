@@ -37,6 +37,24 @@ Deprecated compatibility behavior:
   `preview_edge_behavior`, and `aim_point`, are serde-parsed enums and should
   fail configuration loading with a clear unknown-variant error.
 
+Compatibility and deprecation table:
+
+| Old field or value | New field or value | Fallback behavior | Planned removal policy |
+| --- | --- | --- | --- |
+| `jump.move_cursor_after_each_stage = true` | `jump.cursor_between_stages = "move_to_region_center"` | Used only when `cursor_between_stages` is absent. | Keep through the current compatibility window; remove after checked-in config, README, and smoke-test docs no longer mention the old field except in migration notes. |
+| `jump.move_cursor_after_each_stage = false` | `jump.cursor_between_stages = "none"` | Used only when `cursor_between_stages` is absent. | Same policy as the `true` mapping. |
+| Both `jump.move_cursor_after_each_stage` and `jump.cursor_between_stages` | `jump.cursor_between_stages` | Modern field wins; legacy field is ignored. | Keep precedence until the legacy field is removed, then unknown-field handling can reject it if strict parsing is enabled. |
+| `jump.<stage>.preview_margin_percent` | `jump.<stage>.visual_context_margin_percent` | Legacy field is copied only when `visual_context_margin_percent` is absent. | Remove after one release or migration cycle with warning coverage in tests. |
+| Invalid `jump.<stage>.target_region_mode` string | Valid `target_region_mode`: `exact_region`, `region_with_context`, `expanded_target`, or `cursor_centered_zoom` | Normalizes to `exact_region` and records a config warning. | Keep fallback while users may have experimental values; revisit when config validation becomes stricter. |
+| Missing `[jump.coarse]` with `grid_size = { width, height }` | `[jump.coarse].width` and `[jump.coarse].height` | Coarse jump size is derived from `grid_size`; normalized config writes the coarse size back into runtime state. | Keep until `grid_size` is no longer documented as a legacy fallback. |
+| `starting_speed` | `[mouse_speed].default_speed` | Seeds `mouse_speed.default_speed` only when `[mouse_speed]` is otherwise at its default. Runtime `starting_speed` is normalized to the effective mouse default. | Keep as a legacy migration path; prefer removing after configs have moved fully to `[mouse_speed]`. |
+| `middle_mouse` action | `middle_click` | Action parser accepts both names. | Alias can remain indefinitely because it is harmless and isolated. |
+| `scroll_up`, `scroll_down`, `scroll_left`, `scroll_right` actions | `wheel_up`, `wheel_down`, `wheel_left`, `wheel_right` | Action parser accepts both names. | Alias can remain indefinitely unless action help output becomes canonical-only. |
+| `drag_mode`, `toggle_left_drag`, `toggle_left_button_hold` actions | `toggle_drag_mode` | Action parser accepts all aliases. | Alias can remain indefinitely because existing user bindings are low risk. |
+| `center_monitor` action | `center_current_monitor` | Action parser accepts both names. | Alias can remain indefinitely. |
+| `movement_profile.*`, `mouse_profile:*`, `mouse_profile.*`, `select_movement_profile:*` | `movement_profile:<name>` | Action parser accepts all forms and selects the named movement profile. | Keep aliases while profile binding syntax is user-facing; document only canonical `movement_profile:<name>` and `movement_profile.<name>`. |
+| `wheel_profile.*`, `select_wheel_profile:*` | `wheel_profile:<name>` | Action parser accepts all forms and selects the named wheel profile. | Keep aliases while profile binding syntax is user-facing; document only canonical `wheel_profile:<name>` and `wheel_profile.<name>`. |
+
 Migration notes:
 
 1. Replace `move_cursor_after_each_stage = true` with
