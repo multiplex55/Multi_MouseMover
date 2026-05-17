@@ -229,6 +229,36 @@ fn bounded_region_centered_on(
     })
 }
 
+fn zoomed_region_around_target(
+    base_region: JumpRegion,
+    target_region: JumpRegion,
+    bounds: JumpRegion,
+    zoom_scale: f32,
+) -> Option<JumpRegion> {
+    if !base_region.is_valid() || !target_region.is_valid() || !bounds.is_valid() {
+        return None;
+    }
+
+    let zoom_scale = zoom_scale.max(1.0);
+    let width = ((base_region.width as f32 / zoom_scale).round() as i32).max(1);
+    let height = ((base_region.height as f32 / zoom_scale).round() as i32).max(1);
+    let target_center = (
+        target_region.left + target_region.width / 2,
+        target_region.top + target_region.height / 2,
+    );
+
+    bounded_region_centered_on(
+        target_center,
+        JumpRegion {
+            left: base_region.left,
+            top: base_region.top,
+            width,
+            height,
+        },
+        bounds,
+    )
+}
+
 fn active_stage_metadata(view: &JumpOverlayView) -> Option<&JumpStageMetadata> {
     view.stages.get(view.stage_index)
 }
@@ -236,10 +266,16 @@ fn active_stage_metadata(view: &JumpOverlayView) -> Option<&JumpStageMetadata> {
 fn preview_source_region_for_view(view: &JumpOverlayView) -> JumpRegion {
     active_stage_metadata(view)
         .and_then(|stage| {
-            expand_region_within(
+            let base_region = expand_region_within(
                 view.target_region,
                 stage.visual_context_margin_percent,
                 view.session_region,
+            )?;
+            zoomed_region_around_target(
+                base_region,
+                view.target_region,
+                view.session_region,
+                stage.zoom_scale,
             )
         })
         .unwrap_or(view.preview_source_region)
@@ -796,6 +832,7 @@ mod tests {
                 grid_size: (10, 10),
                 target_margin_percent: 0,
                 visual_context_margin_percent: 20,
+                zoom_scale: 1.0,
                 target_region_mode: JumpTargetRegionMode::RegionWithContext,
             },
         ];
@@ -826,6 +863,7 @@ mod tests {
                 grid_size: (10, 10),
                 target_margin_percent: 0,
                 visual_context_margin_percent: 20,
+                zoom_scale: 1.0,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
             },
         ];
@@ -837,6 +875,61 @@ mod tests {
                 top: 31,
                 width: 56,
                 height: 28,
+            }
+        );
+    }
+
+    #[test]
+    fn preview_source_region_area_decreases_as_zoom_increases() {
+        let mut low_zoom = view(1, 2, "");
+        low_zoom.target_region = JumpRegion {
+            left: 100,
+            top: 100,
+            width: 100,
+            height: 80,
+        };
+        low_zoom.session_region = JumpRegion {
+            left: 0,
+            top: 0,
+            width: 400,
+            height: 400,
+        };
+        low_zoom.stages = vec![
+            stage_metadata(0, JumpTargetRegionMode::ExactRegion),
+            JumpStageMetadata {
+                index: 1,
+                grid_size: (10, 10),
+                target_margin_percent: 0,
+                visual_context_margin_percent: 50,
+                zoom_scale: 1.0,
+                target_region_mode: JumpTargetRegionMode::ExactRegion,
+            },
+        ];
+        let mut high_zoom = low_zoom.clone();
+        high_zoom.stages[1].zoom_scale = 2.0;
+
+        let low_region = preview_source_region_for_view(&low_zoom);
+        let high_region = preview_source_region_for_view(&high_zoom);
+        let low_area = low_region.width * low_region.height;
+        let high_area = high_region.width * high_region.height;
+
+        assert!(high_area < low_area);
+        assert_eq!(
+            low_region,
+            JumpRegion {
+                left: 50,
+                top: 60,
+                width: 200,
+                height: 160,
+            }
+        );
+        assert_eq!(
+            high_region,
+            JumpRegion {
+                left: 100,
+                top: 100,
+                width: 100,
+                height: 80,
             }
         );
     }
@@ -874,6 +967,7 @@ mod tests {
             grid_size: (10, 10),
             target_margin_percent: 10,
             visual_context_margin_percent: 20,
+            zoom_scale: 1.0,
             target_region_mode,
         }
     }

@@ -68,7 +68,7 @@ pub enum JumpState {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum JumpOverlayResolution {
     Hidden,
     Visible(JumpOverlayView),
@@ -448,6 +448,7 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
         grid_size: (config.jump.coarse.width, config.jump.coarse.height),
         target_margin_percent: config.jump.coarse.target_margin_percent,
         visual_context_margin_percent: config.jump.coarse.visual_context_margin_percent,
+        zoom_scale: config.jump.coarse.zoom_scale,
         target_region_mode: config.jump.coarse.target_region_mode,
     }];
 
@@ -457,6 +458,7 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
             grid_size: (config.jump.fine.width, config.jump.fine.height),
             target_margin_percent: config.jump.fine.target_margin_percent,
             visual_context_margin_percent: config.jump.fine.visual_context_margin_percent,
+            zoom_scale: config.jump.fine.zoom_scale,
             target_region_mode: config.jump.fine.target_region_mode,
         });
     }
@@ -467,6 +469,7 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
             grid_size: (config.jump.precise.width, config.jump.precise.height),
             target_margin_percent: config.jump.precise.target_margin_percent,
             visual_context_margin_percent: config.jump.precise.visual_context_margin_percent,
+            zoom_scale: config.jump.precise.zoom_scale,
             target_region_mode: config.jump.precise.target_region_mode,
         });
     }
@@ -829,6 +832,25 @@ mod tests {
         );
         assert_eq!(view.stages[0].target_margin_percent, 0);
         assert_eq!(view.stages[0].visual_context_margin_percent, 0);
+        assert_eq!(view.stages[0].zoom_scale, 1.0);
+    }
+
+    #[test]
+    fn jump_view_propagates_configured_zoom_scale_to_metadata() {
+        let mut config = Config::default();
+        config.jump.mode = crate::JumpMode::Precision;
+        config.jump.coarse.zoom_scale = 1.25;
+        config.jump.fine.enabled = true;
+        config.jump.fine.zoom_scale = 4.0;
+        let config = config.normalize().unwrap();
+
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+
+        let view = state.jump_view().unwrap();
+        assert_eq!(view.stages.len(), 2);
+        assert_eq!(view.stages[0].zoom_scale, 1.25);
+        assert_eq!(view.stages[1].zoom_scale, 4.0);
     }
 
     #[test]
@@ -898,6 +920,43 @@ mod tests {
                 width: 22,
                 height: 22,
             }
+        );
+    }
+
+    #[test]
+    fn zoom_scale_does_not_change_jump_subdivision_math() {
+        let mut low_zoom = Config::default();
+        low_zoom.jump.mode = crate::JumpMode::Precision;
+        low_zoom.jump.coarse.width = 5;
+        low_zoom.jump.coarse.height = 5;
+        low_zoom.jump.fine.enabled = true;
+        low_zoom.jump.fine.width = 5;
+        low_zoom.jump.fine.height = 5;
+        low_zoom.jump.fine.zoom_scale = 1.0;
+
+        let mut high_zoom = low_zoom.clone();
+        high_zoom.jump.fine.zoom_scale = 8.0;
+
+        let low_zoom = low_zoom.normalize().unwrap();
+        let high_zoom = high_zoom.normalize().unwrap();
+        let mut low_state = AppState::default();
+        let mut high_state = AppState::default();
+        assert!(low_state.enter_jump_mode(&low_zoom, jump_region(), VirtualKey::J));
+        assert!(high_state.enter_jump_mode(&high_zoom, jump_region(), VirtualKey::J));
+
+        for key in [VirtualKey::B, VirtualKey::B] {
+            assert_eq!(
+                low_state.handle_jump_input(KeyEvent::new(key, true)),
+                high_state.handle_jump_input(KeyEvent::new(key, true))
+            );
+        }
+
+        let low_view = low_state.jump_view().unwrap();
+        let high_view = high_state.jump_view().unwrap();
+        assert_eq!(low_view.target_region, high_view.target_region);
+        assert_ne!(
+            low_view.stages[low_view.stage_index].zoom_scale,
+            high_view.stages[high_view.stage_index].zoom_scale
         );
     }
 

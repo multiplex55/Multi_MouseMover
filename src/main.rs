@@ -43,6 +43,8 @@ const DEBUG_HEARTBEAT_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
 const MIN_JUMP_STAGE_SIZE: u32 = 1;
 const MAX_JUMP_STAGE_SIZE: u32 = 26;
 const MAX_JUMP_REGION_MARGIN_PERCENT: u8 = 50;
+const MIN_JUMP_ZOOM_SCALE: f32 = 1.0;
+const MAX_JUMP_ZOOM_SCALE: f32 = 10.0;
 const MAX_EDGE_JUMP_OFFSET_PX: i32 = 10_000;
 
 static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
@@ -319,6 +321,7 @@ impl Default for JumpConfig {
                 height: 5,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 10,
+                zoom_scale: 1.5,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
                 legacy_preview_margin_percent: None,
                 legacy_preview_margin_percent_used: false,
@@ -330,6 +333,7 @@ impl Default for JumpConfig {
                 height: 3,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 5,
+                zoom_scale: 2.5,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
                 legacy_preview_margin_percent: None,
                 legacy_preview_margin_percent_used: false,
@@ -346,6 +350,7 @@ struct JumpStageConfig {
     height: u32,
     target_margin_percent: u8,
     visual_context_margin_percent: u8,
+    zoom_scale: f32,
     target_region_mode: JumpTargetRegionMode,
     legacy_preview_margin_percent: Option<u8>,
     legacy_preview_margin_percent_used: bool,
@@ -360,6 +365,7 @@ struct JumpStageConfigToml {
     height: u32,
     target_margin_percent: u8,
     visual_context_margin_percent: Option<u8>,
+    zoom_scale: f32,
     target_region_mode: Option<String>,
     #[serde(default, rename = "preview_margin_percent")]
     legacy_preview_margin_percent: Option<u8>,
@@ -374,6 +380,7 @@ impl Default for JumpStageConfigToml {
             height: default.height,
             target_margin_percent: default.target_margin_percent,
             visual_context_margin_percent: None,
+            zoom_scale: default.zoom_scale,
             target_region_mode: None,
             legacy_preview_margin_percent: default.legacy_preview_margin_percent,
         }
@@ -408,6 +415,7 @@ impl<'de> Deserialize<'de> for JumpStageConfig {
             height: fields.height,
             target_margin_percent: fields.target_margin_percent,
             visual_context_margin_percent,
+            zoom_scale: fields.zoom_scale,
             target_region_mode,
             legacy_preview_margin_percent: fields.legacy_preview_margin_percent,
             legacy_preview_margin_percent_used,
@@ -424,6 +432,7 @@ impl JumpStageConfig {
             height: 0,
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
+            zoom_scale: 1.0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
             legacy_preview_margin_percent: None,
             legacy_preview_margin_percent_used: false,
@@ -440,6 +449,7 @@ impl Default for JumpStageConfig {
             height: 1,
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
+            zoom_scale: 1.0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
             legacy_preview_margin_percent: None,
             legacy_preview_margin_percent_used: false,
@@ -682,6 +692,7 @@ fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
         ));
         stage.visual_context_margin_percent = MAX_JUMP_REGION_MARGIN_PERCENT;
     }
+    stage.zoom_scale = normalize_jump_zoom_scale(name, stage.zoom_scale);
 }
 
 fn normalize_jump_stage_size(name: &str, field: &str, value: u32) -> u32 {
@@ -697,6 +708,30 @@ fn normalize_jump_stage_size(name: &str, field: &str, value: u32) -> u32 {
             MAX_JUMP_STAGE_SIZE, MAX_JUMP_STAGE_SIZE
         ));
         MAX_JUMP_STAGE_SIZE
+    } else {
+        value
+    }
+}
+
+fn normalize_jump_zoom_scale(name: &str, value: f32) -> f32 {
+    if !value.is_finite() {
+        warn_config_normalized(&format!(
+            "{name}.zoom_scale is not finite; using {}",
+            MIN_JUMP_ZOOM_SCALE
+        ));
+        MIN_JUMP_ZOOM_SCALE
+    } else if value < MIN_JUMP_ZOOM_SCALE {
+        warn_config_normalized(&format!(
+            "{name}.zoom_scale={value} is below {}; clamping to {}",
+            MIN_JUMP_ZOOM_SCALE, MIN_JUMP_ZOOM_SCALE
+        ));
+        MIN_JUMP_ZOOM_SCALE
+    } else if value > MAX_JUMP_ZOOM_SCALE {
+        warn_config_normalized(&format!(
+            "{name}.zoom_scale={value} is above {}; clamping to {}",
+            MAX_JUMP_ZOOM_SCALE, MAX_JUMP_ZOOM_SCALE
+        ));
+        MAX_JUMP_ZOOM_SCALE
     } else {
         value
     }
@@ -1448,6 +1483,15 @@ mod tests {
     }
 
     #[test]
+    fn jump_stage_zoom_defaults_are_per_stage() {
+        let config = Config::default().normalize().unwrap();
+
+        assert_eq!(config.jump.coarse.zoom_scale, 1.0);
+        assert_eq!(config.jump.fine.zoom_scale, 1.5);
+        assert_eq!(config.jump.precise.zoom_scale, 2.5);
+    }
+
+    #[test]
     fn jump_target_region_modes_parse_from_config() {
         let cases = [
             ("exact_region", JumpTargetRegionMode::ExactRegion),
@@ -1575,6 +1619,25 @@ mod tests {
             MAX_JUMP_REGION_MARGIN_PERCENT
         );
         assert_eq!(config.jump.coarse.target_margin_percent, 0);
+    }
+
+    #[test]
+    fn jump_stage_zoom_scale_is_clamped_to_supported_range() {
+        let min = parse_config(
+            r#"
+            [jump.coarse]
+            zoom_scale = 0.25
+            "#,
+        );
+        let max = parse_config(
+            r#"
+            [jump.coarse]
+            zoom_scale = 12.5
+            "#,
+        );
+
+        assert_eq!(min.jump.coarse.zoom_scale, MIN_JUMP_ZOOM_SCALE);
+        assert_eq!(max.jump.coarse.zoom_scale, MAX_JUMP_ZOOM_SCALE);
     }
 
     #[test]
