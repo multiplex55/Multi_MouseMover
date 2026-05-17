@@ -1,6 +1,7 @@
 mod action;
 mod action_handler;
 mod app_state;
+mod indicator;
 mod jump_grid;
 mod jump_overlay;
 mod jump_session;
@@ -14,6 +15,7 @@ mod screen_capture;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, JumpOverlayResolution, KeyEvent};
+use indicator::{resolve_indicator_state, IndicatorInput, WheelIndicatorInput};
 use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
 };
@@ -958,7 +960,7 @@ fn main() {
     };
     if let Some(ov) = overlay {
         println!("✅ Overlay Initialized Successfully");
-        ov.show();
+        drop(ov);
     } else {
         eprintln!("Overlay disabled due to initialization failure");
     }
@@ -982,11 +984,27 @@ fn main() {
             loop_diagnostics.movement_ticks += 1;
         }
 
-        // ✅ Update the overlay position inside the loop
-        let is_left_click_held = ACTION_HANDLER.read().unwrap().mouse_master.left_click_held;
+        let indicator_state = {
+            let action_handler = ACTION_HANDLER.read().unwrap();
+            let app_state = APP_STATE.read().unwrap();
+            resolve_indicator_state(IndicatorInput {
+                app_active: app_state.active_mode(),
+                jump_active: app_state.is_jump_active(),
+                active_actions: &action_handler.active_keys,
+                wheel: WheelIndicatorInput {
+                    active: action_handler
+                        .active_keys
+                        .iter()
+                        .any(|action| action.is_wheel_direction()),
+                    current_speed: action_handler.mouse_master.current_wheel_speed,
+                    default_speed: action_handler.mouse_master.config.wheel.default_speed,
+                },
+                left_button_held: action_handler.mouse_master.left_click_held,
+            })
+        };
         if let Ok(mut maybe_ov) = OVERLAY.lock() {
             if let Some(ref mut ov) = *maybe_ov {
-                ov.update_overlay_status(is_left_click_held);
+                ov.update_overlay_status(indicator_state);
             }
         }
 

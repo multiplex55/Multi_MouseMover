@@ -1,5 +1,4 @@
 use crate::monitor::{current_monitor_rect_for_cursor, MonitorEdge, MonitorRect};
-use crate::overlay::OVERLAY;
 use crate::{action, Config};
 use action::Action;
 use enigo::*;
@@ -157,7 +156,6 @@ impl<B: MouseBackend> MouseMaster<B> {
     fn left_click(&mut self) {
         println!("[DEBUG] Left Click Pressed!");
         self.left_click_held = true; // ✅ Update state
-        self.update_overlay(); // ✅ Notify the overlay
         if let Err(e) = self.backend.click(Button::Left) {
             eprintln!("Failed to perform left click: {e}");
         }
@@ -168,14 +166,6 @@ impl<B: MouseBackend> MouseMaster<B> {
     fn release_left_click(&mut self) {
         println!("[DEBUG] Left Click Released!");
         self.left_click_held = false; // ✅ Reset state
-        self.update_overlay(); // ✅ Notify the overlay
-    }
-
-    /// Function to update the overlay window
-    fn update_overlay(&self) {
-        if let Some(ref mut ov) = *OVERLAY.lock().unwrap_or_else(|e| e.into_inner()) {
-            ov.update_color(self.left_click_held);
-        }
     }
 
     /// Simulates a right mouse click

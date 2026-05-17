@@ -1,3 +1,4 @@
+use crate::indicator::IndicatorState;
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -33,7 +34,8 @@ lazy_static::lazy_static! {
 #[derive(Clone)]
 pub struct OverlayWindow {
     hwnd: Arc<Mutex<Option<isize>>>, // ✅ Store HWND as `isize`
-    is_green: bool,
+    indicator_state: IndicatorState,
+    visible: bool,
     last_cursor_position: Option<OverlayPosition>,
     last_visual_state: Option<OverlayVisualState>,
     #[cfg(debug_assertions)]
@@ -52,7 +54,7 @@ struct OverlayPosition {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OverlayVisualState {
-    is_green: bool,
+    indicator_state: IndicatorState,
 }
 
 #[cfg(debug_assertions)]
@@ -68,6 +70,10 @@ fn should_move(previous: Option<&OverlayPosition>, current: &OverlayPosition) ->
 
 fn should_repaint(previous: Option<&OverlayVisualState>, current: &OverlayVisualState) -> bool {
     previous != Some(current)
+}
+
+fn should_display(state: IndicatorState) -> bool {
+    state != IndicatorState::Hidden
 }
 
 #[cfg(debug_assertions)]
@@ -159,7 +165,8 @@ impl OverlayWindow {
         println!("✅ Overlay: Initialization Completed!");
         let overlay = Self {
             hwnd: Arc::new(Mutex::new(hwnd_ptr)),
-            is_green: false,
+            indicator_state: IndicatorState::Hidden,
+            visible: false,
             last_cursor_position: None,
             last_visual_state: None,
             #[cfg(debug_assertions)]
@@ -173,19 +180,28 @@ impl OverlayWindow {
         Ok(overlay)
     }
 
-    /// Shows the overlay without activating it and schedules its first paint.
-    pub fn show(&self) {
-        let hwnd_lock = self.hwnd.lock().unwrap();
-        if let Some(h) = *hwnd_lock {
-            let hwnd = HWND(h as *mut _);
-            unsafe {
-                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                let _ = InvalidateRect(Some(hwnd), None, false);
+    fn hide(&mut self) {
+        if self.visible {
+            let hwnd_lock = self.hwnd.lock().unwrap();
+            if let Some(h) = *hwnd_lock {
+                unsafe {
+                    let _ = ShowWindow(HWND(h as *mut _), SW_HIDE);
+                }
             }
         }
+        self.visible = false;
+        self.indicator_state = IndicatorState::Hidden;
+        self.last_visual_state = Some(OverlayVisualState {
+            indicator_state: IndicatorState::Hidden,
+        });
     }
 
-    pub fn update_overlay_status(&mut self, is_left_click_held: bool) {
+    pub fn update_overlay_status(&mut self, indicator_state: IndicatorState) {
+        if !should_display(indicator_state) {
+            self.hide();
+            return;
+        }
+
         let hwnd = *self.hwnd.lock().unwrap();
         if let Some(h) = hwnd {
             let hwnd = HWND(h as *mut _);
@@ -196,9 +212,8 @@ impl OverlayWindow {
                     x: point.x + 5,
                     y: point.y + 5,
                 };
-                let current_visual = OverlayVisualState {
-                    is_green: is_left_click_held,
-                };
+                let current_visual = OverlayVisualState { indicator_state };
+                let was_hidden = !self.visible;
 
                 if should_move(self.last_cursor_position.as_ref(), &current_position) {
                     unsafe {
@@ -215,8 +230,15 @@ impl OverlayWindow {
                     self.record_set_window_pos_call();
                 }
 
+                if was_hidden {
+                    unsafe {
+                        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                    }
+                    self.visible = true;
+                }
+
                 if should_repaint(self.last_visual_state.as_ref(), &current_visual) {
-                    self.is_green = current_visual.is_green;
+                    self.indicator_state = current_visual.indicator_state;
                     self.request_repaint();
                 }
 
@@ -228,11 +250,7 @@ impl OverlayWindow {
 
     /// Draws the square into the caller-provided paint device context.
     pub fn draw(&self, hdc: HDC) {
-        let color = if self.is_green {
-            RGB(0, 255, 0) // Green when left-click is pressed
-        } else {
-            RGB(255, 0, 0) // Red otherwise
-        };
+        let color = indicator_color(self.indicator_state);
 
         unsafe {
             let hbrush = CreateSolidBrush(color);
@@ -258,39 +276,6 @@ impl OverlayWindow {
                 let _ = InvalidateRect(Some(hwnd), None, false);
             }
             self.record_repaint_request();
-        }
-    }
-
-    /// Moves the overlay to follow the mouse cursor
-    pub fn move_to_mouse(&mut self) {
-        let hwnd_lock = self.hwnd.lock().unwrap();
-        if let Some(h) = *hwnd_lock {
-            let hwnd = HWND(h as *mut _);
-            let mut point = POINT::default();
-
-            if unsafe { GetCursorPos(&mut point) }.is_ok() {
-                let current_position = OverlayPosition {
-                    x: point.x + 5,
-                    y: point.y + 5,
-                };
-
-                if should_move(self.last_cursor_position.as_ref(), &current_position) {
-                    unsafe {
-                        let _ = SetWindowPos(
-                            hwnd,
-                            Some(HWND_TOPMOST),
-                            current_position.x,
-                            current_position.y,
-                            5, // Small overlay width
-                            5, // Small overlay height
-                            SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
-                        );
-                    }
-                    self.record_set_window_pos_call();
-                }
-
-                self.last_cursor_position = Some(current_position);
-            }
         }
     }
 
@@ -336,17 +321,6 @@ impl OverlayWindow {
         });
     }
 
-    /// Updates the color of the square and moves it
-    pub fn update_color(&mut self, is_green: bool) {
-        let current_visual = OverlayVisualState { is_green };
-        if should_repaint(self.last_visual_state.as_ref(), &current_visual) {
-            self.is_green = is_green;
-            self.request_repaint();
-        }
-        self.last_visual_state = Some(current_visual);
-        self.move_to_mouse(); // 🟢 Move the overlay when color updates
-    }
-
     #[cfg(debug_assertions)]
     fn record_set_window_pos_call(&self) {
         self.debug_counters
@@ -383,6 +357,18 @@ impl OverlayWindow {
 #[allow(non_snake_case)]
 pub fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
     COLORREF(((b as u32) << 16) | ((g as u32) << 8) | (r as u32))
+}
+
+fn indicator_color(state: IndicatorState) -> COLORREF {
+    match state {
+        IndicatorState::Hidden => RGB(0, 0, 0),
+        IndicatorState::ActiveNormal => RGB(255, 0, 0),
+        IndicatorState::ActiveSlow => RGB(0, 255, 0),
+        IndicatorState::JumpMode => RGB(0, 120, 255),
+        IndicatorState::WheelScrollingSlow => RGB(255, 180, 0),
+        IndicatorState::WheelScrollingNormal => RGB(255, 255, 0),
+        IndicatorState::WheelScrollingFast => RGB(255, 0, 255),
+    }
 }
 
 /// Window procedure for overlay
@@ -430,8 +416,10 @@ extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: L
 #[cfg(test)]
 mod tests {
     use super::{
-        overlay_ex_style, should_move, should_repaint, OverlayPosition, OverlayVisualState,
+        indicator_color, overlay_ex_style, should_display, should_move, should_repaint,
+        OverlayPosition, OverlayVisualState, RGB,
     };
+    use crate::indicator::IndicatorState;
     use windows::Win32::UI::WindowsAndMessaging::{
         WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     };
@@ -445,6 +433,12 @@ mod tests {
         assert!(style.contains(WS_EX_TOOLWINDOW));
         assert!(style.contains(WS_EX_TRANSPARENT));
         assert!(style.contains(WS_EX_NOACTIVATE));
+    }
+
+    #[test]
+    fn hidden_state_suppresses_display_path() {
+        assert!(!should_display(IndicatorState::Hidden));
+        assert!(should_display(IndicatorState::ActiveNormal));
     }
 
     #[test]
@@ -466,18 +460,55 @@ mod tests {
 
     #[test]
     fn should_repaint_when_there_is_no_previous_visual_state() {
-        let current = OverlayVisualState { is_green: false };
+        let current = OverlayVisualState {
+            indicator_state: IndicatorState::ActiveNormal,
+        };
 
         assert!(should_repaint(None, &current));
     }
 
     #[test]
     fn should_repaint_only_when_visual_state_changes() {
-        let previous = OverlayVisualState { is_green: false };
-        let same = OverlayVisualState { is_green: false };
-        let changed = OverlayVisualState { is_green: true };
+        let previous = OverlayVisualState {
+            indicator_state: IndicatorState::ActiveNormal,
+        };
+        let same = OverlayVisualState {
+            indicator_state: IndicatorState::ActiveNormal,
+        };
+        let changed = OverlayVisualState {
+            indicator_state: IndicatorState::ActiveSlow,
+        };
 
         assert!(!should_repaint(Some(&previous), &same));
         assert!(should_repaint(Some(&previous), &changed));
+    }
+
+    #[test]
+    fn hidden_state_has_a_distinct_non_display_color_branch() {
+        assert_eq!(indicator_color(IndicatorState::Hidden), RGB(0, 0, 0));
+    }
+
+    #[test]
+    fn active_slow_and_jump_states_render_distinct_colors() {
+        assert_ne!(
+            indicator_color(IndicatorState::ActiveNormal),
+            indicator_color(IndicatorState::ActiveSlow)
+        );
+        assert_ne!(
+            indicator_color(IndicatorState::ActiveSlow),
+            indicator_color(IndicatorState::JumpMode)
+        );
+    }
+
+    #[test]
+    fn wheel_speed_states_render_distinct_colors() {
+        assert_ne!(
+            indicator_color(IndicatorState::WheelScrollingSlow),
+            indicator_color(IndicatorState::WheelScrollingNormal)
+        );
+        assert_ne!(
+            indicator_color(IndicatorState::WheelScrollingNormal),
+            indicator_color(IndicatorState::WheelScrollingFast)
+        );
     }
 }
