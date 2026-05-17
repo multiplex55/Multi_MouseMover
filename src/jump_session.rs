@@ -275,12 +275,9 @@ fn target_region_for_stage(
 ) -> Option<JumpRegion> {
     match stage.target_region_mode {
         JumpTargetRegionMode::ExactRegion => Some(selected_region),
-        JumpTargetRegionMode::RegionWithContext => expand_region_within(
-            selected_region,
-            stage.visual_context_margin_percent,
-            session_region,
-        ),
-        JumpTargetRegionMode::ExpandedTarget | JumpTargetRegionMode::CursorCenteredZoom => {
+        JumpTargetRegionMode::RegionWithContext
+        | JumpTargetRegionMode::ExpandedTarget
+        | JumpTargetRegionMode::CursorCenteredZoom => {
             expand_region_within(selected_region, stage.target_margin_percent, session_region)
         }
     }
@@ -298,7 +295,7 @@ mod tests {
         expand_region_within, subdivide_region, JumpRegion, JumpSession, JumpSessionUpdate,
         JumpStage,
     };
-    use crate::keyboard::VirtualKey;
+    use crate::{keyboard::VirtualKey, JumpTargetRegionMode};
 
     fn base_region() -> JumpRegion {
         JumpRegion {
@@ -757,6 +754,49 @@ mod tests {
                     top: 180,
                     width: 48,
                     height: 48,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn visual_context_margin_does_not_expand_next_stage_landing_region() {
+        let stages = vec![
+            JumpStage::new(5, 5),
+            JumpStage::with_target_region_mode(
+                5,
+                5,
+                0,
+                25,
+                JumpTargetRegionMode::RegionWithContext,
+            ),
+            JumpStage::new(2, 2),
+        ];
+        let mut session = JumpSession::new(base_region(), stages).unwrap();
+
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::B, VirtualKey::B]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: JumpRegion {
+                    left: 200,
+                    top: 200,
+                    width: 200,
+                    height: 200,
+                },
+            })
+        );
+        assert_eq!(session.current_region, session.region_history[1]);
+
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::A, VirtualKey::A]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 2,
+                region: JumpRegion {
+                    left: 200,
+                    top: 200,
+                    width: 40,
+                    height: 40,
                 },
             })
         );

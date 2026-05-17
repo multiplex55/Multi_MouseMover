@@ -48,6 +48,10 @@ move_cursor_after_each_stage = false
 # visual_context_margin_percent expands only the preview source. With
 # target_margin_percent = 0 and visual_context_margin_percent = 5, the overlay
 # shows 5% surrounding context without making that context selectable.
+#
+# Deprecated alias: preview_margin_percent is accepted during the compatibility
+# window and maps to visual_context_margin_percent only when that new field is
+# absent. Prefer visual_context_margin_percent in all new stage configs.
 [jump.coarse]
 enabled = true
 width = 10

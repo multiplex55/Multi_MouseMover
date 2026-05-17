@@ -321,6 +321,7 @@ impl Default for JumpConfig {
                 visual_context_margin_percent: 10,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
                 legacy_preview_margin_percent: None,
+                legacy_preview_margin_percent_used: false,
                 target_region_mode_invalid: false,
             },
             precise: JumpStageConfig {
@@ -331,6 +332,7 @@ impl Default for JumpConfig {
                 visual_context_margin_percent: 5,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
                 legacy_preview_margin_percent: None,
+                legacy_preview_margin_percent_used: false,
                 target_region_mode_invalid: false,
             },
         }
@@ -346,6 +348,7 @@ struct JumpStageConfig {
     visual_context_margin_percent: u8,
     target_region_mode: JumpTargetRegionMode,
     legacy_preview_margin_percent: Option<u8>,
+    legacy_preview_margin_percent_used: bool,
     target_region_mode_invalid: bool,
 }
 
@@ -356,7 +359,7 @@ struct JumpStageConfigToml {
     width: u32,
     height: u32,
     target_margin_percent: u8,
-    visual_context_margin_percent: u8,
+    visual_context_margin_percent: Option<u8>,
     target_region_mode: Option<String>,
     #[serde(default, rename = "preview_margin_percent")]
     legacy_preview_margin_percent: Option<u8>,
@@ -370,7 +373,7 @@ impl Default for JumpStageConfigToml {
             width: default.width,
             height: default.height,
             target_margin_percent: default.target_margin_percent,
-            visual_context_margin_percent: default.visual_context_margin_percent,
+            visual_context_margin_percent: None,
             target_region_mode: None,
             legacy_preview_margin_percent: default.legacy_preview_margin_percent,
         }
@@ -392,15 +395,22 @@ impl<'de> Deserialize<'de> for JumpStageConfig {
                     .unwrap_or((JumpTargetRegionMode::ExactRegion, true))
             })
             .unwrap_or((JumpTargetRegionMode::ExactRegion, false));
+        let legacy_preview_margin_percent_used = fields.visual_context_margin_percent.is_none()
+            && fields.legacy_preview_margin_percent.is_some();
+        let visual_context_margin_percent = fields
+            .visual_context_margin_percent
+            .or(fields.legacy_preview_margin_percent)
+            .unwrap_or_default();
 
         Ok(Self {
             enabled: fields.enabled,
             width: fields.width,
             height: fields.height,
             target_margin_percent: fields.target_margin_percent,
-            visual_context_margin_percent: fields.visual_context_margin_percent,
+            visual_context_margin_percent,
             target_region_mode,
             legacy_preview_margin_percent: fields.legacy_preview_margin_percent,
+            legacy_preview_margin_percent_used,
             target_region_mode_invalid,
         })
     }
@@ -416,6 +426,7 @@ impl JumpStageConfig {
             visual_context_margin_percent: 0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
             legacy_preview_margin_percent: None,
+            legacy_preview_margin_percent_used: false,
             target_region_mode_invalid: false,
         }
     }
@@ -431,6 +442,7 @@ impl Default for JumpStageConfig {
             visual_context_margin_percent: 0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
             legacy_preview_margin_percent: None,
+            legacy_preview_margin_percent_used: false,
             target_region_mode_invalid: false,
         }
     }
@@ -641,8 +653,16 @@ fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
         stage.target_region_mode = JumpTargetRegionMode::ExactRegion;
         stage.target_region_mode_invalid = false;
     }
-    if let Some(legacy_preview_margin_percent) = stage.legacy_preview_margin_percent {
-        stage.visual_context_margin_percent = legacy_preview_margin_percent;
+    if stage.legacy_preview_margin_percent.is_some() {
+        if stage.legacy_preview_margin_percent_used {
+            warn_config_normalized(&format!(
+                "{name}.preview_margin_percent is deprecated; using it as {name}.visual_context_margin_percent"
+            ));
+        } else {
+            warn_config_normalized(&format!(
+                "{name}.preview_margin_percent is deprecated and ignored because {name}.visual_context_margin_percent is set"
+            ));
+        }
     }
     if stage.target_margin_percent > MAX_JUMP_REGION_MARGIN_PERCENT {
         warn_config_normalized(&format!(
@@ -1470,6 +1490,32 @@ mod tests {
     }
 
     #[test]
+    fn legacy_preview_margin_maps_to_visual_context_when_new_field_absent() {
+        let config = parse_config(
+            r#"
+            [jump.coarse]
+            preview_margin_percent = 12
+            "#,
+        );
+
+        assert_eq!(config.jump.coarse.visual_context_margin_percent, 12);
+        assert_eq!(config.jump.coarse.target_margin_percent, 0);
+    }
+
+    #[test]
+    fn visual_context_margin_takes_precedence_over_legacy_preview_margin() {
+        let config = parse_config(
+            r#"
+            [jump.coarse]
+            preview_margin_percent = 12
+            visual_context_margin_percent = 7
+            "#,
+        );
+
+        assert_eq!(config.jump.coarse.visual_context_margin_percent, 7);
+    }
+
+    #[test]
     fn disabled_fine_disables_precise_in_precision_mode() {
         let config = parse_config(
             r#"
@@ -1492,7 +1538,7 @@ mod tests {
     }
 
     #[test]
-    fn jump_stage_sizes_and_preview_margin_are_clamped() {
+    fn jump_stage_sizes_and_margin_fields_are_clamped_independently() {
         let config = parse_config(
             r#"
             [jump.coarse]
@@ -1513,6 +1559,22 @@ mod tests {
             config.jump.coarse.visual_context_margin_percent,
             MAX_JUMP_REGION_MARGIN_PERCENT
         );
+    }
+
+    #[test]
+    fn legacy_preview_margin_is_clamped_after_alias_mapping() {
+        let config = parse_config(
+            r#"
+            [jump.coarse]
+            preview_margin_percent = 99
+            "#,
+        );
+
+        assert_eq!(
+            config.jump.coarse.visual_context_margin_percent,
+            MAX_JUMP_REGION_MARGIN_PERCENT
+        );
+        assert_eq!(config.jump.coarse.target_margin_percent, 0);
     }
 
     #[test]

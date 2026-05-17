@@ -123,14 +123,13 @@ fn format_jump_indicator(view: &JumpOverlayView) -> String {
 fn preview_source_rect(view: &JumpOverlayView, snapshot: &ScreenSnapshot) -> RECT {
     let snapshot_right = snapshot.left + snapshot.width;
     let snapshot_bottom = snapshot.top + snapshot.height;
+    let preview_source_region = preview_source_region_for_view(view);
 
     RECT {
-        left: view.preview_source_region.left.max(snapshot.left),
-        top: view.preview_source_region.top.max(snapshot.top),
-        right: (view.preview_source_region.left + view.preview_source_region.width)
-            .min(snapshot_right),
-        bottom: (view.preview_source_region.top + view.preview_source_region.height)
-            .min(snapshot_bottom),
+        left: preview_source_region.left.max(snapshot.left),
+        top: preview_source_region.top.max(snapshot.top),
+        right: (preview_source_region.left + preview_source_region.width).min(snapshot_right),
+        bottom: (preview_source_region.top + preview_source_region.height).min(snapshot_bottom),
     }
 }
 
@@ -234,31 +233,45 @@ fn active_stage_metadata(view: &JumpOverlayView) -> Option<&JumpStageMetadata> {
     view.stages.get(view.stage_index)
 }
 
-fn grid_target_region(view: &JumpOverlayView) -> JumpRegion {
-    let Some(stage) = active_stage_metadata(view) else {
-        return view.target_region;
-    };
+fn preview_source_region_for_view(view: &JumpOverlayView) -> JumpRegion {
+    active_stage_metadata(view)
+        .and_then(|stage| {
+            expand_region_within(
+                view.target_region,
+                stage.visual_context_margin_percent,
+                view.session_region,
+            )
+        })
+        .unwrap_or(view.preview_source_region)
+}
 
+fn target_region_for_stage_metadata(
+    target_region: JumpRegion,
+    session_region: JumpRegion,
+    stage: &JumpStageMetadata,
+) -> JumpRegion {
     match stage.target_region_mode {
-        JumpTargetRegionMode::ExactRegion => view.target_region,
-        JumpTargetRegionMode::RegionWithContext => expand_region_within(
-            view.target_region,
-            stage.visual_context_margin_percent,
-            view.session_region,
-        )
-        .unwrap_or(view.target_region),
-        JumpTargetRegionMode::ExpandedTarget => expand_region_within(
-            view.target_region,
-            stage.target_margin_percent,
-            view.session_region,
-        )
-        .unwrap_or(view.target_region),
+        JumpTargetRegionMode::ExactRegion => target_region,
+        JumpTargetRegionMode::RegionWithContext => {
+            expand_region_within(target_region, stage.target_margin_percent, session_region)
+                .unwrap_or(target_region)
+        }
+        JumpTargetRegionMode::ExpandedTarget => {
+            expand_region_within(target_region, stage.target_margin_percent, session_region)
+                .unwrap_or(target_region)
+        }
         JumpTargetRegionMode::CursorCenteredZoom => current_cursor_position()
-            .and_then(|cursor| {
-                bounded_region_centered_on(cursor, view.target_region, view.session_region)
-            })
-            .unwrap_or(view.target_region),
+            .and_then(|cursor| bounded_region_centered_on(cursor, target_region, session_region))
+            .unwrap_or(target_region),
     }
+}
+
+fn grid_target_region(view: &JumpOverlayView) -> JumpRegion {
+    active_stage_metadata(view)
+        .map(|stage| {
+            target_region_for_stage_metadata(view.target_region, view.session_region, stage)
+        })
+        .unwrap_or(view.target_region)
 }
 
 pub struct JumpOverlay {
@@ -412,7 +425,7 @@ impl JumpOverlay {
     fn grid_rect(&self, view: &JumpOverlayView, client_rect: RECT) -> Option<RECT> {
         target_region_client_rect(
             grid_target_region(view),
-            view.preview_source_region,
+            preview_source_region_for_view(view),
             self.client_draw_rect(view, client_rect),
         )
     }
@@ -607,8 +620,9 @@ pub fn hide_jump_overlay() {
 mod tests {
     use super::{
         bounded_region_centered_on, draw_mode_for_view, format_jump_indicator, grid_target_region,
-        overlay_colorkey, overlay_ex_style, source_screen_to_client, target_region_client_rect,
-        transparency_mode, DrawMode, TransparencyMode, OVERLAY_ALPHA,
+        overlay_colorkey, overlay_ex_style, preview_source_region_for_view,
+        source_screen_to_client, target_region_client_rect, transparency_mode, DrawMode,
+        TransparencyMode, OVERLAY_ALPHA,
     };
     use crate::jump_session::JumpRegion;
     use crate::jump_view::{JumpOverlayView, JumpStageMetadata};
@@ -756,6 +770,73 @@ mod tests {
                 top: 33,
                 width: 48,
                 height: 24,
+            }
+        );
+    }
+
+    #[test]
+    fn region_with_context_grid_target_ignores_visual_context_margin() {
+        let mut view = view(1, 2, "");
+        view.target_region = JumpRegion {
+            left: 25,
+            top: 35,
+            width: 40,
+            height: 20,
+        };
+        view.session_region = JumpRegion {
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+        };
+        view.stages = vec![
+            stage_metadata(0, JumpTargetRegionMode::ExactRegion),
+            JumpStageMetadata {
+                index: 1,
+                grid_size: (10, 10),
+                target_margin_percent: 0,
+                visual_context_margin_percent: 20,
+                target_region_mode: JumpTargetRegionMode::RegionWithContext,
+            },
+        ];
+
+        assert_eq!(grid_target_region(&view), view.target_region);
+    }
+
+    #[test]
+    fn preview_source_region_uses_visual_context_margin() {
+        let mut view = view(1, 2, "");
+        view.target_region = JumpRegion {
+            left: 25,
+            top: 35,
+            width: 40,
+            height: 20,
+        };
+        view.session_region = JumpRegion {
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+        };
+        view.preview_source_region = view.target_region;
+        view.stages = vec![
+            stage_metadata(0, JumpTargetRegionMode::ExactRegion),
+            JumpStageMetadata {
+                index: 1,
+                grid_size: (10, 10),
+                target_margin_percent: 0,
+                visual_context_margin_percent: 20,
+                target_region_mode: JumpTargetRegionMode::ExactRegion,
+            },
+        ];
+
+        assert_eq!(
+            preview_source_region_for_view(&view),
+            JumpRegion {
+                left: 17,
+                top: 31,
+                width: 56,
+                height: 28,
             }
         );
     }

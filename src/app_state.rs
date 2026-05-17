@@ -827,6 +827,8 @@ mod tests {
             view.stages[0].target_region_mode,
             crate::JumpTargetRegionMode::ExactRegion
         );
+        assert_eq!(view.stages[0].target_margin_percent, 0);
+        assert_eq!(view.stages[0].visual_context_margin_percent, 0);
     }
 
     #[test]
