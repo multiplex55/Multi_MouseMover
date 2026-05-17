@@ -1341,7 +1341,7 @@ fn execute_key_action_command<B: MouseBackend>(
 
     if action == Action::ClickThenDisable {
         if is_down {
-            action_handler.execute_action(&Action::LeftClick);
+            action_handler.execute_action(&Action::ClickThenDisable);
             action_handler.clear_active_keys();
             app_state.clear_active_action_keys_and_exit_jump_mode();
             action_handler.mouse_master.set_active_mode(false);
@@ -1675,7 +1675,7 @@ fn main() {
                     current_speed: action_handler.mouse_master.current_wheel_speed,
                     default_speed: action_handler.mouse_master.config.wheel.default_speed,
                 },
-                left_button_held: action_handler.mouse_master.left_click_held,
+                left_button_held: action_handler.mouse_master.left_button_held(),
             })
         };
         if let Ok(mut maybe_ov) = OVERLAY.lock() {

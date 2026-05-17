@@ -88,7 +88,7 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     pub current_wheel_speed: i32,
     pub acceleration_counter: u32,
     pub top_speed: i32,
-    pub left_click_held: bool,
+    pub left_button_held: bool,
     last_wheel_tick: Option<Instant>,
 }
 
@@ -115,7 +115,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             current_wheel_speed: config.wheel.default_speed,
             acceleration_counter: 0,
             top_speed: config.top_speed,
-            left_click_held: false,
+            left_button_held: false,
             last_wheel_tick: None,
         }
     }
@@ -127,7 +127,13 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::MoveDown => self.move_mouse(0, 10),
             Action::MoveLeft => self.move_mouse(-10, 0),
             Action::MoveRight => self.move_mouse(10, 0),
-            Action::LeftClick => self.left_click(),
+            Action::LeftClick => {
+                if self.left_button_held() {
+                    self.release_left_button_if_held();
+                } else {
+                    self.left_click();
+                }
+            }
             Action::RightClick => self.right_click(),
             Action::MiddleClick => self.middle_click(),
             Action::MoveUpRight => self.move_mouse(10, -10),
@@ -140,7 +146,9 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::MoveToRightEdge => self.move_to_monitor_edge(MonitorEdge::Right),
             Action::CenterCurrentMonitor => self.center_current_monitor(),
             Action::ClickThenDisable => {
+                self.release_left_button_if_held();
                 self.left_click();
+                self.set_active_mode(false);
             }
             Action::ToggleDragMode => self.toggle_drag_mode(),
             Action::WheelUp => self.wheel_up(),
@@ -178,33 +186,45 @@ impl<B: MouseBackend> MouseMaster<B> {
     /// Simulates a left mouse click
     fn left_click(&mut self) {
         println!("[DEBUG] Left Click Pressed!");
-        self.left_click_held = true; // ✅ Update state
         if let Err(e) = self.backend.click(Button::Left) {
             eprintln!("Failed to perform left click: {e}");
         }
     }
 
-    /// Detect when left click is released
-    #[allow(dead_code)]
-    fn release_left_click(&mut self) {
-        println!("[DEBUG] Left Click Released!");
-        self.left_click_held = false; // ✅ Reset state
+    pub fn left_button_held(&self) -> bool {
+        self.left_button_held
     }
 
-    fn toggle_drag_mode(&mut self) {
-        if self.left_click_held {
-            if let Err(e) = self.backend.button_up(Button::Left) {
-                eprintln!("Failed to release left button: {e}");
-                return;
-            }
-            self.left_click_held = false;
+    pub fn toggle_drag_mode(&mut self) {
+        if self.left_button_held {
+            self.release_left_button_if_held();
         } else {
-            if let Err(e) = self.backend.button_down(Button::Left) {
-                eprintln!("Failed to hold left button: {e}");
-                return;
-            }
-            self.left_click_held = true;
+            self.press_left_button_for_drag();
         }
+    }
+
+    pub fn press_left_button_for_drag(&mut self) {
+        if self.left_button_held {
+            return;
+        }
+
+        if let Err(e) = self.backend.button_down(Button::Left) {
+            eprintln!("Failed to hold left button: {e}");
+            return;
+        }
+        self.left_button_held = true;
+    }
+
+    pub fn release_left_button_if_held(&mut self) {
+        if !self.left_button_held {
+            return;
+        }
+
+        if let Err(e) = self.backend.button_up(Button::Left) {
+            eprintln!("Failed to release left button: {e}");
+            return;
+        }
+        self.left_button_held = false;
     }
 
     /// Simulates a right mouse click
@@ -813,15 +833,23 @@ mod tests {
     }
 
     #[test]
-    fn toggle_drag_mode_holds_and_releases_left_button() {
+    fn toggle_drag_mode_on_records_left_button_down_and_marks_held() {
         let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
 
         mouse.handle_action(Action::ToggleDragMode);
-        assert!(mouse.left_click_held);
+        assert!(mouse.left_button_held());
         assert_eq!(mouse.backend.button_downs, vec![Button::Left]);
+        assert!(mouse.backend.button_ups.is_empty());
+    }
+
+    #[test]
+    fn toggle_drag_mode_off_records_left_button_up_and_marks_released() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
 
         mouse.handle_action(Action::ToggleDragMode);
-        assert!(!mouse.left_click_held);
+        mouse.handle_action(Action::ToggleDragMode);
+
+        assert!(!mouse.left_button_held());
         assert_eq!(mouse.backend.button_ups, vec![Button::Left]);
     }
 
@@ -854,6 +882,67 @@ mod tests {
             vec![
                 MouseOperation::ButtonDown(Button::Left),
                 MouseOperation::ButtonUp(Button::Left),
+            ]
+        );
+    }
+
+    #[test]
+    fn left_click_during_drag_releases_only_without_clicking() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::ToggleDragMode);
+        mouse.handle_action(Action::LeftClick);
+
+        assert!(!mouse.left_button_held());
+        assert!(mouse.backend.clicks.is_empty());
+        assert_eq!(
+            mouse.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+            ]
+        );
+    }
+
+    #[test]
+    fn left_click_outside_drag_performs_normal_click_only() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::LeftClick);
+
+        assert!(!mouse.left_button_held());
+        assert_eq!(mouse.backend.clicks, vec![Button::Left]);
+        assert_eq!(
+            mouse.backend.operations,
+            vec![MouseOperation::Click(Button::Left)]
+        );
+    }
+
+    #[test]
+    fn release_left_button_if_held_noops_when_already_released() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.release_left_button_if_held();
+
+        assert!(!mouse.left_button_held());
+        assert!(mouse.backend.operations.is_empty());
+    }
+
+    #[test]
+    fn click_then_disable_releases_drag_then_clicks_normally() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::ToggleDragMode);
+        mouse.handle_action(Action::ClickThenDisable);
+
+        assert!(!mouse.left_button_held());
+        assert_eq!(mouse.current_mode, ModeState::Idle);
+        assert_eq!(
+            mouse.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+                MouseOperation::Click(Button::Left),
             ]
         );
     }
