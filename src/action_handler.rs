@@ -120,7 +120,6 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::CenterCurrentMonitor => self.center_current_monitor(),
             Action::ClickThenDisable => {
                 self.left_click();
-                self.current_mode = ModeState::Idle;
             }
             Action::WheelUp => self.wheel_up(),
             Action::WheelDown => self.wheel_down(),
@@ -144,6 +143,14 @@ impl<B: MouseBackend> MouseMaster<B> {
             self.current_mode = ModeState::Active;
             println!("Switched to: Active Mode");
         }
+    }
+
+    pub fn set_active_mode(&mut self, active: bool) {
+        self.current_mode = if active {
+            ModeState::Active
+        } else {
+            ModeState::Idle
+        };
     }
 
     /// Simulates a left mouse click

@@ -244,15 +244,17 @@ mod tests {
 }
 
 /// Manages actions associated with key presses
-pub struct ActionHandler {
+pub struct ActionHandler<
+    B: crate::action_handler::MouseBackend = crate::action_handler::EnigoMouseBackend,
+> {
     pub actions: HashMap<Action, Box<dyn Fn() + Send + Sync>>,
     pub active_keys: HashSet<Action>, // Tracks currently held actions
-    pub mouse_master: crate::action_handler::MouseMaster, // Reference to MouseMaster
+    pub mouse_master: crate::action_handler::MouseMaster<B>, // Reference to MouseMaster
 }
 
-impl ActionHandler {
+impl<B: crate::action_handler::MouseBackend> ActionHandler<B> {
     /// Create a new ActionHandler
-    pub fn new(mouse_master: crate::action_handler::MouseMaster) -> Self {
+    pub fn new(mouse_master: crate::action_handler::MouseMaster<B>) -> Self {
         Self {
             actions: HashMap::new(),
             active_keys: HashSet::new(),
@@ -294,9 +296,5 @@ impl ActionHandler {
     pub fn tick_movement(&mut self) -> MovementTick {
         self.mouse_master
             .tick_movement(&self.active_keys, Duration::from_millis(0))
-    }
-
-    pub fn is_continuous_action(action: Action) -> bool {
-        action.is_continuous()
     }
 }

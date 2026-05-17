@@ -13,7 +13,7 @@ mod screen_capture;
 
 use action::*;
 use action_handler::*;
-use app_state::{AppCommand, AppState, KeyEvent};
+use app_state::{AppCommand, AppState, JumpOverlayResolution, KeyEvent};
 use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
 };
@@ -645,10 +645,73 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
     diagnostics
 }
 
+fn sync_jump_overlay(resolution: JumpOverlayResolution) {
+    match resolution {
+        JumpOverlayResolution::Hidden => hide_jump_overlay(),
+        JumpOverlayResolution::Visible(view) => update_jump_overlay(view),
+    }
+}
+
+fn set_active_mode(active: bool) {
+    {
+        let mut action_handler = ACTION_HANDLER.write().unwrap();
+        if !active {
+            action_handler.clear_active_keys();
+        }
+        action_handler.mouse_master.set_active_mode(active);
+    }
+
+    let resolution = {
+        let mut app_state = APP_STATE.write().unwrap();
+        if !active {
+            app_state.clear_active_action_keys_and_exit_jump_mode();
+        }
+        app_state.set_active_mode(active);
+        app_state.resolve_jump_overlay()
+    };
+    sync_jump_overlay(resolution);
+}
+
+fn execute_key_action_command<B: MouseBackend>(
+    action_handler: &mut ActionHandler<B>,
+    app_state: &mut AppState,
+    action: Action,
+    is_down: bool,
+) -> Option<JumpOverlayResolution> {
+    if action_handler.mouse_master.current_mode != ModeState::Active {
+        return None;
+    }
+
+    if action.is_continuous() {
+        action_handler.process_active_keys(action, is_down);
+        return None;
+    }
+
+    if action == Action::ClickThenDisable {
+        if is_down {
+            action_handler.execute_action(&Action::LeftClick);
+            action_handler.clear_active_keys();
+            app_state.clear_active_action_keys_and_exit_jump_mode();
+            action_handler.mouse_master.set_active_mode(false);
+            app_state.set_active_mode(false);
+            return Some(app_state.resolve_jump_overlay());
+        }
+        return None;
+    }
+
+    if is_down {
+        action_handler.execute_action(&action);
+    }
+    None
+}
+
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
     if debug_diagnostics {
         match command {
             AppCommand::ToggleActiveMode => println!("[command] ToggleActiveMode"),
+            AppCommand::SetActiveMode { active } => {
+                println!("[command] SetActiveMode active={active}")
+            }
             AppCommand::Exit => println!("[command] Exit"),
             AppCommand::EnterJumpMode { activation_key } => {
                 println!("[command] EnterJumpMode activation_key={activation_key:?}")
@@ -674,18 +737,17 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             let active_mode = {
                 let mut action_handler = ACTION_HANDLER.write().unwrap();
                 action_handler.mouse_master.toggle_mode();
-                let active_mode = action_handler.mouse_master.current_mode == ModeState::Active;
-                if !active_mode {
-                    action_handler.clear_active_keys();
-                }
-                active_mode
+                action_handler.mouse_master.current_mode == ModeState::Active
             };
-            let mut app_state = APP_STATE.write().unwrap();
-            app_state.set_active_mode(active_mode);
-            if !active_mode {
-                app_state.exit_jump_mode();
-                hide_jump_overlay();
-            }
+            execute_app_command(
+                AppCommand::SetActiveMode {
+                    active: active_mode,
+                },
+                debug_diagnostics,
+            );
+        }
+        AppCommand::SetActiveMode { active } => {
+            set_active_mode(active);
         }
         AppCommand::Exit => {
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
@@ -706,15 +768,13 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::KeyAction { action, is_down } => {
-            let mut action_handler = ACTION_HANDLER.write().unwrap();
-            if action_handler.mouse_master.current_mode != ModeState::Active {
-                return;
-            }
-
-            if ActionHandler::is_continuous_action(action) {
-                action_handler.process_active_keys(action, is_down);
-            } else if is_down {
-                action_handler.execute_action(&action);
+            let resolution = {
+                let mut action_handler = ACTION_HANDLER.write().unwrap();
+                let mut app_state = APP_STATE.write().unwrap();
+                execute_key_action_command(&mut action_handler, &mut app_state, action, is_down)
+            };
+            if let Some(resolution) = resolution {
+                sync_jump_overlay(resolution);
             }
         }
         AppCommand::JumpInput(event) => {
@@ -760,8 +820,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     }
                 }
                 Some(JumpSessionUpdate::Cancelled) => {
-                    hide_jump_overlay();
-                    APP_STATE.write().unwrap().exit_jump_mode();
+                    let resolution = {
+                        let mut app_state = APP_STATE.write().unwrap();
+                        app_state.exit_jump_mode();
+                        app_state.resolve_jump_overlay()
+                    };
+                    sync_jump_overlay(resolution);
                 }
                 Some(JumpSessionUpdate::Completed { x, y, .. }) => {
                     ACTION_HANDLER
@@ -769,8 +833,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         .unwrap()
                         .mouse_master
                         .move_mouse_to(x, y);
-                    hide_jump_overlay();
-                    APP_STATE.write().unwrap().exit_jump_mode();
+                    let resolution = {
+                        let mut app_state = APP_STATE.write().unwrap();
+                        app_state.exit_jump_mode();
+                        app_state.resolve_jump_overlay()
+                    };
+                    sync_jump_overlay(resolution);
                 }
             }
         }
@@ -938,9 +1006,49 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use enigo::{Axis, Button};
+
+    #[derive(Default)]
+    struct FakeBackend {
+        location: (i32, i32),
+        clicks: Vec<Button>,
+        moves: Vec<(i32, i32)>,
+        scrolls: Vec<(i32, Axis)>,
+    }
+
+    impl MouseBackend for FakeBackend {
+        fn click(&mut self, button: Button) -> Result<(), String> {
+            self.clicks.push(button);
+            Ok(())
+        }
+
+        fn move_abs(&mut self, x: i32, y: i32) -> Result<(), String> {
+            self.moves.push((x, y));
+            self.location = (x, y);
+            Ok(())
+        }
+
+        fn location(&self) -> Result<(i32, i32), String> {
+            Ok(self.location)
+        }
+
+        fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), String> {
+            self.scrolls.push((length, axis));
+            Ok(())
+        }
+    }
 
     fn parse_config(toml: &str) -> Config {
         toml::from_str::<Config>(toml).unwrap().normalize().unwrap()
+    }
+
+    fn jump_region() -> crate::jump_session::JumpRegion {
+        crate::jump_session::JumpRegion {
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+        }
     }
 
     #[test]
@@ -1133,19 +1241,17 @@ mod tests {
 
     #[test]
     fn continuous_key_actions_track_state_without_immediate_execution() {
-        assert!(ActionHandler::is_continuous_action(Action::MoveLeft));
-        assert!(ActionHandler::is_continuous_action(Action::SlowMouse));
-        assert!(ActionHandler::is_continuous_action(Action::WheelDown));
+        assert!(Action::MoveLeft.is_continuous());
+        assert!(Action::SlowMouse.is_continuous());
+        assert!(Action::WheelDown.is_continuous());
     }
 
     #[test]
     fn one_shot_key_actions_execute_on_key_down_only() {
-        assert!(!ActionHandler::is_continuous_action(Action::LeftClick));
-        assert!(!ActionHandler::is_continuous_action(Action::MoveToTopEdge));
-        assert!(!ActionHandler::is_continuous_action(Action::WheelSpeedUp));
-        assert!(!ActionHandler::is_continuous_action(
-            Action::ClickThenDisable
-        ));
+        assert!(!Action::LeftClick.is_continuous());
+        assert!(!Action::MoveToTopEdge.is_continuous());
+        assert!(!Action::WheelSpeedUp.is_continuous());
+        assert!(!Action::ClickThenDisable.is_continuous());
     }
 
     #[test]
@@ -1308,5 +1414,49 @@ mod tests {
         let event = KeyEvent::new(VirtualKey::Escape, false);
 
         assert!(!should_log_routing_event(&event, None));
+    }
+
+    #[test]
+    fn click_then_disable_key_down_clears_active_transition_state() {
+        for start_in_jump_mode in [false, true] {
+            let mut app_state = AppState::default();
+            app_state.set_bound_keys([VirtualKey::Left, VirtualKey::C]);
+            app_state.route_key_event(
+                KeyEvent::new(VirtualKey::Left, true),
+                Some(Action::MoveLeft),
+            );
+            if start_in_jump_mode {
+                let config = Config::default().normalize().unwrap();
+                assert!(app_state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+            }
+
+            let mouse_master =
+                MouseMaster::new_with_backend(Config::default(), FakeBackend::default());
+            let mut action_handler = ActionHandler::new(mouse_master);
+            action_handler.process_active_keys(Action::MoveLeft, true);
+            action_handler.process_active_keys(Action::WheelDown, true);
+
+            let resolution = execute_key_action_command(
+                &mut action_handler,
+                &mut app_state,
+                Action::ClickThenDisable,
+                true,
+            );
+
+            assert_eq!(
+                action_handler.mouse_master.backend.clicks,
+                vec![Button::Left]
+            );
+            assert_eq!(action_handler.mouse_master.current_mode, ModeState::Idle);
+            assert!(action_handler.active_keys.is_empty());
+            assert!(!app_state.active_mode());
+            assert!(!app_state.is_jump_active());
+            assert!(!app_state.has_active_action_keys());
+            assert_eq!(resolution, Some(JumpOverlayResolution::Hidden));
+            assert_eq!(
+                app_state.resolve_jump_overlay(),
+                JumpOverlayResolution::Hidden
+            );
+        }
     }
 }

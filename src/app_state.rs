@@ -35,6 +35,7 @@ impl KeyEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppCommand {
     ToggleActiveMode,
+    SetActiveMode { active: bool },
     Exit,
     EnterJumpMode { activation_key: VirtualKey },
     KeyAction { action: Action, is_down: bool },
@@ -63,6 +64,12 @@ pub enum JumpState {
         activation_key_released: bool,
         stage_metadata: Vec<JumpStageMetadata>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JumpOverlayResolution {
+    Hidden,
+    Visible(JumpOverlayView),
 }
 
 impl Default for AppState {
@@ -115,9 +122,26 @@ impl AppState {
     pub fn set_active_mode(&mut self, active_mode: bool) {
         self.active_mode = active_mode;
         if !active_mode {
-            self.active_keys.clear();
-            self.active_trigger_chords.clear();
+            self.clear_active_action_keys();
         }
+    }
+
+    pub fn active_mode(&self) -> bool {
+        self.active_mode
+    }
+
+    pub fn has_active_action_keys(&self) -> bool {
+        !self.active_keys.is_empty() || !self.active_trigger_chords.is_empty()
+    }
+
+    pub fn clear_active_action_keys(&mut self) {
+        self.active_keys.clear();
+        self.active_trigger_chords.clear();
+    }
+
+    pub fn clear_active_action_keys_and_exit_jump_mode(&mut self) {
+        self.clear_active_action_keys();
+        self.exit_jump_mode();
     }
 
     pub fn set_system_bindings(&mut self, system_bindings: RuntimeSystemBindings) {
@@ -214,6 +238,12 @@ impl AppState {
             input: session.input.clone(),
             preview_margin_percent,
         })
+    }
+
+    pub fn resolve_jump_overlay(&self) -> JumpOverlayResolution {
+        self.jump_view()
+            .map(JumpOverlayResolution::Visible)
+            .unwrap_or(JumpOverlayResolution::Hidden)
     }
 
     pub fn exit_jump_mode(&mut self) {
