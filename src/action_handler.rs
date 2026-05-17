@@ -176,6 +176,10 @@ impl<B: MouseBackend> MouseMaster<B> {
     }
 
     pub fn set_active_mode(&mut self, active: bool) {
+        if !active {
+            self.release_left_button_if_held();
+        }
+
         self.current_mode = if active {
             ModeState::Active
         } else {
@@ -381,8 +385,13 @@ impl<B: MouseBackend> MouseMaster<B> {
         self.last_wheel_tick = None;
     }
 
+    pub fn prepare_exit(&mut self) {
+        self.release_left_button_if_held();
+    }
+
     pub fn exit(&mut self) {
         println!("Exiting");
+        self.prepare_exit();
         std::process::exit(0)
     }
 
@@ -943,6 +952,23 @@ mod tests {
                 MouseOperation::ButtonDown(Button::Left),
                 MouseOperation::ButtonUp(Button::Left),
                 MouseOperation::Click(Button::Left),
+            ]
+        );
+    }
+
+    #[test]
+    fn prepare_exit_releases_held_left_button_without_exiting() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::ToggleDragMode);
+        mouse.prepare_exit();
+
+        assert!(!mouse.left_button_held());
+        assert_eq!(
+            mouse.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
             ]
         );
     }

@@ -1305,23 +1305,28 @@ fn apply_cursor_between_stages<B: MouseBackend>(
 }
 
 fn set_active_mode(active: bool) {
-    {
-        let mut action_handler = ACTION_HANDLER.write().unwrap();
-        if !active {
-            action_handler.clear_active_keys();
-        }
-        action_handler.mouse_master.set_active_mode(active);
-    }
-
     let resolution = {
+        let mut action_handler = ACTION_HANDLER.write().unwrap();
         let mut app_state = APP_STATE.write().unwrap();
-        if !active {
-            app_state.clear_active_action_keys_and_exit_jump_mode();
-        }
-        app_state.set_active_mode(active);
-        app_state.resolve_jump_overlay()
+        apply_active_mode_transition(&mut action_handler, &mut app_state, active)
     };
     sync_jump_overlay(resolution);
+}
+
+fn apply_active_mode_transition<B: MouseBackend>(
+    action_handler: &mut ActionHandler<B>,
+    app_state: &mut AppState,
+    active: bool,
+) -> JumpOverlayResolution {
+    if !active {
+        action_handler.mouse_master.release_left_button_if_held();
+        action_handler.clear_active_keys();
+        app_state.clear_active_action_keys_and_exit_jump_mode();
+    }
+
+    action_handler.mouse_master.set_active_mode(active);
+    app_state.set_active_mode(active);
+    app_state.resolve_jump_overlay()
 }
 
 fn execute_key_action_command<B: MouseBackend>(
@@ -1592,6 +1597,9 @@ fn main() {
     // Set a panic hook to ensure we clean up resources on unexpected errors
     std::panic::set_hook(Box::new(|info| {
         eprintln!("Application panicked: {}", info);
+        if let Ok(mut action_handler) = ACTION_HANDLER.write() {
+            action_handler.mouse_master.release_left_button_if_held();
+        }
         // Drop the hook guard so the keyboard is unhooked
         KEYBOARD_HOOK_HANDLE.with(|slot| {
             slot.borrow_mut().take();
@@ -1702,12 +1710,20 @@ mod tests {
     use super::*;
     use enigo::{Axis, Button};
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum MouseOperation {
+        Click(Button),
+        ButtonDown(Button),
+        ButtonUp(Button),
+    }
+
     #[derive(Default)]
     struct FakeBackend {
         location: (i32, i32),
         clicks: Vec<Button>,
         button_downs: Vec<Button>,
         button_ups: Vec<Button>,
+        operations: Vec<MouseOperation>,
         moves: Vec<(i32, i32)>,
         scrolls: Vec<(i32, Axis)>,
     }
@@ -1715,16 +1731,19 @@ mod tests {
     impl MouseBackend for FakeBackend {
         fn click(&mut self, button: Button) -> Result<(), String> {
             self.clicks.push(button);
+            self.operations.push(MouseOperation::Click(button));
             Ok(())
         }
 
         fn button_down(&mut self, button: Button) -> Result<(), String> {
             self.button_downs.push(button);
+            self.operations.push(MouseOperation::ButtonDown(button));
             Ok(())
         }
 
         fn button_up(&mut self, button: Button) -> Result<(), String> {
             self.button_ups.push(button);
+            self.operations.push(MouseOperation::ButtonUp(button));
             Ok(())
         }
 
@@ -2623,5 +2642,77 @@ mod tests {
                 JumpOverlayResolution::Hidden
             );
         }
+    }
+
+    #[test]
+    fn disable_while_drag_active_releases_button_and_clears_state() {
+        let mut app_state = AppState::default();
+        app_state.set_bound_keys([VirtualKey::Left]);
+        app_state.route_key_event(
+            KeyEvent::new(VirtualKey::Left, true),
+            Some(Action::MoveLeft),
+        );
+
+        let mouse_master = MouseMaster::new_with_backend(Config::default(), FakeBackend::default());
+        let mut action_handler = ActionHandler::new(mouse_master);
+        action_handler.process_active_keys(Action::MoveLeft, true);
+        action_handler
+            .mouse_master
+            .handle_action(Action::ToggleDragMode);
+
+        let resolution = apply_active_mode_transition(&mut action_handler, &mut app_state, false);
+
+        assert_eq!(
+            action_handler.mouse_master.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+            ]
+        );
+        assert!(!action_handler.mouse_master.left_button_held());
+        assert_eq!(action_handler.mouse_master.current_mode, ModeState::Idle);
+        assert!(action_handler.active_keys.is_empty());
+        assert!(!app_state.active_mode());
+        assert!(!app_state.has_active_action_keys());
+        assert_eq!(resolution, JumpOverlayResolution::Hidden);
+    }
+
+    #[test]
+    fn click_then_disable_from_drag_state_releases_clicks_then_disables() {
+        let mut app_state = AppState::default();
+        app_state.set_bound_keys([VirtualKey::Left, VirtualKey::C]);
+        app_state.route_key_event(
+            KeyEvent::new(VirtualKey::Left, true),
+            Some(Action::MoveLeft),
+        );
+
+        let mouse_master = MouseMaster::new_with_backend(Config::default(), FakeBackend::default());
+        let mut action_handler = ActionHandler::new(mouse_master);
+        action_handler.process_active_keys(Action::MoveLeft, true);
+        action_handler
+            .mouse_master
+            .handle_action(Action::ToggleDragMode);
+
+        let resolution = execute_key_action_command(
+            &mut action_handler,
+            &mut app_state,
+            Action::ClickThenDisable,
+            true,
+        );
+
+        assert_eq!(
+            action_handler.mouse_master.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+                MouseOperation::Click(Button::Left),
+            ]
+        );
+        assert!(!action_handler.mouse_master.left_button_held());
+        assert_eq!(action_handler.mouse_master.current_mode, ModeState::Idle);
+        assert!(action_handler.active_keys.is_empty());
+        assert!(!app_state.active_mode());
+        assert!(!app_state.has_active_action_keys());
+        assert_eq!(resolution, Some(JumpOverlayResolution::Hidden));
     }
 }
