@@ -120,17 +120,79 @@ fn format_jump_indicator(view: &JumpOverlayView) -> String {
 }
 
 fn preview_source_rect(view: &JumpOverlayView, snapshot: &ScreenSnapshot) -> RECT {
-    let margin_x = view.region.width * view.preview_margin_percent as i32 / 100;
-    let margin_y = view.region.height * view.preview_margin_percent as i32 / 100;
     let snapshot_right = snapshot.left + snapshot.width;
     let snapshot_bottom = snapshot.top + snapshot.height;
 
     RECT {
-        left: (view.region.left - margin_x).max(snapshot.left),
-        top: (view.region.top - margin_y).max(snapshot.top),
-        right: (view.region.left + view.region.width + margin_x).min(snapshot_right),
-        bottom: (view.region.top + view.region.height + margin_y).min(snapshot_bottom),
+        left: view.preview_source_region.left.max(snapshot.left),
+        top: view.preview_source_region.top.max(snapshot.top),
+        right: (view.preview_source_region.left + view.preview_source_region.width)
+            .min(snapshot_right),
+        bottom: (view.preview_source_region.top + view.preview_source_region.height)
+            .min(snapshot_bottom),
     }
+}
+
+fn map_axis(value: i32, source_start: i32, source_len: i32, dest_start: i32, dest_len: i32) -> i32 {
+    (dest_start as f64 + (value - source_start) as f64 * dest_len as f64 / source_len as f64)
+        .round() as i32
+}
+
+fn source_screen_to_client(
+    x: i32,
+    y: i32,
+    source_region: JumpRegion,
+    client_draw_region: JumpRegion,
+) -> Option<(i32, i32)> {
+    if !source_region.is_valid() || !client_draw_region.is_valid() {
+        return None;
+    }
+
+    Some((
+        map_axis(
+            x,
+            source_region.left,
+            source_region.width,
+            client_draw_region.left,
+            client_draw_region.width,
+        ),
+        map_axis(
+            y,
+            source_region.top,
+            source_region.height,
+            client_draw_region.top,
+            client_draw_region.height,
+        ),
+    ))
+}
+
+fn target_region_client_rect(
+    target_region: JumpRegion,
+    source_region: JumpRegion,
+    client_draw_region: JumpRegion,
+) -> Option<RECT> {
+    if !target_region.is_valid() {
+        return None;
+    }
+    let (left, top) = source_screen_to_client(
+        target_region.left,
+        target_region.top,
+        source_region,
+        client_draw_region,
+    )?;
+    let (right, bottom) = source_screen_to_client(
+        target_region.left + target_region.width,
+        target_region.top + target_region.height,
+        source_region,
+        client_draw_region,
+    )?;
+
+    Some(RECT {
+        left,
+        top,
+        right,
+        bottom,
+    })
 }
 
 pub struct JumpOverlay {
@@ -268,19 +330,25 @@ impl JumpOverlay {
         }
     }
 
-    fn grid_rect(&self, view: &JumpOverlayView, client_rect: RECT) -> RECT {
-        match self.effective_draw_mode() {
-            DrawMode::TransparentGrid => {
-                let virtual_screen = ScreenRect::from_virtual_screen();
-                RECT {
-                    left: view.region.left - virtual_screen.left,
-                    top: view.region.top - virtual_screen.top,
-                    right: view.region.left - virtual_screen.left + view.region.width,
-                    bottom: view.region.top - virtual_screen.top + view.region.height,
-                }
+    fn client_draw_rect(&self, view: &JumpOverlayView, client_rect: RECT) -> JumpRegion {
+        if view.client_draw_region.is_valid() {
+            view.client_draw_region
+        } else {
+            JumpRegion {
+                left: client_rect.left,
+                top: client_rect.top,
+                width: client_rect.right - client_rect.left,
+                height: client_rect.bottom - client_rect.top,
             }
-            DrawMode::MagnifiedPreview => client_rect,
         }
+    }
+
+    fn grid_rect(&self, view: &JumpOverlayView, client_rect: RECT) -> Option<RECT> {
+        target_region_client_rect(
+            view.target_region,
+            view.preview_source_region,
+            self.client_draw_rect(view, client_rect),
+        )
     }
 
     fn draw_background(&self, hdc: HDC, client_rect: &RECT, view: &JumpOverlayView) {
@@ -309,13 +377,14 @@ impl JumpOverlay {
                         let src_w = src.right - src.left;
                         let src_h = src.bottom - src.top;
                         if src_w > 0 && src_h > 0 {
+                            let draw_region = self.client_draw_rect(view, *client_rect);
                             let _ = SetStretchBltMode(hdc, HALFTONE);
                             let _ = StretchBlt(
                                 hdc,
-                                client_rect.left,
-                                client_rect.top,
-                                client_rect.right - client_rect.left,
-                                client_rect.bottom - client_rect.top,
+                                draw_region.left,
+                                draw_region.top,
+                                draw_region.width,
+                                draw_region.height,
                                 Some(snapshot.hdc()),
                                 snapshot.source_x(src.left),
                                 snapshot.source_y(src.top),
@@ -345,7 +414,9 @@ impl JumpOverlay {
                 };
                 self.draw_background(hdc, &rect, view);
 
-                let grid_rect = self.grid_rect(view, rect);
+                let Some(grid_rect) = self.grid_rect(view, rect) else {
+                    return;
+                };
                 let width = grid_rect.right - grid_rect.left;
                 let height = grid_rect.bottom - grid_rect.top;
                 let cell_w = width / grid_size.0 as i32;
@@ -470,8 +541,10 @@ pub fn hide_jump_overlay() {
 mod tests {
     use super::{
         draw_mode_for_view, format_jump_indicator, overlay_colorkey, overlay_ex_style,
-        transparency_mode, DrawMode, TransparencyMode, OVERLAY_ALPHA,
+        source_screen_to_client, target_region_client_rect, transparency_mode, DrawMode,
+        TransparencyMode, OVERLAY_ALPHA,
     };
+    use crate::jump_session::JumpRegion;
     use crate::jump_view::JumpOverlayView;
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
 
@@ -515,20 +588,94 @@ mod tests {
         );
     }
 
+    #[test]
+    fn source_screen_to_client_maps_edges_with_negative_origin() {
+        let source = JumpRegion {
+            left: -100,
+            top: 50,
+            width: 200,
+            height: 100,
+        };
+        let client = JumpRegion {
+            left: 0,
+            top: 0,
+            width: 800,
+            height: 400,
+        };
+
+        assert_eq!(
+            source_screen_to_client(-100, 50, source, client),
+            Some((0, 0))
+        );
+        assert_eq!(
+            source_screen_to_client(100, 150, source, client),
+            Some((800, 400))
+        );
+        assert_eq!(
+            source_screen_to_client(0, 100, source, client),
+            Some((400, 200))
+        );
+    }
+
+    #[test]
+    fn target_region_client_rect_maps_non_square_context() {
+        let source = JumpRegion {
+            left: 10,
+            top: 20,
+            width: 300,
+            height: 100,
+        };
+        let target = JumpRegion {
+            left: 85,
+            top: 45,
+            width: 150,
+            height: 50,
+        };
+        let client = JumpRegion {
+            left: 20,
+            top: 30,
+            width: 600,
+            height: 400,
+        };
+
+        let rect = target_region_client_rect(target, source, client).unwrap();
+        assert_eq!(rect.left, 170);
+        assert_eq!(rect.top, 130);
+        assert_eq!(rect.right, 470);
+        assert_eq!(rect.bottom, 330);
+    }
+
     fn view(stage_index: usize, stage_count: usize, input: &str) -> JumpOverlayView {
         JumpOverlayView {
             stage_index,
             stage_count,
             stages: Vec::new(),
-            region: crate::jump_session::JumpRegion {
+            session_region: JumpRegion {
                 left: -100,
                 top: 50,
                 width: 200,
                 height: 100,
             },
+            target_region: JumpRegion {
+                left: -100,
+                top: 50,
+                width: 200,
+                height: 100,
+            },
+            preview_source_region: JumpRegion {
+                left: -110,
+                top: 45,
+                width: 220,
+                height: 110,
+            },
+            client_draw_region: JumpRegion {
+                left: 0,
+                top: 0,
+                width: 800,
+                height: 400,
+            },
             grid_size: (10, 10),
             input: input.to_string(),
-            preview_margin_percent: 10,
         }
     }
 }

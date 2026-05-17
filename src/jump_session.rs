@@ -28,11 +28,24 @@ impl JumpRegion {
 pub struct JumpStage {
     pub width: u32,
     pub height: u32,
+    pub target_margin_percent: u8,
 }
 
 impl JumpStage {
     pub fn new(width: u32, height: u32) -> Self {
-        Self { width, height }
+        Self {
+            width,
+            height,
+            target_margin_percent: 0,
+        }
+    }
+
+    pub fn with_target_margin(width: u32, height: u32, target_margin_percent: u8) -> Self {
+        Self {
+            width,
+            height,
+            target_margin_percent,
+        }
     }
 
     pub fn grid(self) -> (u32, u32) {
@@ -48,6 +61,7 @@ impl JumpStage {
 pub struct JumpSession {
     pub stages: Vec<JumpStage>,
     pub stage_index: usize,
+    pub session_region: JumpRegion,
     pub current_region: JumpRegion,
     pub input: String,
     pub path: Vec<(usize, usize)>,
@@ -105,19 +119,47 @@ pub fn subdivide_region(
     child.is_valid().then_some(child)
 }
 
+pub fn expand_region_within(
+    region: JumpRegion,
+    margin_percent: u8,
+    bounds: JumpRegion,
+) -> Option<JumpRegion> {
+    if !region.is_valid() || !bounds.is_valid() {
+        return None;
+    }
+
+    let margin_x = region.width * margin_percent as i32 / 100;
+    let margin_y = region.height * margin_percent as i32 / 100;
+    let bounds_right = bounds.left + bounds.width;
+    let bounds_bottom = bounds.top + bounds.height;
+    let left = (region.left - margin_x).max(bounds.left);
+    let top = (region.top - margin_y).max(bounds.top);
+    let right = (region.left + region.width + margin_x).min(bounds_right);
+    let bottom = (region.top + region.height + margin_y).min(bounds_bottom);
+    let expanded = JumpRegion {
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+    };
+    expanded.is_valid().then_some(expanded)
+}
+
 impl JumpSession {
     pub fn new(region: JumpRegion, stages: Vec<JumpStage>) -> Option<Self> {
         if !region.is_valid() || stages.is_empty() || stages.iter().any(|stage| !stage.is_valid()) {
             return None;
         }
+        let current_region = expand_region_within(region, stages[0].target_margin_percent, region)?;
 
         Some(Self {
             stages,
             stage_index: 0,
-            current_region: region,
+            session_region: region,
+            current_region,
             input: String::new(),
             path: Vec::new(),
-            region_history: vec![region],
+            region_history: vec![current_region],
         })
     }
 
@@ -179,17 +221,27 @@ impl JumpSession {
             return JumpSessionUpdate::Invalid;
         };
 
-        self.current_region = region;
         self.path.push((row, col));
-        self.region_history.push(region);
 
         if self.stage_index + 1 < self.stages.len() {
             self.stage_index += 1;
+            let region = match expand_region_within(
+                region,
+                self.current_stage().target_margin_percent,
+                self.session_region,
+            ) {
+                Some(region) => region,
+                None => return JumpSessionUpdate::Invalid,
+            };
+            self.current_region = region;
+            self.region_history.push(region);
             JumpSessionUpdate::StageAdvanced {
                 stage_index: self.stage_index,
                 region,
             }
         } else {
+            self.current_region = region;
+            self.region_history.push(region);
             let (x, y) = region.center();
             JumpSessionUpdate::Completed { x, y, region }
         }
@@ -204,7 +256,10 @@ impl JumpStage {
 
 #[cfg(test)]
 mod tests {
-    use super::{subdivide_region, JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
+    use super::{
+        expand_region_within, subdivide_region, JumpRegion, JumpSession, JumpSessionUpdate,
+        JumpStage,
+    };
     use crate::keyboard::VirtualKey;
 
     fn base_region() -> JumpRegion {
@@ -473,6 +528,33 @@ mod tests {
     }
 
     #[test]
+    fn expand_region_within_clamps_to_session_bounds() {
+        assert_eq!(
+            expand_region_within(
+                JumpRegion {
+                    left: 10,
+                    top: 20,
+                    width: 100,
+                    height: 50,
+                },
+                10,
+                JumpRegion {
+                    left: 0,
+                    top: 0,
+                    width: 120,
+                    height: 80,
+                },
+            ),
+            Some(JumpRegion {
+                left: 0,
+                top: 15,
+                width: 120,
+                height: 60,
+            })
+        );
+    }
+
+    #[test]
     fn letters_are_consumed_until_single_stage_completes() {
         let mut session = JumpSession::new(base_region(), vec![JumpStage::new(10, 10)]).unwrap();
 
@@ -603,6 +685,43 @@ mod tests {
         assert_eq!(session.input, "");
         assert_eq!(session.path, vec![(1, 2), (3, 4), (1, 1)]);
         assert_eq!(session.region_history.len(), 4);
+    }
+
+    #[test]
+    fn subdivision_uses_target_region_state_independent_of_preview_context() {
+        let stages = vec![
+            JumpStage::new(5, 5),
+            JumpStage::with_target_margin(5, 5, 10),
+            JumpStage::new(2, 2),
+        ];
+        let mut session = JumpSession::new(base_region(), stages).unwrap();
+
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::B, VirtualKey::B]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: JumpRegion {
+                    left: 180,
+                    top: 180,
+                    width: 240,
+                    height: 240,
+                },
+            })
+        );
+        assert_eq!(session.current_region, session.region_history[1]);
+
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::A, VirtualKey::A]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 2,
+                region: JumpRegion {
+                    left: 180,
+                    top: 180,
+                    width: 48,
+                    height: 48,
+                },
+            })
+        );
     }
 
     #[test]

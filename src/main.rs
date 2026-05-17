@@ -42,7 +42,7 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const DEBUG_HEARTBEAT_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
 const MIN_JUMP_STAGE_SIZE: u32 = 1;
 const MAX_JUMP_STAGE_SIZE: u32 = 26;
-const MAX_PREVIEW_MARGIN_PERCENT: u8 = 50;
+const MAX_JUMP_REGION_MARGIN_PERCENT: u8 = 50;
 const MAX_EDGE_JUMP_OFFSET_PX: i32 = 10_000;
 
 static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
@@ -293,13 +293,17 @@ impl Default for JumpConfig {
                 enabled: false,
                 width: 5,
                 height: 5,
-                preview_margin_percent: 10,
+                target_margin_percent: 0,
+                visual_context_margin_percent: 10,
+                legacy_preview_margin_percent: None,
             },
             precise: JumpStageConfig {
                 enabled: false,
                 width: 3,
                 height: 3,
-                preview_margin_percent: 5,
+                target_margin_percent: 0,
+                visual_context_margin_percent: 5,
+                legacy_preview_margin_percent: None,
             },
         }
     }
@@ -311,7 +315,10 @@ struct JumpStageConfig {
     enabled: bool,
     width: u32,
     height: u32,
-    preview_margin_percent: u8,
+    target_margin_percent: u8,
+    visual_context_margin_percent: u8,
+    #[serde(default, rename = "preview_margin_percent")]
+    legacy_preview_margin_percent: Option<u8>,
 }
 
 impl JumpStageConfig {
@@ -320,7 +327,9 @@ impl JumpStageConfig {
             enabled: true,
             width: 0,
             height: 0,
-            preview_margin_percent: 0,
+            target_margin_percent: 0,
+            visual_context_margin_percent: 0,
+            legacy_preview_margin_percent: None,
         }
     }
 }
@@ -331,7 +340,9 @@ impl Default for JumpStageConfig {
             enabled: false,
             width: 1,
             height: 1,
-            preview_margin_percent: 0,
+            target_margin_percent: 0,
+            visual_context_margin_percent: 0,
+            legacy_preview_margin_percent: None,
         }
     }
 }
@@ -534,12 +545,26 @@ fn warn_config_normalized(message: &str) {
 fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
     stage.width = normalize_jump_stage_size(name, "width", stage.width);
     stage.height = normalize_jump_stage_size(name, "height", stage.height);
-    if stage.preview_margin_percent > MAX_PREVIEW_MARGIN_PERCENT {
+    if let Some(legacy_preview_margin_percent) = stage.legacy_preview_margin_percent {
+        stage.visual_context_margin_percent = legacy_preview_margin_percent;
+    }
+    if stage.target_margin_percent > MAX_JUMP_REGION_MARGIN_PERCENT {
         warn_config_normalized(&format!(
-            "{name}.preview_margin_percent={} is above {}; clamping to {}",
-            stage.preview_margin_percent, MAX_PREVIEW_MARGIN_PERCENT, MAX_PREVIEW_MARGIN_PERCENT
+            "{name}.target_margin_percent={} is above {}; clamping to {}",
+            stage.target_margin_percent,
+            MAX_JUMP_REGION_MARGIN_PERCENT,
+            MAX_JUMP_REGION_MARGIN_PERCENT
         ));
-        stage.preview_margin_percent = MAX_PREVIEW_MARGIN_PERCENT;
+        stage.target_margin_percent = MAX_JUMP_REGION_MARGIN_PERCENT;
+    }
+    if stage.visual_context_margin_percent > MAX_JUMP_REGION_MARGIN_PERCENT {
+        warn_config_normalized(&format!(
+            "{name}.visual_context_margin_percent={} is above {}; clamping to {}",
+            stage.visual_context_margin_percent,
+            MAX_JUMP_REGION_MARGIN_PERCENT,
+            MAX_JUMP_REGION_MARGIN_PERCENT
+        ));
+        stage.visual_context_margin_percent = MAX_JUMP_REGION_MARGIN_PERCENT;
     }
 }
 
@@ -1335,15 +1360,20 @@ mod tests {
             [jump.coarse]
             width = 0
             height = 27
-            preview_margin_percent = 99
+            target_margin_percent = 99
+            visual_context_margin_percent = 99
             "#,
         );
 
         assert_eq!(config.jump.coarse.width, 1);
         assert_eq!(config.jump.coarse.height, 26);
         assert_eq!(
-            config.jump.coarse.preview_margin_percent,
-            MAX_PREVIEW_MARGIN_PERCENT
+            config.jump.coarse.target_margin_percent,
+            MAX_JUMP_REGION_MARGIN_PERCENT
+        );
+        assert_eq!(
+            config.jump.coarse.visual_context_margin_percent,
+            MAX_JUMP_REGION_MARGIN_PERCENT
         );
     }
 

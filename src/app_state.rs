@@ -1,5 +1,7 @@
 use crate::action::Action;
-use crate::jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
+use crate::jump_session::{
+    expand_region_within, JumpRegion, JumpSession, JumpSessionUpdate, JumpStage,
+};
 use crate::jump_view::{JumpOverlayView, JumpStageMetadata};
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
 use crate::keyboard::VirtualKey;
@@ -185,7 +187,17 @@ impl AppState {
         let stage_metadata = jump_stage_metadata(config);
         let stages = stage_metadata
             .iter()
-            .map(|stage| JumpStage::new(stage.grid_size.0, stage.grid_size.1))
+            .map(|stage| {
+                if stage.target_margin_percent == 0 {
+                    JumpStage::new(stage.grid_size.0, stage.grid_size.1)
+                } else {
+                    JumpStage::with_target_margin(
+                        stage.grid_size.0,
+                        stage.grid_size.1,
+                        stage.target_margin_percent,
+                    )
+                }
+            })
             .collect();
 
         let Some(session) = JumpSession::new(virtual_screen_region, stages) else {
@@ -224,19 +236,35 @@ impl AppState {
             return None;
         };
 
-        let preview_margin_percent = stage_metadata
+        let visual_context_margin_percent = stage_metadata
             .get(session.stage_index)
-            .map(|stage| stage.preview_margin_percent)
+            .map(|stage| stage.visual_context_margin_percent)
             .unwrap_or(0);
+        let session_region = session.current_region;
+        let target_region = session.current_region;
+        let preview_source_region = expand_region_within(
+            target_region,
+            visual_context_margin_percent,
+            session.session_region,
+        )
+        .unwrap_or(target_region);
+        let client_draw_region = JumpRegion {
+            left: 0,
+            top: 0,
+            width: session.session_region.width,
+            height: session.session_region.height,
+        };
 
         Some(JumpOverlayView {
             stage_index: session.stage_index,
             stage_count: session.stages.len(),
             stages: stage_metadata.clone(),
-            region: session.current_region,
+            session_region,
+            target_region,
+            preview_source_region,
+            client_draw_region,
             grid_size: session.current_grid(),
             input: session.input.clone(),
-            preview_margin_percent,
         })
     }
 
@@ -420,14 +448,16 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
     let mut stages = vec![JumpStageMetadata {
         index: 0,
         grid_size: (config.jump.coarse.width, config.jump.coarse.height),
-        preview_margin_percent: config.jump.coarse.preview_margin_percent,
+        target_margin_percent: config.jump.coarse.target_margin_percent,
+        visual_context_margin_percent: config.jump.coarse.visual_context_margin_percent,
     }];
 
     if config.jump.fine.enabled {
         stages.push(JumpStageMetadata {
             index: stages.len(),
             grid_size: (config.jump.fine.width, config.jump.fine.height),
-            preview_margin_percent: config.jump.fine.preview_margin_percent,
+            target_margin_percent: config.jump.fine.target_margin_percent,
+            visual_context_margin_percent: config.jump.fine.visual_context_margin_percent,
         });
     }
 
@@ -435,7 +465,8 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
         stages.push(JumpStageMetadata {
             index: stages.len(),
             grid_size: (config.jump.precise.width, config.jump.precise.height),
-            preview_margin_percent: config.jump.precise.preview_margin_percent,
+            target_margin_percent: config.jump.precise.target_margin_percent,
+            visual_context_margin_percent: config.jump.precise.visual_context_margin_percent,
         });
     }
 
@@ -776,11 +807,67 @@ mod tests {
 
         assert_eq!(view.stage_index, 0);
         assert_eq!(view.stage_count, 1);
-        assert_eq!(view.region, jump_region());
+        assert_eq!(view.session_region, jump_region());
+        assert_eq!(view.target_region, jump_region());
+        assert_eq!(view.preview_source_region, jump_region());
+        assert_eq!(
+            view.client_draw_region,
+            JumpRegion {
+                left: 0,
+                top: 0,
+                width: 100,
+                height: 100,
+            }
+        );
         assert_eq!(view.grid_size, (10, 10));
         assert_eq!(view.input, "");
-        assert_eq!(view.preview_margin_percent, 0);
         assert_eq!(view.stages.len(), 1);
+    }
+
+    #[test]
+    fn jump_view_exposes_distinct_context_region_without_expanding_target() {
+        let mut config = Config::default();
+        config.jump.mode = crate::JumpMode::Precision;
+        config.jump.coarse.width = 5;
+        config.jump.coarse.height = 5;
+        config.jump.fine.enabled = true;
+        config.jump.fine.width = 5;
+        config.jump.fine.height = 5;
+        config.jump.fine.target_margin_percent = 0;
+        config.jump.fine.visual_context_margin_percent = 5;
+        let config = config.normalize().unwrap();
+
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true)),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true)),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: JumpRegion {
+                    left: 20,
+                    top: 20,
+                    width: 20,
+                    height: 20,
+                },
+            })
+        );
+
+        let view = state.jump_view().unwrap();
+        assert_eq!(view.session_region, view.target_region);
+        assert_ne!(view.preview_source_region, view.target_region);
+        assert_eq!(
+            view.preview_source_region,
+            JumpRegion {
+                left: 19,
+                top: 19,
+                width: 22,
+                height: 22,
+            }
+        );
     }
 
     #[test]

@@ -38,23 +38,36 @@ grid_size = {width = 10, height = 10}
 mode = "precision"
 move_cursor_after_each_stage = false
 
+# Jump geometry uses four explicit regions:
+# - session_region: the authoritative region tracked by the jump session.
+# - target_region: the selectable region the current grid maps to.
+# - preview_source_region: the captured screen region rendered behind the overlay.
+# - client_draw_region: overlay window/client pixels used for drawing.
+#
+# target_margin_percent expands the selectable target for the next stage.
+# visual_context_margin_percent expands only the preview source. With
+# target_margin_percent = 0 and visual_context_margin_percent = 5, the overlay
+# shows 5% surrounding context without making that context selectable.
 [jump.coarse]
 enabled = true
 width = 10
 height = 10
-preview_margin_percent = 0
+target_margin_percent = 0
+visual_context_margin_percent = 0
 
 [jump.fine]
 enabled = true
 width = 8
 height = 8
-preview_margin_percent = 1
+target_margin_percent = 0
+visual_context_margin_percent = 1
 
 [jump.precise]
 enabled = true
 width = 5
 height = 5
-preview_margin_percent = 5
+target_margin_percent = 0
+visual_context_margin_percent = 5
 
 # Mouse movement parameters
 acceleration      = 2 # Pixels per acceleration step
