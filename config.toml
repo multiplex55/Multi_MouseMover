@@ -38,6 +38,13 @@ grid_size = {width = 10, height = 10}
 mode = "precision"
 move_cursor_after_each_stage = false
 
+[jump.visuals]
+selected_region_outline = true
+preview_outline = true
+active_grid_outline = true
+cell_centers = false
+final_crosshair = true
+
 # Jump geometry uses four explicit regions:
 # - session_region: the authoritative region tracked by the jump session.
 # - target_region: the selectable region the current grid maps to.

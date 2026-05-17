@@ -1,5 +1,14 @@
 use crate::{jump_session::JumpRegion, JumpAimPoint, JumpTargetRegionMode};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JumpVisuals {
+    pub selected_region_outline: bool,
+    pub preview_outline: bool,
+    pub active_grid_outline: bool,
+    pub cell_centers: bool,
+    pub final_crosshair: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct JumpStageMetadata {
     pub index: usize,
@@ -37,5 +46,6 @@ pub struct JumpOverlayView {
     pub client_draw_region: JumpRegion,
     pub grid_size: (u32, u32),
     pub input: String,
+    pub visuals: JumpVisuals,
     pub final_adjust: Option<FinalAdjustOverlayView>,
 }

@@ -66,6 +66,7 @@ pub enum JumpState {
         activation_key: VirtualKey,
         activation_key_released: bool,
         stage_metadata: Vec<JumpStageMetadata>,
+        visuals: crate::JumpVisualsConfig,
         final_adjust_config: crate::FinalAdjustConfig,
     },
 }
@@ -213,6 +214,7 @@ impl AppState {
             activation_key,
             activation_key_released: false,
             stage_metadata,
+            visuals: config.jump.visuals,
             final_adjust_config: config.final_adjust.clone(),
         };
         true
@@ -259,6 +261,7 @@ impl AppState {
         let JumpState::Active {
             session,
             stage_metadata,
+            visuals,
             final_adjust_config,
             ..
         } = &self.jump
@@ -295,6 +298,7 @@ impl AppState {
             client_draw_region,
             grid_size: session.current_grid(),
             input: session.input.clone(),
+            visuals: (*visuals).into(),
             final_adjust: session.final_adjust.map(|adjust| FinalAdjustOverlayView {
                 original_point: (adjust.original_x, adjust.original_y),
                 candidate_point: (adjust.x, adjust.y),
@@ -1045,6 +1049,27 @@ mod tests {
             view.stages[1].target_region_mode,
             crate::JumpTargetRegionMode::ExpandedTarget
         );
+    }
+
+    #[test]
+    fn jump_view_propagates_configured_visual_toggles() {
+        let mut config = Config::default();
+        config.jump.visuals.selected_region_outline = false;
+        config.jump.visuals.preview_outline = true;
+        config.jump.visuals.active_grid_outline = false;
+        config.jump.visuals.cell_centers = true;
+        config.jump.visuals.final_crosshair = false;
+        let config = config.normalize().unwrap();
+
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+
+        let view = state.jump_view().unwrap();
+        assert!(!view.visuals.selected_region_outline);
+        assert!(view.visuals.preview_outline);
+        assert!(!view.visuals.active_grid_outline);
+        assert!(view.visuals.cell_centers);
+        assert!(!view.visuals.final_crosshair);
     }
 
     #[test]

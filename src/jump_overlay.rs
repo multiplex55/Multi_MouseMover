@@ -51,6 +51,15 @@ impl ScreenRect {
     }
 }
 
+fn region_to_rect(region: JumpRegion) -> RECT {
+    RECT {
+        left: region.left,
+        top: region.top,
+        right: region.left + region.width,
+        bottom: region.top + region.height,
+    }
+}
+
 fn overlay_colorkey() -> COLORREF {
     RGB(0, 0, 0)
 }
@@ -69,6 +78,22 @@ fn input_color() -> COLORREF {
 
 fn final_adjust_color() -> COLORREF {
     RGB(255, 64, 64)
+}
+
+fn target_outline_color() -> COLORREF {
+    RGB(0, 255, 255)
+}
+
+fn preview_outline_color() -> COLORREF {
+    RGB(96, 96, 96)
+}
+
+fn active_grid_outline_color() -> COLORREF {
+    RGB(255, 255, 0)
+}
+
+fn cell_center_color() -> COLORREF {
+    RGB(255, 128, 0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,18 +211,26 @@ fn target_region_client_rect(
     source_region: JumpRegion,
     client_draw_region: JumpRegion,
 ) -> Option<RECT> {
-    if !target_region.is_valid() {
+    project_source_rect_to_client(target_region, source_region, client_draw_region)
+}
+
+fn project_source_rect_to_client(
+    source_rect: JumpRegion,
+    source_region: JumpRegion,
+    client_draw_region: JumpRegion,
+) -> Option<RECT> {
+    if !source_rect.is_valid() {
         return None;
     }
     let (left, top) = source_screen_to_client(
-        target_region.left,
-        target_region.top,
+        source_rect.left,
+        source_rect.top,
         source_region,
         client_draw_region,
     )?;
     let (right, bottom) = source_screen_to_client(
-        target_region.left + target_region.width,
-        target_region.top + target_region.height,
+        source_rect.left + source_rect.width,
+        source_rect.top + source_rect.height,
         source_region,
         client_draw_region,
     )?;
@@ -208,6 +241,25 @@ fn target_region_client_rect(
         right,
         bottom,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct JumpRenderBranches {
+    target_outline: bool,
+    preview_outline: bool,
+    active_grid_outline: bool,
+    cell_centers: bool,
+    final_crosshair: bool,
+}
+
+fn render_branches_for_view(view: &JumpOverlayView) -> JumpRenderBranches {
+    JumpRenderBranches {
+        target_outline: view.visuals.selected_region_outline,
+        preview_outline: view.visuals.preview_outline,
+        active_grid_outline: view.visuals.active_grid_outline,
+        cell_centers: view.visuals.cell_centers,
+        final_crosshair: view.visuals.final_crosshair && view.final_adjust.is_some(),
+    }
 }
 
 fn current_cursor_position() -> Option<(i32, i32)> {
@@ -481,7 +533,77 @@ impl JumpOverlay {
         )
     }
 
-    fn draw_final_adjust(&self, hdc: HDC, view: &JumpOverlayView) {
+    fn draw_rect_outline(&self, hdc: HDC, rect: RECT, color: COLORREF, pen_width: i32) {
+        unsafe {
+            let pen = CreatePen(PS_SOLID, pen_width, color);
+            let old_pen = SelectObject(hdc, pen.into());
+            let _ = MoveToEx(hdc, rect.left, rect.top, None);
+            let _ = LineTo(hdc, rect.right, rect.top);
+            let _ = LineTo(hdc, rect.right, rect.bottom);
+            let _ = LineTo(hdc, rect.left, rect.bottom);
+            let _ = LineTo(hdc, rect.left, rect.top);
+            let _ = SelectObject(hdc, old_pen);
+            let _ = DeleteObject(pen.into());
+        }
+    }
+
+    fn draw_target_outline(
+        &self,
+        hdc: HDC,
+        view: &JumpOverlayView,
+        client_draw_region: JumpRegion,
+    ) {
+        let Some(rect) = target_region_client_rect(
+            view.target_region,
+            preview_source_region_for_view(view),
+            client_draw_region,
+        ) else {
+            return;
+        };
+
+        self.draw_rect_outline(hdc, rect, target_outline_color(), 2);
+    }
+
+    fn draw_preview_outline(&self, hdc: HDC, view: &JumpOverlayView, client_rect: RECT) {
+        self.draw_rect_outline(
+            hdc,
+            region_to_rect(self.client_draw_rect(view, client_rect)),
+            preview_outline_color(),
+            1,
+        );
+    }
+
+    fn draw_active_grid_outline(&self, hdc: HDC, grid_rect: RECT) {
+        self.draw_rect_outline(hdc, grid_rect, active_grid_outline_color(), 2);
+    }
+
+    fn draw_cell_centers(
+        &self,
+        hdc: HDC,
+        grid_rect: RECT,
+        grid_size: (u32, u32),
+        cell_w: i32,
+        cell_h: i32,
+    ) {
+        unsafe {
+            let pen = CreatePen(PS_SOLID, 1, cell_center_color());
+            let old_pen = SelectObject(hdc, pen.into());
+            for row in 0..grid_size.1 {
+                for col in 0..grid_size.0 {
+                    let x = grid_rect.left + col as i32 * cell_w + cell_w / 2;
+                    let y = grid_rect.top + row as i32 * cell_h + cell_h / 2;
+                    let _ = MoveToEx(hdc, x - 2, y, None);
+                    let _ = LineTo(hdc, x + 3, y);
+                    let _ = MoveToEx(hdc, x, y - 2, None);
+                    let _ = LineTo(hdc, x, y + 3);
+                }
+            }
+            let _ = SelectObject(hdc, old_pen);
+            let _ = DeleteObject(pen.into());
+        }
+    }
+
+    fn draw_final_crosshair(&self, hdc: HDC, view: &JumpOverlayView) {
         let Some(adjust) = &view.final_adjust else {
             return;
         };
@@ -568,6 +690,14 @@ impl JumpOverlay {
                     return;
                 };
                 self.draw_background(hdc, &rect, view);
+                let client_draw_region = self.client_draw_rect(view, rect);
+                let branches = render_branches_for_view(view);
+                if branches.preview_outline {
+                    self.draw_preview_outline(hdc, view, rect);
+                }
+                if branches.target_outline {
+                    self.draw_target_outline(hdc, view, client_draw_region);
+                }
 
                 let Some(grid_rect) = self.grid_rect(view, rect) else {
                     return;
@@ -596,6 +726,12 @@ impl JumpOverlay {
                     let _ = MoveToEx(hdc, grid_rect.left, pos, None);
                     let _ = LineTo(hdc, grid_rect.right, pos);
                 }
+                if branches.active_grid_outline {
+                    self.draw_active_grid_outline(hdc, grid_rect);
+                }
+                if branches.cell_centers {
+                    self.draw_cell_centers(hdc, grid_rect, grid_size, cell_w, cell_h);
+                }
 
                 let row_len = letters_needed(grid_size.1);
                 let col_len = letters_needed(grid_size.0);
@@ -617,7 +753,9 @@ impl JumpOverlay {
                 let indicator_x = grid_rect.left + (width / 2) - 60;
                 let indicator_y = grid_rect.top + 16;
                 let _ = TextOutW(hdc, indicator_x, indicator_y, &indicator_utf16);
-                self.draw_final_adjust(hdc, view);
+                if branches.final_crosshair {
+                    self.draw_final_crosshair(hdc, view);
+                }
 
                 let _ = SetTextColor(hdc, old_text_color);
                 let _ = SetBkMode(hdc, BACKGROUND_MODE(old_bk_mode as u32));
@@ -698,11 +836,14 @@ mod tests {
     use super::{
         bounded_region_centered_on, draw_mode_for_view, format_jump_indicator, grid_target_region,
         overlay_colorkey, overlay_ex_style, preview_source_region_for_view,
-        source_screen_to_client, target_region_client_rect, transparency_mode, DrawMode,
+        project_source_rect_to_client, render_branches_for_view, source_screen_to_client,
+        target_region_client_rect, transparency_mode, DrawMode, JumpRenderBranches,
         TransparencyMode, OVERLAY_ALPHA,
     };
     use crate::jump_session::JumpRegion;
-    use crate::jump_view::{JumpOverlayView, JumpStageMetadata};
+    use crate::jump_view::{
+        FinalAdjustOverlayView, JumpOverlayView, JumpStageMetadata, JumpVisuals,
+    };
     use crate::{JumpAimPoint, JumpTargetRegionMode};
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
 
@@ -801,6 +942,77 @@ mod tests {
         assert_eq!(rect.top, 130);
         assert_eq!(rect.right, 470);
         assert_eq!(rect.bottom, 330);
+    }
+
+    #[test]
+    fn projected_rect_alignment_uses_explicit_source_to_client_transform() {
+        let preview_source = JumpRegion {
+            left: 100,
+            top: 200,
+            width: 50,
+            height: 25,
+        };
+        let target = JumpRegion {
+            left: 110,
+            top: 205,
+            width: 20,
+            height: 10,
+        };
+        let client = JumpRegion {
+            left: 400,
+            top: 20,
+            width: 500,
+            height: 250,
+        };
+
+        let rect = project_source_rect_to_client(target, preview_source, client).unwrap();
+
+        assert_eq!(rect.left, 500);
+        assert_eq!(rect.top, 70);
+        assert_eq!(rect.right, 700);
+        assert_eq!(rect.bottom, 170);
+    }
+
+    #[test]
+    fn visual_toggles_control_render_branches() {
+        let mut view = view(1, 2, "");
+        view.final_adjust = Some(FinalAdjustOverlayView {
+            original_point: (0, 0),
+            candidate_point: (1, 1),
+            region: view.target_region,
+            small_step_px: 1,
+            large_step_px: 10,
+            modifier_key: "Shift".to_string(),
+            confirm_key: "Enter".to_string(),
+            cancel_key: "Escape".to_string(),
+            back_key: "Backspace".to_string(),
+        });
+        view.visuals = JumpVisuals {
+            selected_region_outline: false,
+            preview_outline: true,
+            active_grid_outline: false,
+            cell_centers: true,
+            final_crosshair: false,
+        };
+
+        assert_eq!(
+            render_branches_for_view(&view),
+            JumpRenderBranches {
+                target_outline: false,
+                preview_outline: true,
+                active_grid_outline: false,
+                cell_centers: true,
+                final_crosshair: false,
+            }
+        );
+    }
+
+    #[test]
+    fn final_crosshair_branch_requires_final_adjust_view() {
+        let mut view = view(1, 2, "");
+        view.visuals.final_crosshair = true;
+
+        assert!(!render_branches_for_view(&view).final_crosshair);
     }
 
     #[test]
@@ -1056,6 +1268,13 @@ mod tests {
             },
             grid_size: (10, 10),
             input: input.to_string(),
+            visuals: JumpVisuals {
+                selected_region_outline: true,
+                preview_outline: true,
+                active_grid_outline: true,
+                cell_centers: false,
+                final_crosshair: true,
+            },
             final_adjust: None,
         }
     }

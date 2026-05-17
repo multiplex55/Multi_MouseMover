@@ -20,6 +20,7 @@ use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
 };
 use jump_session::JumpSessionUpdate;
+use jump_view::JumpVisuals;
 use key_chord::{KeyChord, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
@@ -365,6 +366,7 @@ fn parse_jump_target_region_mode(value: &str) -> Option<JumpTargetRegionMode> {
 struct JumpConfig {
     mode: JumpMode,
     cursor_between_stages: CursorBetweenStagesMode,
+    visuals: JumpVisualsConfig,
     coarse: JumpStageConfig,
     fine: JumpStageConfig,
     precise: JumpStageConfig,
@@ -375,6 +377,7 @@ impl Default for JumpConfig {
         Self {
             mode: JumpMode::Single,
             cursor_between_stages: CursorBetweenStagesMode::None,
+            visuals: JumpVisualsConfig::default(),
             coarse: JumpStageConfig::missing_coarse(),
             fine: JumpStageConfig {
                 enabled: false,
@@ -416,6 +419,7 @@ struct JumpConfigToml {
     mode: JumpMode,
     cursor_between_stages: Option<CursorBetweenStagesMode>,
     move_cursor_after_each_stage: Option<bool>,
+    visuals: JumpVisualsConfig,
     coarse: JumpStageConfig,
     fine: JumpStageConfig,
     precise: JumpStageConfig,
@@ -428,6 +432,7 @@ impl Default for JumpConfigToml {
             mode: default.mode,
             cursor_between_stages: None,
             move_cursor_after_each_stage: None,
+            visuals: default.visuals,
             coarse: default.coarse,
             fine: default.fine,
             precise: default.precise,
@@ -452,10 +457,45 @@ impl<'de> Deserialize<'de> for JumpConfig {
         Ok(Self {
             mode: fields.mode,
             cursor_between_stages,
+            visuals: fields.visuals,
             coarse: fields.coarse,
             fine: fields.fine,
             precise: fields.precise,
         })
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct JumpVisualsConfig {
+    selected_region_outline: bool,
+    preview_outline: bool,
+    active_grid_outline: bool,
+    cell_centers: bool,
+    final_crosshair: bool,
+}
+
+impl Default for JumpVisualsConfig {
+    fn default() -> Self {
+        Self {
+            selected_region_outline: true,
+            preview_outline: true,
+            active_grid_outline: true,
+            cell_centers: false,
+            final_crosshair: true,
+        }
+    }
+}
+
+impl From<JumpVisualsConfig> for JumpVisuals {
+    fn from(config: JumpVisualsConfig) -> Self {
+        Self {
+            selected_region_outline: config.selected_region_outline,
+            preview_outline: config.preview_outline,
+            active_grid_outline: config.active_grid_outline,
+            cell_centers: config.cell_centers,
+            final_crosshair: config.final_crosshair,
+        }
     }
 }
 
@@ -1535,6 +1575,7 @@ mod tests {
             config.jump.cursor_between_stages,
             defaults.jump.cursor_between_stages
         );
+        assert_eq!(config.jump.visuals, defaults.jump.visuals);
         assert_eq!(config.jump.coarse.width, defaults.grid_size.width);
         assert_eq!(config.jump.coarse.height, defaults.grid_size.height);
         assert_eq!(config.wheel, defaults.wheel);
@@ -1549,6 +1590,31 @@ mod tests {
         );
         assert_eq!(config.system_bindings.exit, defaults.system_bindings.exit);
         assert!(config.key_bindings.is_empty());
+    }
+
+    #[test]
+    fn jump_visual_flags_parse_from_config() {
+        let config = parse_config(
+            r#"
+            [jump.visuals]
+            selected_region_outline = false
+            preview_outline = true
+            active_grid_outline = false
+            cell_centers = true
+            final_crosshair = false
+            "#,
+        );
+
+        assert_eq!(
+            config.jump.visuals,
+            JumpVisualsConfig {
+                selected_region_outline: false,
+                preview_outline: true,
+                active_grid_outline: false,
+                cell_centers: true,
+                final_crosshair: false,
+            }
+        );
     }
 
     #[test]
