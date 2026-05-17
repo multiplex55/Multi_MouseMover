@@ -27,6 +27,7 @@ pub enum Action {
     RightClick,
     MiddleClick,
     ClickThenDisable,
+    ToggleDragMode,
 
     // Wheel actions.
     WheelUp,
@@ -64,6 +65,9 @@ impl Action {
             "right_click" => Some(Self::RightClick),
             "middle_click" | "middle_mouse" => Some(Self::MiddleClick),
             "click_then_disable" => Some(Self::ClickThenDisable),
+            "toggle_drag_mode" | "drag_mode" | "toggle_left_drag" | "toggle_left_button_hold" => {
+                Some(Self::ToggleDragMode)
+            }
             "wheel_up" | "scroll_up" => Some(Self::WheelUp),
             "wheel_down" | "scroll_down" => Some(Self::WheelDown),
             "wheel_left" | "scroll_left" => Some(Self::WheelLeft),
@@ -129,6 +133,7 @@ mod tests {
             ("wheel_speed_down", Action::WheelSpeedDown),
             ("center_current_monitor", Action::CenterCurrentMonitor),
             ("click_then_disable", Action::ClickThenDisable),
+            ("toggle_drag_mode", Action::ToggleDragMode),
             ("move_to_top_edge", Action::MoveToTopEdge),
             ("move_to_bottom_edge", Action::MoveToBottomEdge),
             ("move_to_left_edge", Action::MoveToLeftEdge),
@@ -149,6 +154,9 @@ mod tests {
             ("scroll_left", Action::WheelLeft),
             ("scroll_right", Action::WheelRight),
             ("center_monitor", Action::CenterCurrentMonitor),
+            ("drag_mode", Action::ToggleDragMode),
+            ("toggle_left_drag", Action::ToggleDragMode),
+            ("toggle_left_button_hold", Action::ToggleDragMode),
         ];
 
         for (input, expected) in cases {
@@ -206,6 +214,7 @@ mod tests {
             Action::RightClick,
             Action::MiddleClick,
             Action::ClickThenDisable,
+            Action::ToggleDragMode,
             Action::WheelUp,
             Action::WheelDown,
             Action::WheelLeft,
@@ -257,6 +266,7 @@ mod tests {
             Action::RightClick,
             Action::MiddleClick,
             Action::ClickThenDisable,
+            Action::ToggleDragMode,
             Action::WheelSpeedUp,
             Action::WheelSpeedDown,
             Action::Exit,

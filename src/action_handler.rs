@@ -27,6 +27,8 @@ pub enum FinalAdjustControl {
 
 pub trait MouseBackend {
     fn click(&mut self, button: Button) -> Result<(), String>;
+    fn press(&mut self, button: Button) -> Result<(), String>;
+    fn release(&mut self, button: Button) -> Result<(), String>;
     fn move_abs(&mut self, x: i32, y: i32) -> Result<(), String>;
     fn location(&self) -> Result<(i32, i32), String>;
     fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), String>;
@@ -48,6 +50,18 @@ impl MouseBackend for EnigoMouseBackend {
     fn click(&mut self, button: Button) -> Result<(), String> {
         self.enigo
             .button(button, Direction::Click)
+            .map_err(|e| e.to_string())
+    }
+
+    fn press(&mut self, button: Button) -> Result<(), String> {
+        self.enigo
+            .button(button, Direction::Press)
+            .map_err(|e| e.to_string())
+    }
+
+    fn release(&mut self, button: Button) -> Result<(), String> {
+        self.enigo
+            .button(button, Direction::Release)
             .map_err(|e| e.to_string())
     }
 
@@ -128,6 +142,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::ClickThenDisable => {
                 self.left_click();
             }
+            Action::ToggleDragMode => self.toggle_drag_mode(),
             Action::WheelUp => self.wheel_up(),
             Action::WheelDown => self.wheel_down(),
             Action::WheelLeft => self.wheel_left(),
@@ -174,6 +189,22 @@ impl<B: MouseBackend> MouseMaster<B> {
     fn release_left_click(&mut self) {
         println!("[DEBUG] Left Click Released!");
         self.left_click_held = false; // ✅ Reset state
+    }
+
+    fn toggle_drag_mode(&mut self) {
+        if self.left_click_held {
+            if let Err(e) = self.backend.release(Button::Left) {
+                eprintln!("Failed to release left button: {e}");
+                return;
+            }
+            self.left_click_held = false;
+        } else {
+            if let Err(e) = self.backend.press(Button::Left) {
+                eprintln!("Failed to hold left button: {e}");
+                return;
+            }
+            self.left_click_held = true;
+        }
     }
 
     /// Simulates a right mouse click
@@ -558,6 +589,8 @@ mod tests {
     struct FakeBackend {
         location: (i32, i32),
         clicks: Vec<Button>,
+        presses: Vec<Button>,
+        releases: Vec<Button>,
         moves: Vec<(i32, i32)>,
         scrolls: Vec<(i32, Axis)>,
     }
@@ -565,6 +598,16 @@ mod tests {
     impl MouseBackend for FakeBackend {
         fn click(&mut self, button: Button) -> Result<(), String> {
             self.clicks.push(button);
+            Ok(())
+        }
+
+        fn press(&mut self, button: Button) -> Result<(), String> {
+            self.presses.push(button);
+            Ok(())
+        }
+
+        fn release(&mut self, button: Button) -> Result<(), String> {
+            self.releases.push(button);
             Ok(())
         }
 
@@ -756,6 +799,19 @@ mod tests {
                 (mouse.current_wheel_speed, Axis::Horizontal)
             ]
         );
+    }
+
+    #[test]
+    fn toggle_drag_mode_holds_and_releases_left_button() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::ToggleDragMode);
+        assert!(mouse.left_click_held);
+        assert_eq!(mouse.backend.presses, vec![Button::Left]);
+
+        mouse.handle_action(Action::ToggleDragMode);
+        assert!(!mouse.left_click_held);
+        assert_eq!(mouse.backend.releases, vec![Button::Left]);
     }
 
     #[test]

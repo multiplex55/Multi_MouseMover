@@ -8,6 +8,7 @@ key_bindings = [
     ["RightShift", "slow_mouse"],
     ["S", "move_down"],
     ["SPACE", "left_click"],
+    ["N", "toggle_drag_mode"],
     ["F", "jump_mode"],
     ["W", "move_up"],
     [";", "middle_click"],

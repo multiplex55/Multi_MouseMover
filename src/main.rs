@@ -1706,6 +1706,8 @@ mod tests {
     struct FakeBackend {
         location: (i32, i32),
         clicks: Vec<Button>,
+        presses: Vec<Button>,
+        releases: Vec<Button>,
         moves: Vec<(i32, i32)>,
         scrolls: Vec<(i32, Axis)>,
     }
@@ -1713,6 +1715,16 @@ mod tests {
     impl MouseBackend for FakeBackend {
         fn click(&mut self, button: Button) -> Result<(), String> {
             self.clicks.push(button);
+            Ok(())
+        }
+
+        fn press(&mut self, button: Button) -> Result<(), String> {
+            self.presses.push(button);
+            Ok(())
+        }
+
+        fn release(&mut self, button: Button) -> Result<(), String> {
+            self.releases.push(button);
             Ok(())
         }
 
@@ -1821,6 +1833,7 @@ mod tests {
             key_bindings = [
                 ["A", "move_left"],
                 ["D", "move_right"],
+                ["N", "toggle_drag_mode"],
                 [";", "middle_click"],
                 [",", "wheel_up"],
                 ["M", "wheel_down"],
@@ -1841,6 +1854,7 @@ mod tests {
         let expected = [
             ("A", Action::MoveLeft),
             ("D", Action::MoveRight),
+            ("N", Action::ToggleDragMode),
             (";", Action::MiddleClick),
             (",", Action::WheelUp),
             ("M", Action::WheelDown),
@@ -2397,6 +2411,7 @@ mod tests {
         assert!(!Action::MoveToTopEdge.is_continuous());
         assert!(!Action::WheelSpeedUp.is_continuous());
         assert!(!Action::ClickThenDisable.is_continuous());
+        assert!(!Action::ToggleDragMode.is_continuous());
     }
 
     #[test]
