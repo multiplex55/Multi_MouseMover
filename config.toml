@@ -37,7 +37,9 @@ grid_size = {width = 10, height = 10}
 
 [jump]
 mode = "precision"
-move_cursor_after_each_stage = false
+cursor_between_stages = "none"
+start_region = "virtual_screen"
+preview_edge_behavior = "clamp"
 
 [jump.visuals]
 selected_region_outline = true
@@ -69,6 +71,14 @@ aim_offset_x_px = 0
 aim_offset_y_px = 0
 target_margin_percent = 0
 visual_context_margin_percent = 0
+zoom_scale = 1.0
+target_region_mode = "exact_region"
+
+[jump.coarse.labels]
+font_scale = 1.0
+center_marker = false
+separators = true
+hide_threshold_px = 0
 
 [jump.fine]
 enabled = true
@@ -79,6 +89,14 @@ aim_offset_x_px = 0
 aim_offset_y_px = 0
 target_margin_percent = 0
 visual_context_margin_percent = 1
+zoom_scale = 1.5
+target_region_mode = "exact_region"
+
+[jump.fine.labels]
+font_scale = 1.0
+center_marker = false
+separators = true
+hide_threshold_px = 0
 
 [jump.precise]
 enabled = true
@@ -89,6 +107,14 @@ aim_offset_x_px = 0
 aim_offset_y_px = 0
 target_margin_percent = 0
 visual_context_margin_percent = 5
+zoom_scale = 2.5
+target_region_mode = "exact_region"
+
+[jump.precise.labels]
+font_scale = 1.0
+center_marker = false
+separators = true
+hide_threshold_px = 0
 
 [final_adjust]
 enabled = false

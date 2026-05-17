@@ -1785,6 +1785,16 @@ mod tests {
         toml::from_str::<Config>(toml).unwrap().normalize().unwrap()
     }
 
+    fn parse_config_error(toml: &str) -> String {
+        match toml::from_str::<Config>(toml) {
+            Ok(config) => config
+                .normalize()
+                .expect_err("config should fail normalization")
+                .to_string(),
+            Err(err) => err.to_string(),
+        }
+    }
+
     fn jump_region() -> crate::jump_session::JumpRegion {
         crate::jump_session::JumpRegion {
             left: 0,
@@ -2016,17 +2026,29 @@ mod tests {
 
     #[test]
     fn jump_cursor_between_stages_is_configurable() {
-        let config = parse_config(
-            r#"
-            [jump]
-            cursor_between_stages = "preview_only"
-            "#,
-        );
+        let cases = [
+            ("none", CursorBetweenStagesMode::None),
+            (
+                "move_to_region_center",
+                CursorBetweenStagesMode::MoveToRegionCenter,
+            ),
+            ("preview_only", CursorBetweenStagesMode::PreviewOnly),
+            (
+                "warp_and_continue",
+                CursorBetweenStagesMode::WarpAndContinue,
+            ),
+        ];
 
-        assert_eq!(
-            config.jump.cursor_between_stages,
-            CursorBetweenStagesMode::PreviewOnly
-        );
+        for (value, expected) in cases {
+            let config = parse_config(&format!(
+                r#"
+                [jump]
+                cursor_between_stages = "{value}"
+                "#
+            ));
+
+            assert_eq!(config.jump.cursor_between_stages, expected);
+        }
     }
 
     #[test]
@@ -2113,9 +2135,61 @@ mod tests {
     fn jump_stage_zoom_defaults_are_per_stage() {
         let config = Config::default().normalize().unwrap();
 
+        assert_eq!(
+            config.jump.coarse.target_region_mode,
+            JumpTargetRegionMode::ExactRegion
+        );
         assert_eq!(config.jump.coarse.zoom_scale, 1.0);
+        assert_eq!(
+            config.jump.fine.target_region_mode,
+            JumpTargetRegionMode::ExactRegion
+        );
         assert_eq!(config.jump.fine.zoom_scale, 1.5);
+        assert_eq!(
+            config.jump.precise.target_region_mode,
+            JumpTargetRegionMode::ExactRegion
+        );
         assert_eq!(config.jump.precise.zoom_scale, 2.5);
+    }
+
+    #[test]
+    fn jump_stage_target_region_mode_and_zoom_parse_per_stage() {
+        let config = parse_config(
+            r#"
+            [jump]
+            mode = "precision"
+
+            [jump.coarse]
+            target_region_mode = "region_with_context"
+            zoom_scale = 1.25
+
+            [jump.fine]
+            enabled = true
+            target_region_mode = "expanded_target"
+            zoom_scale = 2.0
+
+            [jump.precise]
+            enabled = true
+            target_region_mode = "cursor_centered_zoom"
+            zoom_scale = 3.5
+            "#,
+        );
+
+        assert_eq!(
+            config.jump.coarse.target_region_mode,
+            JumpTargetRegionMode::RegionWithContext
+        );
+        assert_eq!(config.jump.coarse.zoom_scale, 1.25);
+        assert_eq!(
+            config.jump.fine.target_region_mode,
+            JumpTargetRegionMode::ExpandedTarget
+        );
+        assert_eq!(config.jump.fine.zoom_scale, 2.0);
+        assert_eq!(
+            config.jump.precise.target_region_mode,
+            JumpTargetRegionMode::CursorCenteredZoom
+        );
+        assert_eq!(config.jump.precise.zoom_scale, 3.5);
     }
 
     #[test]
@@ -2250,6 +2324,21 @@ mod tests {
     }
 
     #[test]
+    fn nested_label_config_keeps_predictable_defaults() {
+        let config = parse_config(
+            r#"
+            [jump.fine.labels]
+            center_marker = true
+            "#,
+        );
+
+        assert_eq!(config.jump.fine.labels.font_scale, 1.0);
+        assert!(config.jump.fine.labels.center_marker);
+        assert!(config.jump.fine.labels.separators);
+        assert_eq!(config.jump.fine.labels.hide_threshold_px, 0);
+    }
+
+    #[test]
     fn invalid_jump_target_region_mode_falls_back_to_exact_region() {
         let config = parse_config(
             r#"
@@ -2262,6 +2351,34 @@ mod tests {
             config.jump.coarse.target_region_mode,
             JumpTargetRegionMode::ExactRegion
         );
+    }
+
+    #[test]
+    fn invalid_jump_enum_values_return_clear_parse_errors() {
+        for toml in [
+            r#"
+            [jump]
+            cursor_between_stages = "after_each_stage"
+            "#,
+            r#"
+            [jump]
+            start_region = "focused_window"
+            "#,
+            r#"
+            [jump]
+            preview_edge_behavior = "stretch"
+            "#,
+            r#"
+            [jump.coarse]
+            aim_point = "middle"
+            "#,
+        ] {
+            let err = parse_config_error(toml);
+            assert!(
+                err.contains("unknown variant"),
+                "expected unknown variant error, got: {err}"
+            );
+        }
     }
 
     #[test]
