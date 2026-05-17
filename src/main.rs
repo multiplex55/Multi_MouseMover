@@ -16,9 +16,10 @@ mod screen_capture;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, JumpOverlayResolution, KeyEvent};
+#[cfg(test)]
+use indicator::IndicatorState;
 use indicator::{
-    resolve_indicator_snapshot, resolve_indicator_state, IndicatorInput, IndicatorState,
-    MouseIndicatorInput, WheelIndicatorInput,
+    resolve_indicator_snapshot, IndicatorInput, MouseIndicatorInput, WheelIndicatorInput,
 };
 use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
@@ -3488,7 +3489,7 @@ mod tests {
             .mouse_master
             .handle_action(Action::MouseSpeedUp);
 
-        let indicator = resolve_indicator_state(IndicatorInput {
+        let indicator = resolve_indicator_snapshot(IndicatorInput {
             app_active: true,
             jump_active: false,
             jump_stage: None,
@@ -3505,7 +3506,8 @@ mod tests {
                 default_speed: action_handler.mouse_master.config.wheel.default_speed,
             },
             left_button_held: false,
-        });
+        })
+        .state;
 
         assert_eq!(indicator, IndicatorState::MouseSpeedFast);
     }
@@ -3531,7 +3533,7 @@ mod tests {
             .mouse_master
             .handle_action(Action::MouseSpeedReset);
 
-        let indicator = resolve_indicator_state(IndicatorInput {
+        let indicator = resolve_indicator_snapshot(IndicatorInput {
             app_active: true,
             jump_active: false,
             jump_stage: None,
@@ -3548,7 +3550,8 @@ mod tests {
                 default_speed: action_handler.mouse_master.config.wheel.default_speed,
             },
             left_button_held: false,
-        });
+        })
+        .state;
 
         assert_eq!(indicator, IndicatorState::MouseSpeedNormal);
     }

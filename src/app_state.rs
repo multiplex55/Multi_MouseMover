@@ -629,7 +629,7 @@ fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
 mod tests {
     use super::*;
     use crate::indicator::{
-        resolve_indicator_state, IndicatorInput, IndicatorState, MouseIndicatorInput,
+        resolve_indicator_snapshot, IndicatorInput, IndicatorState, MouseIndicatorInput,
         WheelIndicatorInput,
     };
     use crate::key_chord::KeyChord;
@@ -954,7 +954,7 @@ mod tests {
         state.route_key_event(KeyEvent::new(VirtualKey::W, true), Some(Action::MoveUp));
 
         let active_actions = HashSet::from([Action::MoveUp]);
-        let indicator = resolve_indicator_state(IndicatorInput {
+        let indicator = resolve_indicator_snapshot(IndicatorInput {
             app_active: state.active_mode(),
             jump_active: state.is_jump_active(),
             jump_stage: state.jump_stage_status(),
@@ -971,7 +971,8 @@ mod tests {
                 default_speed: 3,
             },
             left_button_held: true,
-        });
+        })
+        .state;
 
         assert_eq!(collect_commands(&mut state), Vec::new());
         assert_eq!(indicator, IndicatorState::Hidden);

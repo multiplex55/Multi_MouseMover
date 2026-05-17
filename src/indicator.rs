@@ -65,10 +65,6 @@ pub struct IndicatorInput<'a> {
     pub left_button_held: bool,
 }
 
-pub fn resolve_indicator_state(input: IndicatorInput<'_>) -> IndicatorState {
-    resolve_indicator_snapshot(input).state
-}
-
 pub fn resolve_indicator_snapshot(input: IndicatorInput<'_>) -> IndicatorSnapshot {
     let slow = input.active_actions.contains(&Action::SlowMouse);
     let wheel_direction_active = input
@@ -172,7 +168,7 @@ mod tests {
         default_mouse_speed: i32,
         left_button_held: bool,
     ) -> IndicatorState {
-        resolve_indicator_state(IndicatorInput {
+        resolve_indicator_snapshot(IndicatorInput {
             app_active,
             jump_active,
             jump_stage: jump_active.then_some((1, 1)),
@@ -190,6 +186,7 @@ mod tests {
             },
             left_button_held,
         })
+        .state
     }
 
     #[test]
