@@ -100,6 +100,10 @@ pub enum JumpSessionUpdate {
         stage_index: usize,
         region: JumpRegion,
     },
+    StageBacktracked {
+        stage_index: usize,
+        region: JumpRegion,
+    },
     Completed {
         x: i32,
         y: i32,
@@ -204,11 +208,33 @@ impl JumpSession {
                 self.input.clear();
                 Some(JumpSessionUpdate::Cancelled)
             }
-            VirtualKey::Backspace => {
-                self.input.pop();
-                Some(JumpSessionUpdate::Consumed)
-            }
+            VirtualKey::Backspace => Some(self.handle_backspace()),
             _ => self.handle_character_key(key),
+        }
+    }
+
+    fn handle_backspace(&mut self) -> JumpSessionUpdate {
+        if self.input.pop().is_some() {
+            return JumpSessionUpdate::Consumed;
+        }
+
+        if self.stage_index == 0 {
+            return JumpSessionUpdate::Consumed;
+        }
+
+        self.stage_index -= 1;
+        self.path.pop();
+        self.region_history.pop();
+        self.current_region = self
+            .region_history
+            .last()
+            .copied()
+            .unwrap_or(self.session_region);
+        self.input.clear();
+
+        JumpSessionUpdate::StageBacktracked {
+            stage_index: self.stage_index,
+            region: self.current_region,
         }
     }
 
@@ -878,18 +904,88 @@ mod tests {
 
         assert_eq!(
             press(&mut session, VirtualKey::Backspace),
-            Some(JumpSessionUpdate::Consumed)
+            Some(JumpSessionUpdate::StageBacktracked {
+                stage_index: 0,
+                region: base_region(),
+            })
         );
         assert_eq!(session.input, "");
-        assert_eq!(session.stage_index, 1);
+        assert_eq!(session.stage_index, 0);
+        assert_eq!(session.current_region, base_region());
+        assert!(session.path.is_empty());
+        assert_eq!(session.region_history, vec![base_region()]);
+    }
+
+    #[test]
+    fn backspace_behavior_matrix_by_stage_and_input_state() {
+        let mut stage_zero_with_input = staged_session();
         assert_eq!(
-            session.current_region,
-            JumpRegion {
-                left: 200,
-                top: 100,
-                width: 100,
-                height: 100,
-            }
+            press(&mut stage_zero_with_input, VirtualKey::A),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            press(&mut stage_zero_with_input, VirtualKey::Backspace),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(stage_zero_with_input.input, "");
+        assert_eq!(stage_zero_with_input.stage_index, 0);
+
+        let mut stage_zero_empty = staged_session();
+        assert_eq!(
+            press(&mut stage_zero_empty, VirtualKey::Backspace),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(stage_zero_empty.stage_index, 0);
+
+        let mut later_stage_with_input = staged_session();
+        enter_code(&mut later_stage_with_input, &[VirtualKey::B, VirtualKey::C]);
+        assert_eq!(
+            press(&mut later_stage_with_input, VirtualKey::D),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            press(&mut later_stage_with_input, VirtualKey::Backspace),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(later_stage_with_input.input, "");
+        assert_eq!(later_stage_with_input.stage_index, 1);
+
+        let mut later_stage_empty = staged_session();
+        enter_code(&mut later_stage_empty, &[VirtualKey::B, VirtualKey::C]);
+        assert_eq!(
+            press(&mut later_stage_empty, VirtualKey::Backspace),
+            Some(JumpSessionUpdate::StageBacktracked {
+                stage_index: 0,
+                region: base_region(),
+            })
+        );
+        assert_eq!(later_stage_empty.stage_index, 0);
+    }
+
+    #[test]
+    fn backspace_restores_region_history_and_path_after_backtrack() {
+        let mut session = staged_session();
+        enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]);
+        let stage_one_region = session.current_region;
+        enter_code(&mut session, &[VirtualKey::D, VirtualKey::E]);
+
+        assert_eq!(session.stage_index, 2);
+        assert_eq!(session.path, vec![(1, 2), (3, 4)]);
+        assert_eq!(session.region_history.len(), 3);
+
+        assert_eq!(
+            press(&mut session, VirtualKey::Backspace),
+            Some(JumpSessionUpdate::StageBacktracked {
+                stage_index: 1,
+                region: stage_one_region,
+            })
+        );
+        assert_eq!(session.stage_index, 1);
+        assert_eq!(session.current_region, stage_one_region);
+        assert_eq!(session.path, vec![(1, 2)]);
+        assert_eq!(
+            session.region_history,
+            vec![base_region(), stage_one_region]
         );
     }
 }

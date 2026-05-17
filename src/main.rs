@@ -275,6 +275,21 @@ impl Default for JumpMode {
     }
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum CursorBetweenStagesMode {
+    None,
+    MoveToRegionCenter,
+    PreviewOnly,
+    WarpAndContinue,
+}
+
+impl Default for CursorBetweenStagesMode {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JumpTargetRegionMode {
     ExactRegion,
@@ -299,11 +314,10 @@ fn parse_jump_target_region_mode(value: &str) -> Option<JumpTargetRegionMode> {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
-#[serde(default)]
+#[derive(Debug, Clone)]
 struct JumpConfig {
     mode: JumpMode,
-    move_cursor_after_each_stage: bool,
+    cursor_between_stages: CursorBetweenStagesMode,
     coarse: JumpStageConfig,
     fine: JumpStageConfig,
     precise: JumpStageConfig,
@@ -313,7 +327,7 @@ impl Default for JumpConfig {
     fn default() -> Self {
         Self {
             mode: JumpMode::Single,
-            move_cursor_after_each_stage: false,
+            cursor_between_stages: CursorBetweenStagesMode::None,
             coarse: JumpStageConfig::missing_coarse(),
             fine: JumpStageConfig {
                 enabled: false,
@@ -340,6 +354,55 @@ impl Default for JumpConfig {
                 target_region_mode_invalid: false,
             },
         }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+struct JumpConfigToml {
+    mode: JumpMode,
+    cursor_between_stages: Option<CursorBetweenStagesMode>,
+    move_cursor_after_each_stage: Option<bool>,
+    coarse: JumpStageConfig,
+    fine: JumpStageConfig,
+    precise: JumpStageConfig,
+}
+
+impl Default for JumpConfigToml {
+    fn default() -> Self {
+        let default = JumpConfig::default();
+        Self {
+            mode: default.mode,
+            cursor_between_stages: None,
+            move_cursor_after_each_stage: None,
+            coarse: default.coarse,
+            fine: default.fine,
+            precise: default.precise,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for JumpConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let fields = JumpConfigToml::deserialize(deserializer)?;
+        let cursor_between_stages = fields.cursor_between_stages.unwrap_or_else(|| {
+            if fields.move_cursor_after_each_stage.unwrap_or(false) {
+                CursorBetweenStagesMode::MoveToRegionCenter
+            } else {
+                CursorBetweenStagesMode::None
+            }
+        });
+
+        Ok(Self {
+            mode: fields.mode,
+            cursor_between_stages,
+            coarse: fields.coarse,
+            fine: fields.fine,
+            precise: fields.precise,
+        })
     }
 }
 
@@ -863,6 +926,20 @@ fn sync_jump_overlay(resolution: JumpOverlayResolution) {
     }
 }
 
+fn apply_cursor_between_stages<B: MouseBackend>(
+    action_handler: &mut ActionHandler<B>,
+    mode: CursorBetweenStagesMode,
+    region: jump_session::JumpRegion,
+) {
+    match mode {
+        CursorBetweenStagesMode::None | CursorBetweenStagesMode::PreviewOnly => {}
+        CursorBetweenStagesMode::MoveToRegionCenter | CursorBetweenStagesMode::WarpAndContinue => {
+            let (x, y) = region.center();
+            action_handler.mouse_master.move_mouse_to(x, y);
+        }
+    }
+}
+
 fn set_active_mode(active: bool) {
     {
         let mut action_handler = ACTION_HANDLER.write().unwrap();
@@ -996,7 +1073,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     None
                     | Some(JumpSessionUpdate::Consumed)
                     | Some(JumpSessionUpdate::Invalid)
-                    | Some(JumpSessionUpdate::StageAdvanced { .. }) => app_state.jump_view(),
+                    | Some(JumpSessionUpdate::StageAdvanced { .. })
+                    | Some(JumpSessionUpdate::StageBacktracked { .. }) => app_state.jump_view(),
                     Some(JumpSessionUpdate::Cancelled | JumpSessionUpdate::Completed { .. }) => {
                         None
                     }
@@ -1011,21 +1089,18 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     }
                 }
                 Some(JumpSessionUpdate::StageAdvanced { region, .. }) => {
-                    let move_cursor_after_each_stage = ACTION_HANDLER
-                        .read()
-                        .unwrap()
+                    let mut action_handler = ACTION_HANDLER.write().unwrap();
+                    let mode = action_handler
                         .mouse_master
                         .config
                         .jump
-                        .move_cursor_after_each_stage;
-                    if move_cursor_after_each_stage {
-                        let (x, y) = region.center();
-                        ACTION_HANDLER
-                            .write()
-                            .unwrap()
-                            .mouse_master
-                            .move_mouse_to(x, y);
+                        .cursor_between_stages;
+                    apply_cursor_between_stages(&mut action_handler, mode, region);
+                    if let Some(view) = view {
+                        update_jump_overlay(view);
                     }
+                }
+                Some(JumpSessionUpdate::StageBacktracked { .. }) => {
                     if let Some(view) = view {
                         update_jump_overlay(view);
                     }
@@ -1302,8 +1377,8 @@ mod tests {
         assert_eq!(config.grid_size.height, defaults.grid_size.height);
         assert_eq!(config.jump.mode, defaults.jump.mode);
         assert_eq!(
-            config.jump.move_cursor_after_each_stage,
-            defaults.jump.move_cursor_after_each_stage
+            config.jump.cursor_between_stages,
+            defaults.jump.cursor_between_stages
         );
         assert_eq!(config.jump.coarse.width, defaults.grid_size.width);
         assert_eq!(config.jump.coarse.height, defaults.grid_size.height);
@@ -1471,15 +1546,98 @@ mod tests {
     }
 
     #[test]
-    fn jump_move_cursor_after_each_stage_is_configurable() {
+    fn jump_cursor_between_stages_is_configurable() {
         let config = parse_config(
+            r#"
+            [jump]
+            cursor_between_stages = "preview_only"
+            "#,
+        );
+
+        assert_eq!(
+            config.jump.cursor_between_stages,
+            CursorBetweenStagesMode::PreviewOnly
+        );
+    }
+
+    #[test]
+    fn legacy_jump_move_cursor_after_each_stage_maps_to_cursor_mode() {
+        let enabled = parse_config(
             r#"
             [jump]
             move_cursor_after_each_stage = true
             "#,
         );
+        let disabled = parse_config(
+            r#"
+            [jump]
+            move_cursor_after_each_stage = false
+            "#,
+        );
 
-        assert!(config.jump.move_cursor_after_each_stage);
+        assert_eq!(
+            enabled.jump.cursor_between_stages,
+            CursorBetweenStagesMode::MoveToRegionCenter
+        );
+        assert_eq!(
+            disabled.jump.cursor_between_stages,
+            CursorBetweenStagesMode::None
+        );
+    }
+
+    #[test]
+    fn cursor_between_stages_takes_precedence_over_legacy_bool() {
+        let config = parse_config(
+            r#"
+            [jump]
+            cursor_between_stages = "preview_only"
+            move_cursor_after_each_stage = true
+            "#,
+        );
+
+        assert_eq!(
+            config.jump.cursor_between_stages,
+            CursorBetweenStagesMode::PreviewOnly
+        );
+    }
+
+    #[test]
+    fn cursor_between_stage_mode_dispatch_controls_warping() {
+        let region = crate::jump_session::JumpRegion {
+            left: 20,
+            top: 40,
+            width: 10,
+            height: 20,
+        };
+
+        for mode in [
+            CursorBetweenStagesMode::None,
+            CursorBetweenStagesMode::PreviewOnly,
+        ] {
+            let mouse_master =
+                MouseMaster::new_with_backend(Config::default(), FakeBackend::default());
+            let mut action_handler = ActionHandler::new(mouse_master);
+
+            apply_cursor_between_stages(&mut action_handler, mode, region);
+
+            assert!(
+                action_handler.mouse_master.backend.moves.is_empty(),
+                "{mode:?} must not warp the cursor"
+            );
+        }
+
+        for mode in [
+            CursorBetweenStagesMode::MoveToRegionCenter,
+            CursorBetweenStagesMode::WarpAndContinue,
+        ] {
+            let mouse_master =
+                MouseMaster::new_with_backend(Config::default(), FakeBackend::default());
+            let mut action_handler = ActionHandler::new(mouse_master);
+
+            apply_cursor_between_stages(&mut action_handler, mode, region);
+
+            assert_eq!(action_handler.mouse_master.backend.moves, vec![(25, 50)]);
+        }
     }
 
     #[test]

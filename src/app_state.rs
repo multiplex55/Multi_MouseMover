@@ -924,6 +924,64 @@ mod tests {
     }
 
     #[test]
+    fn jump_view_rehydrates_input_and_region_after_stage_backtrack() {
+        let mut config = Config::default();
+        config.jump.mode = crate::JumpMode::Precision;
+        config.jump.coarse.width = 5;
+        config.jump.coarse.height = 5;
+        config.jump.fine.enabled = true;
+        config.jump.fine.width = 5;
+        config.jump.fine.height = 5;
+        let config = config.normalize().unwrap();
+
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true)),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true)),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: JumpRegion {
+                    left: 20,
+                    top: 20,
+                    width: 20,
+                    height: 20,
+                },
+            })
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::D, true)),
+            Some(JumpSessionUpdate::Consumed)
+        );
+
+        let before_backtrack = state.jump_view().unwrap();
+        assert_eq!(before_backtrack.stage_index, 1);
+        assert_eq!(before_backtrack.input, "D");
+
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::Backspace, true)),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::Backspace, true)),
+            Some(JumpSessionUpdate::StageBacktracked {
+                stage_index: 0,
+                region: jump_region(),
+            })
+        );
+
+        let view = state.jump_view().unwrap();
+        assert_eq!(view.stage_index, 0);
+        assert_eq!(view.input, "");
+        assert_eq!(view.session_region, jump_region());
+        assert_eq!(view.target_region, jump_region());
+        assert_eq!(view.grid_size, (5, 5));
+    }
+
+    #[test]
     fn zoom_scale_does_not_change_jump_subdivision_math() {
         let mut low_zoom = Config::default();
         low_zoom.jump.mode = crate::JumpMode::Precision;
