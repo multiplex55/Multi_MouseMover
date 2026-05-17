@@ -401,10 +401,10 @@ impl Config {
         let mut key_actions = KEY_ACTIONS.write().unwrap(); // Acquire write lock
 
         for (key, action_str) in &self.key_bindings {
-            if let Some(virtual_key) = VirtualKey::from_string(key) {
+            if let Ok(chord) = KeyChord::parse(key) {
                 if let Some(action) = Action::from_string(action_str) {
-                    println!("✅ Binding key: {:?} -> {:?}", virtual_key, action);
-                    key_actions.add_binding(virtual_key, action);
+                    println!("✅ Binding key: {:?} -> {:?}", chord, action);
+                    key_actions.add_chord_binding(chord, action);
                 } else {
                     println!(
                         "❌ Action '{}' does not exist for key '{}'",
@@ -419,7 +419,7 @@ impl Config {
         APP_STATE
             .write()
             .unwrap()
-            .set_bound_keys(key_actions.bound_keys());
+            .set_bound_chords(key_actions.bound_chords());
     }
 
     fn initialize_system_bindings(&self) -> Result<(), Box<dyn Error>> {
@@ -480,13 +480,17 @@ fn modifier_down(vk_code: i32) -> bool {
 fn decode_key_event(w_param: WPARAM, kbd: KBDLLHOOKSTRUCT) -> Option<KeyEvent> {
     let key = VirtualKey::from_vk_code(kbd.vkCode)?;
     let is_down = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
-    let alt_down = (kbd.flags & LLKHF_ALTDOWN)
-        != windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0);
+    let right_alt_down =
+        modifier_down(VirtualKey::RightAlt.to_vk_code() as i32) || key == VirtualKey::RightAlt;
+    let alt_down = right_alt_down
+        || (kbd.flags & LLKHF_ALTDOWN)
+            != windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0);
 
     Some(KeyEvent {
         key,
         is_down,
         alt_down,
+        right_alt_down,
         ctrl_down: modifier_down(0x11)
             || key == VirtualKey::Ctrl
             || key == VirtualKey::LeftCtrl
@@ -559,7 +563,7 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
             break;
         };
 
-        let action = KEY_ACTIONS.read().unwrap().get_action(event.key).copied();
+        let action = KEY_ACTIONS.read().unwrap().get_action_for_event(&event);
 
         if debug_diagnostics && should_log_routing_event(&event, action) {
             println!(

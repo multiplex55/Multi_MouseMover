@@ -1,7 +1,7 @@
 use crate::action::Action;
 use crate::jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
 use crate::jump_view::{JumpOverlayView, JumpStageMetadata};
-use crate::key_chord::RuntimeSystemBindings;
+use crate::key_chord::{KeyChord, RuntimeSystemBindings};
 use crate::keyboard::VirtualKey;
 use crate::Config;
 use std::collections::{HashSet, VecDeque};
@@ -11,6 +11,7 @@ pub struct KeyEvent {
     pub key: VirtualKey,
     pub is_down: bool,
     pub alt_down: bool,
+    pub right_alt_down: bool,
     pub ctrl_down: bool,
     pub shift_down: bool,
     pub win_down: bool,
@@ -23,6 +24,7 @@ impl KeyEvent {
             key,
             is_down,
             alt_down: false,
+            right_alt_down: false,
             ctrl_down: false,
             shift_down: false,
             win_down: false,
@@ -43,8 +45,9 @@ pub enum AppCommand {
 pub struct AppState {
     key_events: VecDeque<KeyEvent>,
     commands: VecDeque<AppCommand>,
-    bound_keys: HashSet<VirtualKey>,
+    bound_chords: HashSet<KeyChord>,
     active_keys: HashSet<VirtualKey>,
+    active_trigger_chords: HashSet<KeyChord>,
     jump: JumpState,
     active_mode: bool,
     preserve_global_shortcuts: bool,
@@ -67,8 +70,9 @@ impl Default for AppState {
         Self {
             key_events: VecDeque::new(),
             commands: VecDeque::new(),
-            bound_keys: HashSet::new(),
+            bound_chords: HashSet::new(),
             active_keys: HashSet::new(),
+            active_trigger_chords: HashSet::new(),
             jump: JumpState::Inactive,
             active_mode: true,
             preserve_global_shortcuts: true,
@@ -98,13 +102,21 @@ impl AppState {
     where
         I: IntoIterator<Item = VirtualKey>,
     {
-        self.bound_keys = keys.into_iter().collect();
+        self.bound_chords = keys.into_iter().map(KeyChord::from_key).collect();
+    }
+
+    pub fn set_bound_chords<I>(&mut self, chords: I)
+    where
+        I: IntoIterator<Item = KeyChord>,
+    {
+        self.bound_chords = chords.into_iter().collect();
     }
 
     pub fn set_active_mode(&mut self, active_mode: bool) {
         self.active_mode = active_mode;
         if !active_mode {
             self.active_keys.clear();
+            self.active_trigger_chords.clear();
         }
     }
 
@@ -221,7 +233,16 @@ impl AppState {
             return false;
         }
 
-        self.active_mode && self.bound_keys.contains(&event.key)
+        self.active_mode
+            && (self
+                .bound_chords
+                .iter()
+                .any(|chord| chord.matches_event(event))
+                || (!event.is_down
+                    && self
+                        .active_trigger_chords
+                        .iter()
+                        .any(|chord| chord.key == event.key)))
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, action: Option<Action>) {
@@ -259,6 +280,9 @@ impl AppState {
 
         if event.is_down {
             self.active_keys.insert(event.key);
+            if action.is_some() {
+                self.track_active_trigger_chord(event);
+            }
         } else {
             self.active_keys.remove(&event.key);
         }
@@ -272,6 +296,11 @@ impl AppState {
 
         for command in self.commands_for_active_keys(event, action) {
             self.enqueue_command(command);
+        }
+
+        if !event.is_down {
+            self.active_trigger_chords
+                .retain(|chord| chord.key != event.key);
         }
     }
 
@@ -316,6 +345,18 @@ impl AppState {
         }
 
         false
+    }
+
+    fn track_active_trigger_chord(&mut self, event: KeyEvent) {
+        if let Some(chord) = self
+            .bound_chords
+            .iter()
+            .filter(|chord| chord.matches_event(&event))
+            .max_by_key(|chord| chord.specificity())
+            .copied()
+        {
+            self.active_trigger_chords.insert(chord);
+        }
     }
 
     fn is_preserved_shortcut(&self, event: &KeyEvent) -> bool {

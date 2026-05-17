@@ -3,11 +3,12 @@ use crate::keyboard::VirtualKey;
 use std::error::Error;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyChord {
     pub key: VirtualKey,
     pub ctrl: bool,
     pub alt: bool,
+    pub right_alt: bool,
     pub shift: bool,
     pub win: bool,
 }
@@ -16,6 +17,7 @@ impl KeyChord {
     pub fn parse(input: &str) -> Result<Self, KeyChordParseError> {
         let mut ctrl = false;
         let mut alt = false;
+        let mut right_alt = false;
         let mut shift = false;
         let mut win = false;
         let mut key = None;
@@ -32,6 +34,12 @@ impl KeyChord {
             match token.to_ascii_uppercase().as_str() {
                 "CTRL" | "CONTROL" => set_modifier(input, "Ctrl", &mut ctrl)?,
                 "ALT" => set_modifier(input, "Alt", &mut alt)?,
+                "RIGHTALT" | "RALT" | "RIGHT_ALT" => {
+                    set_modifier(input, "RightAlt", &mut right_alt)?;
+                    if !alt {
+                        alt = true;
+                    }
+                }
                 "SHIFT" => set_modifier(input, "Shift", &mut shift)?,
                 "WIN" | "SUPER" | "META" => set_modifier(input, "Win", &mut win)?,
                 _ => {
@@ -56,15 +64,32 @@ impl KeyChord {
             key,
             ctrl,
             alt,
+            right_alt,
             shift,
             win,
         })
+    }
+
+    pub fn from_key(key: VirtualKey) -> Self {
+        Self {
+            key,
+            ctrl: false,
+            alt: false,
+            right_alt: false,
+            shift: false,
+            win: false,
+        }
+    }
+
+    pub fn specificity(&self) -> u8 {
+        self.ctrl as u8 + self.alt as u8 + self.right_alt as u8 + self.shift as u8 + self.win as u8
     }
 
     pub fn matches_event(&self, event: &KeyEvent) -> bool {
         self.key == event.key
             && self.ctrl == event.ctrl_down
             && self.alt == event.alt_down
+            && (!self.right_alt || event.right_alt_down)
             && self.shift == event.shift_down
             && self.win == event.win_down
     }
@@ -92,6 +117,7 @@ impl Default for RuntimeSystemBindings {
                 key: VirtualKey::E,
                 ctrl: true,
                 alt: false,
+                right_alt: false,
                 shift: false,
                 win: false,
             },
@@ -99,6 +125,7 @@ impl Default for RuntimeSystemBindings {
                 key: VirtualKey::Escape,
                 ctrl: false,
                 alt: false,
+                right_alt: false,
                 shift: false,
                 win: false,
             },
@@ -144,11 +171,19 @@ fn set_modifier(input: &str, modifier: &str, target: &mut bool) -> Result<(), Ke
 mod tests {
     use super::*;
 
-    fn chord(key: VirtualKey, ctrl: bool, alt: bool, shift: bool, win: bool) -> KeyChord {
+    fn chord(
+        key: VirtualKey,
+        ctrl: bool,
+        alt: bool,
+        right_alt: bool,
+        shift: bool,
+        win: bool,
+    ) -> KeyChord {
         KeyChord {
             key,
             ctrl,
             alt,
+            right_alt,
             shift,
             win,
         }
@@ -158,19 +193,23 @@ mod tests {
     fn parses_supported_chords() {
         assert_eq!(
             KeyChord::parse("Ctrl+E").unwrap(),
-            chord(VirtualKey::E, true, false, false, false)
+            chord(VirtualKey::E, true, false, false, false, false)
         );
         assert_eq!(
             KeyChord::parse("Alt+E").unwrap(),
-            chord(VirtualKey::E, false, true, false, false)
+            chord(VirtualKey::E, false, true, false, false, false)
+        );
+        assert_eq!(
+            KeyChord::parse("RightAlt+E").unwrap(),
+            chord(VirtualKey::E, false, true, true, false, false)
         );
         assert_eq!(
             KeyChord::parse("Ctrl+Shift+J").unwrap(),
-            chord(VirtualKey::J, true, false, true, false)
+            chord(VirtualKey::J, true, false, false, true, false)
         );
         assert_eq!(
             KeyChord::parse("Escape").unwrap(),
-            chord(VirtualKey::Escape, false, false, false, false)
+            chord(VirtualKey::Escape, false, false, false, false, false)
         );
     }
 
@@ -178,15 +217,23 @@ mod tests {
     fn parses_modifier_aliases() {
         assert_eq!(
             KeyChord::parse("Control+E").unwrap(),
-            chord(VirtualKey::E, true, false, false, false)
+            chord(VirtualKey::E, true, false, false, false, false)
         );
         assert_eq!(
             KeyChord::parse("Super+E").unwrap(),
-            chord(VirtualKey::E, false, false, false, true)
+            chord(VirtualKey::E, false, false, false, false, true)
         );
         assert_eq!(
             KeyChord::parse("Meta+E").unwrap(),
-            chord(VirtualKey::E, false, false, false, true)
+            chord(VirtualKey::E, false, false, false, false, true)
+        );
+        assert_eq!(
+            KeyChord::parse("RAlt+E").unwrap(),
+            chord(VirtualKey::E, false, true, true, false, false)
+        );
+        assert_eq!(
+            KeyChord::parse("RIGHT_ALT+E").unwrap(),
+            chord(VirtualKey::E, false, true, true, false, false)
         );
     }
 
@@ -194,11 +241,11 @@ mod tests {
     fn parses_case_insensitively() {
         assert_eq!(
             KeyChord::parse("ctrl+shift+j").unwrap(),
-            chord(VirtualKey::J, true, false, true, false)
+            chord(VirtualKey::J, true, false, false, true, false)
         );
         assert_eq!(
             KeyChord::parse("eScApE").unwrap(),
-            chord(VirtualKey::Escape, false, false, false, false)
+            chord(VirtualKey::Escape, false, false, false, false, false)
         );
     }
 
@@ -210,11 +257,31 @@ mod tests {
 
         assert!(chord.matches_event(&event));
         assert!(!event.alt_down);
+        assert!(!event.right_alt_down);
         assert!(!event.shift_down);
         assert!(!event.win_down);
 
         event.shift_down = true;
         assert!(!chord.matches_event(&event));
+    }
+
+    #[test]
+    fn right_alt_matches_more_specifically_than_alt_and_plain_key() {
+        let right_alt_w = KeyChord::parse("RightAlt+W").unwrap();
+        let alt_w = KeyChord::parse("Alt+W").unwrap();
+        let plain_w = KeyChord::parse("W").unwrap();
+
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.alt_down = true;
+        event.right_alt_down = true;
+
+        assert!(right_alt_w.matches_event(&event));
+        assert!(alt_w.matches_event(&event));
+        assert!(!plain_w.matches_event(&event));
+
+        event.right_alt_down = false;
+        assert!(!right_alt_w.matches_event(&event));
+        assert!(alt_w.matches_event(&event));
     }
 
     #[test]

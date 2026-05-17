@@ -1,5 +1,6 @@
 use crate::action::Action;
-use std::collections::HashMap;
+use crate::app_state::KeyEvent;
+use crate::key_chord::KeyChord;
 
 /// Enum representing virtual key codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -250,17 +251,17 @@ impl VirtualKey {
             "DELETE" => Some(Self::Delete),
 
             // Symbols
-            "OEM_PLUS" => Some(Self::OemPlus),
-            "OEM_COMMA" => Some(Self::OemComma),
-            "OEM_MINUS" => Some(Self::OemMinus),
-            "OEM_PERIOD" => Some(Self::OemPeriod),
-            "OEM_1" => Some(Self::Oem1),
-            "OEM_2" => Some(Self::Oem2),
-            "OEM_3" => Some(Self::Oem3),
-            "OEM_4" => Some(Self::Oem4),
-            "OEM_5" => Some(Self::Oem5),
-            "OEM_6" => Some(Self::Oem6),
-            "OEM_7" => Some(Self::Oem7),
+            "+" | "=" | "PLUS" | "EQUALS" | "OEM_PLUS" => Some(Self::OemPlus),
+            "," | "COMMA" | "OEM_COMMA" => Some(Self::OemComma),
+            "-" | "MINUS" | "OEM_MINUS" => Some(Self::OemMinus),
+            "." | "PERIOD" | "DOT" | "OEM_PERIOD" => Some(Self::OemPeriod),
+            ";" | "SEMICOLON" | "OEM_1" => Some(Self::Oem1),
+            "/" | "SLASH" | "FORWARD_SLASH" | "OEM_2" => Some(Self::Oem2),
+            "`" | "BACKTICK" | "GRAVE" | "OEM_3" => Some(Self::Oem3),
+            "[" | "LEFT_BRACKET" | "LBRACKET" | "OEM_4" => Some(Self::Oem4),
+            "\\" | "BACKSLASH" | "OEM_5" => Some(Self::Oem5),
+            "]" | "RIGHT_BRACKET" | "RBRACKET" | "OEM_6" => Some(Self::Oem6),
+            "'" | "QUOTE" | "APOSTROPHE" | "OEM_7" => Some(Self::Oem7),
 
             // Additional keys
             "PRINTSCREEN" => Some(Self::PrintScreen),
@@ -271,7 +272,7 @@ impl VirtualKey {
             "LEFTCTRL" => Some(Self::LeftCtrl),
             "RIGHTCTRL" => Some(Self::RightCtrl),
             "LEFTALT" => Some(Self::LeftAlt),
-            "RIGHTALT" => Some(Self::RightAlt),
+            "RIGHTALT" | "RIGHT_ALT" | "RALT" => Some(Self::RightAlt),
 
             _ => None,
         }
@@ -601,28 +602,126 @@ impl VirtualKey {
 /// Struct for managing keybindings
 #[derive(Debug)]
 pub struct KeyBindings {
-    bindings: HashMap<VirtualKey, Action>,
+    bindings: Vec<(KeyChord, Action)>,
 }
 
 impl KeyBindings {
     /// Create a new KeyBindings instance
     pub fn new() -> Self {
         Self {
-            bindings: HashMap::new(),
+            bindings: Vec::new(),
         }
     }
 
     /// Add a keybinding
+    #[allow(dead_code)]
     pub fn add_binding(&mut self, key: VirtualKey, action: Action) {
-        self.bindings.insert(key, action);
+        self.add_chord_binding(KeyChord::from_key(key), action);
+    }
+
+    pub fn add_chord_binding(&mut self, chord: KeyChord, action: Action) {
+        if let Some((_, existing_action)) = self
+            .bindings
+            .iter_mut()
+            .find(|(existing_chord, _)| *existing_chord == chord)
+        {
+            *existing_action = action;
+        } else {
+            self.bindings.push((chord, action));
+        }
+        self.bindings
+            .sort_by(|(left, _), (right, _)| right.specificity().cmp(&left.specificity()));
     }
 
     /// Get the action for a key
+    #[allow(dead_code)]
     pub fn get_action(&self, key: VirtualKey) -> Option<&Action> {
-        self.bindings.get(&key)
+        let chord = KeyChord::from_key(key);
+        self.bindings
+            .iter()
+            .find_map(|(bound_chord, action)| (*bound_chord == chord).then_some(action))
     }
 
-    pub fn bound_keys(&self) -> impl Iterator<Item = VirtualKey> + '_ {
-        self.bindings.keys().copied()
+    pub fn get_action_for_event(&self, event: &KeyEvent) -> Option<Action> {
+        let exact_match = self
+            .bindings
+            .iter()
+            .find_map(|(chord, action)| chord.matches_event(event).then_some(*action));
+
+        if exact_match.is_some() || event.is_down {
+            return exact_match;
+        }
+
+        self.bindings
+            .iter()
+            .find_map(|(chord, action)| (chord.key == event.key).then_some(*action))
+    }
+
+    pub fn bound_chords(&self) -> impl Iterator<Item = KeyChord> + '_ {
+        self.bindings.iter().map(|(chord, _)| *chord)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_required_punctuation_aliases() {
+        let cases = [
+            (";", VirtualKey::Oem1),
+            ("SEMICOLON", VirtualKey::Oem1),
+            (",", VirtualKey::OemComma),
+            ("COMMA", VirtualKey::OemComma),
+            (".", VirtualKey::OemPeriod),
+            ("PERIOD", VirtualKey::OemPeriod),
+            ("DOT", VirtualKey::OemPeriod),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(VirtualKey::from_string(input), Some(expected));
+        }
+    }
+
+    #[test]
+    fn parses_optional_oem_punctuation_aliases() {
+        let cases = [
+            ("/", VirtualKey::Oem2),
+            ("`", VirtualKey::Oem3),
+            ("[", VirtualKey::Oem4),
+            ("\\", VirtualKey::Oem5),
+            ("]", VirtualKey::Oem6),
+            ("'", VirtualKey::Oem7),
+            ("-", VirtualKey::OemMinus),
+            ("=", VirtualKey::OemPlus),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(VirtualKey::from_string(input), Some(expected));
+        }
+    }
+
+    #[test]
+    fn chord_specificity_prefers_right_alt_over_plain_key() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("W").unwrap(), Action::MoveUp);
+        bindings.add_chord_binding(
+            KeyChord::parse("RightAlt+W").unwrap(),
+            Action::MoveToTopEdge,
+        );
+
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.alt_down = true;
+        event.right_alt_down = true;
+
+        assert_eq!(
+            bindings.get_action_for_event(&event),
+            Some(Action::MoveToTopEdge)
+        );
+
+        event.alt_down = false;
+        event.right_alt_down = false;
+
+        assert_eq!(bindings.get_action_for_event(&event), Some(Action::MoveUp));
     }
 }
