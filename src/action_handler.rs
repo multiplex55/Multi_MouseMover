@@ -64,7 +64,20 @@ impl MouseMaster {
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
-            Action::JumpMode => {}
+            Action::JumpMode
+            | Action::MoveToTopEdge
+            | Action::MoveToBottomEdge
+            | Action::MoveToLeftEdge
+            | Action::MoveToRightEdge
+            | Action::CenterCurrentMonitor
+            | Action::MiddleClick
+            | Action::ClickThenDisable
+            | Action::WheelUp
+            | Action::WheelDown
+            | Action::WheelLeft
+            | Action::WheelRight
+            | Action::WheelSpeedUp
+            | Action::WheelSpeedDown => {}
         }
     }
     /// Toggles between `Idle` and `Active` mode

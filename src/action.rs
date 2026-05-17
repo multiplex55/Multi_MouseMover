@@ -5,6 +5,7 @@ use std::time::Duration;
 /// Enum representing all possible actions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
+    // Continuous cursor movement actions.
     MoveUp,
     MoveDown,
     MoveLeft,
@@ -13,8 +14,29 @@ pub enum Action {
     MoveUpLeft,
     MoveDownRight,
     MoveDownLeft,
+
+    // Cursor jump actions.
+    MoveToTopEdge,
+    MoveToBottomEdge,
+    MoveToLeftEdge,
+    MoveToRightEdge,
+    CenterCurrentMonitor,
+
+    // Click actions.
     LeftClick,
     RightClick,
+    MiddleClick,
+    ClickThenDisable,
+
+    // Wheel actions.
+    WheelUp,
+    WheelDown,
+    WheelLeft,
+    WheelRight,
+    WheelSpeedUp,
+    WheelSpeedDown,
+
+    // Control actions.
     Exit,
     SlowMouse,
     JumpMode,
@@ -32,12 +54,120 @@ impl Action {
             "move_up_left" => Some(Self::MoveUpLeft),
             "move_down_right" => Some(Self::MoveDownRight),
             "move_down_left" => Some(Self::MoveDownLeft),
+            "move_to_top_edge" => Some(Self::MoveToTopEdge),
+            "move_to_bottom_edge" => Some(Self::MoveToBottomEdge),
+            "move_to_left_edge" => Some(Self::MoveToLeftEdge),
+            "move_to_right_edge" => Some(Self::MoveToRightEdge),
+            "center_current_monitor" | "center_monitor" => Some(Self::CenterCurrentMonitor),
             "left_click" => Some(Self::LeftClick),
             "right_click" => Some(Self::RightClick),
+            "middle_click" | "middle_mouse" => Some(Self::MiddleClick),
+            "click_then_disable" => Some(Self::ClickThenDisable),
+            "wheel_up" | "scroll_up" => Some(Self::WheelUp),
+            "wheel_down" | "scroll_down" => Some(Self::WheelDown),
+            "wheel_left" | "scroll_left" => Some(Self::WheelLeft),
+            "wheel_right" | "scroll_right" => Some(Self::WheelRight),
+            "wheel_speed_up" => Some(Self::WheelSpeedUp),
+            "wheel_speed_down" => Some(Self::WheelSpeedDown),
             "exit" => Some(Self::Exit),
             "slow_mouse" => Some(Self::SlowMouse),
             "jump_mode" => Some(Self::JumpMode),
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_new_canonical_action_strings() {
+        let cases = [
+            ("middle_click", Action::MiddleClick),
+            ("wheel_up", Action::WheelUp),
+            ("wheel_down", Action::WheelDown),
+            ("wheel_left", Action::WheelLeft),
+            ("wheel_right", Action::WheelRight),
+            ("wheel_speed_up", Action::WheelSpeedUp),
+            ("wheel_speed_down", Action::WheelSpeedDown),
+            ("center_current_monitor", Action::CenterCurrentMonitor),
+            ("click_then_disable", Action::ClickThenDisable),
+            ("move_to_top_edge", Action::MoveToTopEdge),
+            ("move_to_bottom_edge", Action::MoveToBottomEdge),
+            ("move_to_left_edge", Action::MoveToLeftEdge),
+            ("move_to_right_edge", Action::MoveToRightEdge),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(Action::from_string(input), Some(expected));
+        }
+    }
+
+    #[test]
+    fn parses_new_alias_action_strings() {
+        let cases = [
+            ("middle_mouse", Action::MiddleClick),
+            ("scroll_up", Action::WheelUp),
+            ("scroll_down", Action::WheelDown),
+            ("scroll_left", Action::WheelLeft),
+            ("scroll_right", Action::WheelRight),
+            ("center_monitor", Action::CenterCurrentMonitor),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(Action::from_string(input), Some(expected));
+        }
+    }
+
+    #[test]
+    fn unknown_action_strings_do_not_parse() {
+        assert_eq!(Action::from_string("unknown_action"), None);
+    }
+
+    #[test]
+    fn continuous_move_actions_are_movement() {
+        let movement_actions = [
+            Action::MoveUp,
+            Action::MoveDown,
+            Action::MoveLeft,
+            Action::MoveRight,
+            Action::MoveUpRight,
+            Action::MoveUpLeft,
+            Action::MoveDownRight,
+            Action::MoveDownLeft,
+        ];
+
+        for action in movement_actions {
+            assert!(ActionHandler::is_movement_action(action));
+        }
+    }
+
+    #[test]
+    fn non_continuous_actions_are_not_movement() {
+        let non_movement_actions = [
+            Action::MoveToTopEdge,
+            Action::MoveToBottomEdge,
+            Action::MoveToLeftEdge,
+            Action::MoveToRightEdge,
+            Action::CenterCurrentMonitor,
+            Action::LeftClick,
+            Action::RightClick,
+            Action::MiddleClick,
+            Action::ClickThenDisable,
+            Action::WheelUp,
+            Action::WheelDown,
+            Action::WheelLeft,
+            Action::WheelRight,
+            Action::WheelSpeedUp,
+            Action::WheelSpeedDown,
+            Action::Exit,
+            Action::SlowMouse,
+            Action::JumpMode,
+        ];
+
+        for action in non_movement_actions {
+            assert!(!ActionHandler::is_movement_action(action));
         }
     }
 }
