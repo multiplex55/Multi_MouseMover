@@ -207,13 +207,46 @@ mod tests {
     use super::{subdivide_region, JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
     use crate::keyboard::VirtualKey;
 
-    fn region() -> JumpRegion {
+    fn base_region() -> JumpRegion {
+        JumpRegion {
+            left: 0,
+            top: 0,
+            width: 1000,
+            height: 1000,
+        }
+    }
+
+    fn rounded_region() -> JumpRegion {
         JumpRegion {
             left: 0,
             top: 0,
             width: 100,
             height: 90,
         }
+    }
+
+    fn staged_grids() -> Vec<JumpStage> {
+        vec![
+            JumpStage::new(10, 10),
+            JumpStage::new(5, 5),
+            JumpStage::new(2, 2),
+        ]
+    }
+
+    fn staged_session() -> JumpSession {
+        JumpSession::new(base_region(), staged_grids()).unwrap()
+    }
+
+    fn press(session: &mut JumpSession, key: VirtualKey) -> Option<JumpSessionUpdate> {
+        session.handle_key(key, true)
+    }
+
+    fn enter_code(session: &mut JumpSession, keys: &[VirtualKey]) -> Option<JumpSessionUpdate> {
+        let mut update = None;
+        for &key in keys {
+            update = press(session, key);
+        }
+        update
     }
 
     #[test]
@@ -232,15 +265,15 @@ mod tests {
 
     #[test]
     fn region_validity_requires_positive_area() {
-        assert!(region().is_valid());
+        assert!(base_region().is_valid());
         assert!(!JumpRegion {
             width: 0,
-            ..region()
+            ..base_region()
         }
         .is_valid());
         assert!(!JumpRegion {
             height: -1,
-            ..region()
+            ..base_region()
         }
         .is_valid());
     }
@@ -248,7 +281,7 @@ mod tests {
     #[test]
     fn subdivide_region_uses_rounded_float_boundaries() {
         assert_eq!(
-            subdivide_region(region(), (3, 2), 1, 2),
+            subdivide_region(rounded_region(), (3, 2), 1, 2),
             Some(JumpRegion {
                 left: 67,
                 top: 45,
@@ -260,14 +293,14 @@ mod tests {
 
     #[test]
     fn subdivide_region_rejects_invalid_inputs() {
-        assert_eq!(subdivide_region(region(), (0, 2), 0, 0), None);
-        assert_eq!(subdivide_region(region(), (2, 2), 2, 0), None);
-        assert_eq!(subdivide_region(region(), (2, 2), 0, 2), None);
+        assert_eq!(subdivide_region(base_region(), (0, 2), 0, 0), None);
+        assert_eq!(subdivide_region(base_region(), (2, 2), 2, 0), None);
+        assert_eq!(subdivide_region(base_region(), (2, 2), 0, 2), None);
         assert_eq!(
             subdivide_region(
                 JumpRegion {
                     width: 0,
-                    ..region()
+                    ..base_region()
                 },
                 (2, 2),
                 0,
@@ -279,7 +312,7 @@ mod tests {
 
     #[test]
     fn letters_are_consumed_until_single_stage_completes() {
-        let mut session = JumpSession::new(region(), vec![JumpStage::new(10, 10)]).unwrap();
+        let mut session = JumpSession::new(base_region(), vec![JumpStage::new(10, 10)]).unwrap();
 
         assert_eq!(
             session.handle_key(VirtualKey::A, true),
@@ -288,13 +321,13 @@ mod tests {
         assert_eq!(
             session.handle_key(VirtualKey::J, true),
             Some(JumpSessionUpdate::Completed {
-                x: 95,
-                y: 5,
+                x: 950,
+                y: 50,
                 region: JumpRegion {
-                    left: 90,
+                    left: 900,
                     top: 0,
-                    width: 10,
-                    height: 9,
+                    width: 100,
+                    height: 100,
                 },
             })
         );
@@ -304,10 +337,22 @@ mod tests {
 
     #[test]
     fn invalid_code_clears_input_without_advancing() {
-        let mut session = JumpSession::new(region(), vec![JumpStage::new(10, 10)]).unwrap();
+        let mut session = staged_session();
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: JumpRegion {
+                    left: 200,
+                    top: 100,
+                    width: 100,
+                    height: 100,
+                },
+            })
+        );
 
         assert_eq!(
-            session.handle_key(VirtualKey::K, true),
+            session.handle_key(VirtualKey::F, true),
             Some(JumpSessionUpdate::Consumed)
         );
         assert_eq!(
@@ -315,13 +360,21 @@ mod tests {
             Some(JumpSessionUpdate::Invalid)
         );
         assert_eq!(session.input, "");
-        assert_eq!(session.stage_index, 0);
-        assert_eq!(session.current_region, region());
+        assert_eq!(session.stage_index, 1);
+        assert_eq!(
+            session.current_region,
+            JumpRegion {
+                left: 200,
+                top: 100,
+                width: 100,
+                height: 100,
+            }
+        );
     }
 
     #[test]
     fn cancel_backspace_and_ignored_keys_are_deterministic() {
-        let mut session = JumpSession::new(region(), vec![JumpStage::new(10, 10)]).unwrap();
+        let mut session = JumpSession::new(base_region(), vec![JumpStage::new(10, 10)]).unwrap();
 
         assert_eq!(session.handle_key(VirtualKey::Num1, true), None);
         assert_eq!(session.handle_key(VirtualKey::A, false), None);
@@ -342,44 +395,142 @@ mod tests {
 
     #[test]
     fn multi_stage_session_advances_then_completes() {
-        let mut session =
-            JumpSession::new(region(), vec![JumpStage::new(10, 10), JumpStage::new(5, 5)]).unwrap();
+        let mut session = staged_session();
 
         assert_eq!(
-            session.handle_key(VirtualKey::B, true),
-            Some(JumpSessionUpdate::Consumed)
-        );
-        assert_eq!(
-            session.handle_key(VirtualKey::C, true),
+            enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
-                    left: 20,
-                    top: 9,
-                    width: 10,
-                    height: 9,
+                    left: 200,
+                    top: 100,
+                    width: 100,
+                    height: 100,
                 },
             })
         );
         assert_eq!(session.current_grid(), (5, 5));
 
         assert_eq!(
-            session.handle_key(VirtualKey::A, true),
-            Some(JumpSessionUpdate::Consumed)
-        );
-        assert_eq!(
-            session.handle_key(VirtualKey::A, true),
-            Some(JumpSessionUpdate::Completed {
-                x: 21,
-                y: 10,
+            enter_code(&mut session, &[VirtualKey::D, VirtualKey::E]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 2,
                 region: JumpRegion {
-                    left: 20,
-                    top: 9,
-                    width: 2,
-                    height: 2,
+                    left: 280,
+                    top: 160,
+                    width: 20,
+                    height: 20,
                 },
             })
         );
-        assert_eq!(session.region_history.len(), 3);
+        assert_eq!(session.current_grid(), (2, 2));
+
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::B, VirtualKey::B]),
+            Some(JumpSessionUpdate::Completed {
+                x: 295,
+                y: 175,
+                region: JumpRegion {
+                    left: 290,
+                    top: 170,
+                    width: 10,
+                    height: 10,
+                },
+            })
+        );
+        assert_eq!(session.input, "");
+        assert_eq!(session.path, vec![(1, 2), (3, 4), (1, 1)]);
+        assert_eq!(session.region_history.len(), 4);
+    }
+
+    #[test]
+    fn cancel_key_cancels_at_every_stage() {
+        let stage_entries = [
+            Vec::new(),
+            vec![VirtualKey::B, VirtualKey::C],
+            vec![VirtualKey::B, VirtualKey::C, VirtualKey::D, VirtualKey::E],
+        ];
+
+        for (expected_stage, entry_keys) in stage_entries.into_iter().enumerate() {
+            let mut session = staged_session();
+            for chunk in entry_keys.chunks(2) {
+                enter_code(&mut session, chunk);
+            }
+
+            assert_eq!(session.stage_index, expected_stage);
+            assert_eq!(
+                press(&mut session, VirtualKey::A),
+                Some(JumpSessionUpdate::Consumed)
+            );
+            assert_eq!(
+                press(&mut session, VirtualKey::Escape),
+                Some(JumpSessionUpdate::Cancelled)
+            );
+            assert_eq!(session.input, "");
+            assert_eq!(session.stage_index, expected_stage);
+        }
+    }
+
+    #[test]
+    fn backspace_removes_only_the_current_stage_input() {
+        let mut session = staged_session();
+
+        assert_eq!(
+            press(&mut session, VirtualKey::A),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            press(&mut session, VirtualKey::Backspace),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(session.input, "");
+        assert_eq!(session.stage_index, 0);
+        assert_eq!(session.current_region, base_region());
+
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::C, VirtualKey::D]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: JumpRegion {
+                    left: 300,
+                    top: 200,
+                    width: 100,
+                    height: 100,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn empty_input_backspace_stays_on_the_current_stage() {
+        let mut session = staged_session();
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: JumpRegion {
+                    left: 200,
+                    top: 100,
+                    width: 100,
+                    height: 100,
+                },
+            })
+        );
+
+        assert_eq!(
+            press(&mut session, VirtualKey::Backspace),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(session.input, "");
+        assert_eq!(session.stage_index, 1);
+        assert_eq!(
+            session.current_region,
+            JumpRegion {
+                left: 200,
+                top: 100,
+                width: 100,
+                height: 100,
+            }
+        );
     }
 }
