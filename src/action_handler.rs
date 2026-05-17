@@ -562,7 +562,9 @@ fn calculate_movement(
     }
 
     let speed = if active_actions.contains(&Action::SlowMouse) {
-        config.starting_speed
+        *current_speed = config.starting_speed;
+        *acceleration_counter = 0;
+        *current_speed
     } else {
         advance_speed(config, top_speed, current_speed, acceleration_counter)
     };
@@ -783,6 +785,79 @@ mod tests {
         assert_eq!(movement.speed, config.starting_speed);
         assert_eq!(current_speed, config.starting_speed);
         assert_eq!(acceleration_counter, 0);
+    }
+
+    #[test]
+    fn slow_mouse_uses_starting_speed() {
+        let config = test_config();
+        let mut current_speed = 9;
+        let mut acceleration_counter = 1;
+        let active_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
+
+        let movement = tick(
+            &active_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        assert_eq!(movement.speed, config.starting_speed);
+        assert_eq!(movement.dx, f64::from(config.starting_speed));
+        assert_eq!(movement.dy, 0.0);
+    }
+
+    #[test]
+    fn slow_mouse_resets_speed_state() {
+        let config = test_config();
+        let mut current_speed = 9;
+        let mut acceleration_counter = 1;
+        let active_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
+
+        let movement = tick(
+            &active_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        assert!(movement.moving);
+        assert_eq!(current_speed, config.starting_speed);
+        assert_eq!(acceleration_counter, 0);
+    }
+
+    #[test]
+    fn releasing_slow_mouse_resumes_acceleration_from_baseline() {
+        let config = test_config();
+        let mut current_speed = 9;
+        let mut acceleration_counter = 1;
+        let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
+        let movement_actions = actions(&[Action::MoveRight]);
+
+        let slow_tick = tick(
+            &slow_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+        let first_after_release = tick(
+            &movement_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+        let second_after_release = tick(
+            &movement_actions,
+            &config,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        assert_eq!(slow_tick.speed, config.starting_speed);
+        assert_eq!(first_after_release.speed, config.starting_speed);
+        assert_eq!(
+            second_after_release.speed,
+            config.starting_speed + config.acceleration
+        );
     }
 
     #[test]
