@@ -29,7 +29,7 @@ cargo run
 - [ ] Expected log fragments:
 
 ```text
-🚀 Program Start!
+🚀 Multi MouseMover (multi_mousemover) Program Start!
 ✅ Config Loaded
 ✅ Key Bindings Initialized
 🔹 Attempting to Get Module Handle...

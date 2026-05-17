@@ -51,6 +51,8 @@ const MAX_JUMP_ZOOM_SCALE: f32 = 10.0;
 const MAX_EDGE_JUMP_OFFSET_PX: i32 = 10_000;
 const MAX_JUMP_AIM_OFFSET_PX: i32 = 10_000;
 const MAX_FINAL_ADJUST_STEP_PX: i32 = 10_000;
+const APP_CRATE_ID: &str = env!("CARGO_PKG_NAME");
+const APP_DISPLAY_NAME: &str = "Multi MouseMover";
 
 static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_DECODED: AtomicU64 = AtomicU64::new(0);
@@ -1580,6 +1582,10 @@ fn print_heartbeat(diagnostics: LoopDiagnostics, hook_diagnostics: HookDiagnosti
     );
 }
 
+fn startup_summary_line() -> String {
+    format!("{APP_DISPLAY_NAME} ({APP_CRATE_ID}) Program Start!")
+}
+
 unsafe fn install_keyboard_hook() -> windows::core::Result<()> {
     println!("🔹 Attempting to Get Module Handle...");
     let h_instance = GetModuleHandleW(None)?;
@@ -1600,7 +1606,7 @@ unsafe fn install_keyboard_hook() -> windows::core::Result<()> {
 }
 
 fn main() {
-    println!("🚀 Program Start!");
+    println!("🚀 {}", startup_summary_line());
 
     // Set a panic hook to ensure we clean up resources on unexpected errors
     std::panic::set_hook(Box::new(|info| {
@@ -1719,6 +1725,8 @@ fn main() {
 mod tests {
     use super::*;
     use enigo::{Axis, Button};
+
+    const LEGACY_PACKAGE_NAME: &str = concat!("Learn", "ing", "_", "Ru", "st");
 
     #[derive(Debug, PartialEq, Eq)]
     enum MouseOperation {
@@ -2464,6 +2472,32 @@ mod tests {
         .to_string();
 
         assert!(err.contains("unknown variant"));
+    }
+
+    #[test]
+    fn startup_summary_uses_current_crate_id() {
+        let summary = startup_summary_line();
+
+        assert!(summary.contains(APP_DISPLAY_NAME));
+        assert!(summary.contains("multi_mousemover"));
+        assert!(!summary.contains(LEGACY_PACKAGE_NAME));
+    }
+
+    #[test]
+    fn programmatic_app_labels_do_not_emit_legacy_package_name() {
+        assert_eq!(APP_DISPLAY_NAME, "Multi MouseMover");
+        assert_eq!(APP_CRATE_ID, "multi_mousemover");
+        assert_ne!(APP_CRATE_ID, LEGACY_PACKAGE_NAME);
+    }
+
+    #[test]
+    fn readme_documents_current_artifact_names() {
+        let readme = include_str!("../README.md");
+
+        assert!(readme.contains("The crate and binary id is `multi_mousemover`"));
+        assert!(readme.contains("target/debug/multi_mousemover.exe"));
+        assert!(readme.contains("target/release/multi_mousemover.exe"));
+        assert!(!readme.contains(LEGACY_PACKAGE_NAME));
     }
 
     #[test]

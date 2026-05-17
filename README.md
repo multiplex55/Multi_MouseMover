@@ -17,6 +17,12 @@ cargo build --release
 cargo run --release
 ```
 
+## Artifact names
+
+The crate and binary id is `multi_mousemover`. On Windows, `cargo build` produces
+`target/debug/multi_mousemover.exe`, and `cargo build --release` produces
+`target/release/multi_mousemover.exe`.
+
 Configuration lives in `config.toml` in the project root.  Key bindings and mouse parameters can be tweaked there.
 
 ## Keybindings
