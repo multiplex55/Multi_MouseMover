@@ -8,7 +8,7 @@ use std::time::Instant;
 use windows::core::{w, Error};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOZORDER,
 };
 use windows::Win32::{
     Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*, UI::WindowsAndMessaging::*,
@@ -42,6 +42,15 @@ pub struct OverlayWindow {
     debug_counters: Arc<Mutex<OverlayDebugCounters>>,
 }
 
+const OVERLAY_WIDTH: i32 = 25;
+const OVERLAY_HEIGHT: i32 = 25;
+const CURSOR_OFFSET_X: i32 = 5;
+const CURSOR_OFFSET_Y: i32 = 5;
+const INDICATOR_SQUARE_SIZE: i32 = 25;
+const PIP_SIZE: i32 = 4;
+const PIP_GAP: i32 = 2;
+const PIP_BOTTOM_MARGIN: i32 = 4;
+
 fn overlay_ex_style() -> WINDOW_EX_STYLE {
     WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
 }
@@ -55,6 +64,13 @@ struct OverlayPosition {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OverlayVisualState {
     indicator_state: IndicatorState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct IndicatorVisual {
+    base_color: COLORREF,
+    pip_count: u8,
+    draw_outline: bool,
 }
 
 #[cfg(debug_assertions)]
@@ -74,6 +90,38 @@ fn should_repaint(previous: Option<&OverlayVisualState>, current: &OverlayVisual
 
 fn should_display(state: IndicatorState) -> bool {
     state != IndicatorState::Hidden
+}
+
+fn overlay_rect() -> RECT {
+    RECT {
+        left: 0,
+        top: 0,
+        right: OVERLAY_WIDTH,
+        bottom: OVERLAY_HEIGHT,
+    }
+}
+
+fn indicator_square_rect() -> RECT {
+    RECT {
+        left: 0,
+        top: 0,
+        right: INDICATOR_SQUARE_SIZE.min(OVERLAY_WIDTH),
+        bottom: INDICATOR_SQUARE_SIZE.min(OVERLAY_HEIGHT),
+    }
+}
+
+fn pip_rect(index: u8, pip_count: u8) -> RECT {
+    let pip_count = i32::from(pip_count);
+    let total_width = pip_count * PIP_SIZE + (pip_count - 1).max(0) * PIP_GAP;
+    let left = (OVERLAY_WIDTH - total_width) / 2 + i32::from(index) * (PIP_SIZE + PIP_GAP);
+    let top = OVERLAY_HEIGHT - PIP_BOTTOM_MARGIN - PIP_SIZE;
+
+    RECT {
+        left,
+        top,
+        right: left + PIP_SIZE,
+        bottom: top + PIP_SIZE,
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -138,8 +186,8 @@ impl OverlayWindow {
                 WS_POPUP,
                 50, // Default X position
                 50, // Default Y position
-                25, // Width
-                25, // Height
+                OVERLAY_WIDTH,
+                OVERLAY_HEIGHT,
                 None,
                 None,
                 Some(h_instance.into()),
@@ -209,8 +257,8 @@ impl OverlayWindow {
 
             if unsafe { GetCursorPos(&mut point) }.is_ok() {
                 let current_position = OverlayPosition {
-                    x: point.x + 5,
-                    y: point.y + 5,
+                    x: point.x + CURSOR_OFFSET_X,
+                    y: point.y + CURSOR_OFFSET_Y,
                 };
                 let current_visual = OverlayVisualState { indicator_state };
                 let was_hidden = !self.visible;
@@ -222,9 +270,9 @@ impl OverlayWindow {
                             Some(HWND_TOPMOST),
                             current_position.x,
                             current_position.y,
-                            5, // Small overlay width
-                            5, // Small overlay height
-                            SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
+                            OVERLAY_WIDTH,
+                            OVERLAY_HEIGHT,
+                            SWP_NOZORDER | SWP_NOACTIVATE,
                         );
                     }
                     self.record_set_window_pos_call();
@@ -250,19 +298,34 @@ impl OverlayWindow {
 
     /// Draws the square into the caller-provided paint device context.
     pub fn draw(&self, hdc: HDC) {
-        let color = indicator_color(self.indicator_state);
+        let visual = indicator_visual(self.indicator_state);
 
         unsafe {
-            let hbrush = CreateSolidBrush(color);
+            let hbrush = CreateSolidBrush(visual.base_color);
             if !hbrush.0.is_null() {
-                let rect = RECT {
-                    left: 0,
-                    top: 0,
-                    right: 100,
-                    bottom: 100,
-                };
+                let rect = indicator_square_rect();
                 let _ = FillRect(hdc, &rect, hbrush);
                 let _ = DeleteObject(hbrush.into());
+            }
+
+            if visual.draw_outline {
+                let outline_brush = CreateSolidBrush(RGB(0, 0, 0));
+                if !outline_brush.0.is_null() {
+                    let rect = overlay_rect();
+                    let _ = FrameRect(hdc, &rect, outline_brush);
+                    let _ = DeleteObject(outline_brush.into());
+                }
+            }
+
+            if visual.pip_count > 0 {
+                let pip_brush = CreateSolidBrush(RGB(255, 255, 255));
+                if !pip_brush.0.is_null() {
+                    for index in 0..visual.pip_count {
+                        let rect = pip_rect(index, visual.pip_count);
+                        let _ = FillRect(hdc, &rect, pip_brush);
+                    }
+                    let _ = DeleteObject(pip_brush.into());
+                }
             }
         }
     }
@@ -293,8 +356,8 @@ impl OverlayWindow {
                     let mut point = POINT::default();
 
                     if unsafe { GetCursorPos(&mut point) }.is_ok() {
-                        let x = point.x + 10;
-                        let y = point.y + 10;
+                        let x = point.x + CURSOR_OFFSET_X;
+                        let y = point.y + CURSOR_OFFSET_Y;
 
                         // Only update if the position is different to avoid unnecessary SetWindowPos calls
                         let mut is_moving = is_moving_clone.lock().unwrap();
@@ -306,9 +369,9 @@ impl OverlayWindow {
                                     Some(HWND_TOPMOST),
                                     x,
                                     y,
-                                    20, // Small overlay width
-                                    20, // Small overlay height
-                                    SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE,
+                                    OVERLAY_WIDTH,
+                                    OVERLAY_HEIGHT,
+                                    SWP_NOZORDER | SWP_NOACTIVATE,
                                 );
                             }
                             *is_moving = false;
@@ -359,16 +422,48 @@ pub fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
     COLORREF(((b as u32) << 16) | ((g as u32) << 8) | (r as u32))
 }
 
-fn indicator_color(state: IndicatorState) -> COLORREF {
+fn indicator_visual(state: IndicatorState) -> IndicatorVisual {
     match state {
-        IndicatorState::Hidden => RGB(0, 0, 0),
-        IndicatorState::ActiveNormal => RGB(255, 0, 0),
-        IndicatorState::ActiveSlow => RGB(0, 255, 0),
-        IndicatorState::DraggingLeft => RGB(0, 255, 255),
-        IndicatorState::JumpMode => RGB(0, 120, 255),
-        IndicatorState::WheelScrollingSlow => RGB(255, 180, 0),
-        IndicatorState::WheelScrollingNormal => RGB(255, 255, 0),
-        IndicatorState::WheelScrollingFast => RGB(255, 0, 255),
+        IndicatorState::Hidden => IndicatorVisual {
+            base_color: RGB(0, 0, 0),
+            pip_count: 0,
+            draw_outline: false,
+        },
+        IndicatorState::ActiveNormal => IndicatorVisual {
+            base_color: RGB(255, 0, 0),
+            pip_count: 0,
+            draw_outline: true,
+        },
+        IndicatorState::ActiveSlow => IndicatorVisual {
+            base_color: RGB(0, 255, 0),
+            pip_count: 0,
+            draw_outline: true,
+        },
+        IndicatorState::DraggingLeft => IndicatorVisual {
+            base_color: RGB(0, 255, 255),
+            pip_count: 0,
+            draw_outline: false,
+        },
+        IndicatorState::JumpMode => IndicatorVisual {
+            base_color: RGB(0, 120, 255),
+            pip_count: 0,
+            draw_outline: true,
+        },
+        IndicatorState::WheelScrollingSlow => IndicatorVisual {
+            base_color: RGB(255, 180, 0),
+            pip_count: 1,
+            draw_outline: true,
+        },
+        IndicatorState::WheelScrollingNormal => IndicatorVisual {
+            base_color: RGB(255, 255, 0),
+            pip_count: 2,
+            draw_outline: true,
+        },
+        IndicatorState::WheelScrollingFast => IndicatorVisual {
+            base_color: RGB(255, 0, 255),
+            pip_count: 3,
+            draw_outline: true,
+        },
     }
 }
 
@@ -417,8 +512,8 @@ extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: L
 #[cfg(test)]
 mod tests {
     use super::{
-        indicator_color, overlay_ex_style, should_display, should_move, should_repaint,
-        OverlayPosition, OverlayVisualState, RGB,
+        indicator_visual, overlay_ex_style, should_display, should_move, should_repaint,
+        IndicatorVisual, OverlayPosition, OverlayVisualState, RGB,
     };
     use crate::indicator::IndicatorState;
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -486,30 +581,80 @@ mod tests {
 
     #[test]
     fn hidden_state_has_a_distinct_non_display_color_branch() {
-        assert_eq!(indicator_color(IndicatorState::Hidden), RGB(0, 0, 0));
+        assert_eq!(
+            indicator_visual(IndicatorState::Hidden).base_color,
+            RGB(0, 0, 0)
+        );
     }
 
     #[test]
     fn active_slow_and_jump_states_render_distinct_colors() {
         assert_ne!(
-            indicator_color(IndicatorState::ActiveNormal),
-            indicator_color(IndicatorState::ActiveSlow)
+            indicator_visual(IndicatorState::ActiveNormal).base_color,
+            indicator_visual(IndicatorState::ActiveSlow).base_color
         );
         assert_ne!(
-            indicator_color(IndicatorState::ActiveSlow),
-            indicator_color(IndicatorState::JumpMode)
+            indicator_visual(IndicatorState::ActiveSlow).base_color,
+            indicator_visual(IndicatorState::JumpMode).base_color
         );
     }
 
     #[test]
     fn wheel_speed_states_render_distinct_colors() {
         assert_ne!(
-            indicator_color(IndicatorState::WheelScrollingSlow),
-            indicator_color(IndicatorState::WheelScrollingNormal)
+            indicator_visual(IndicatorState::WheelScrollingSlow).base_color,
+            indicator_visual(IndicatorState::WheelScrollingNormal).base_color
         );
         assert_ne!(
-            indicator_color(IndicatorState::WheelScrollingNormal),
-            indicator_color(IndicatorState::WheelScrollingFast)
+            indicator_visual(IndicatorState::WheelScrollingNormal).base_color,
+            indicator_visual(IndicatorState::WheelScrollingFast).base_color
+        );
+    }
+
+    #[test]
+    fn wheel_speed_states_map_to_speed_pip_counts() {
+        assert_eq!(
+            indicator_visual(IndicatorState::WheelScrollingSlow).pip_count,
+            1
+        );
+        assert_eq!(
+            indicator_visual(IndicatorState::WheelScrollingNormal).pip_count,
+            2
+        );
+        assert_eq!(
+            indicator_visual(IndicatorState::WheelScrollingFast).pip_count,
+            3
+        );
+    }
+
+    #[test]
+    fn non_wheel_states_map_to_zero_pips() {
+        let non_wheel_states = [
+            IndicatorState::Hidden,
+            IndicatorState::ActiveNormal,
+            IndicatorState::ActiveSlow,
+            IndicatorState::DraggingLeft,
+            IndicatorState::JumpMode,
+        ];
+
+        for state in non_wheel_states {
+            assert_eq!(indicator_visual(state).pip_count, 0);
+        }
+    }
+
+    #[test]
+    fn drag_visual_is_distinct_from_active_normal() {
+        assert_ne!(
+            indicator_visual(IndicatorState::DraggingLeft),
+            indicator_visual(IndicatorState::ActiveNormal)
+        );
+        assert_eq!(
+            indicator_visual(IndicatorState::DraggingLeft),
+            IndicatorVisual {
+                base_color: RGB(0, 255, 255),
+                pip_count: 0,
+                draw_outline: false,
+            }
         );
     }
 }

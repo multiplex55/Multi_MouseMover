@@ -38,6 +38,7 @@ pub struct JumpStage {
 }
 
 impl JumpStage {
+    #[cfg(test)]
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             width,
@@ -51,6 +52,7 @@ impl JumpStage {
         }
     }
 
+    #[cfg(test)]
     pub fn with_target_margin(width: u32, height: u32, target_margin_percent: u8) -> Self {
         Self {
             width,

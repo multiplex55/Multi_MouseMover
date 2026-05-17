@@ -6,7 +6,9 @@ use crate::jump_session::{
 use crate::jump_view::{FinalAdjustOverlayView, JumpOverlayView, JumpStageMetadata};
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
 use crate::keyboard::VirtualKey;
-use crate::{Config, JumpConfig};
+#[cfg(test)]
+use crate::Config;
+use crate::JumpConfig;
 use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +120,7 @@ impl AppState {
         self.commands.pop_front()
     }
 
+    #[cfg(test)]
     pub fn set_bound_keys<I>(&mut self, keys: I)
     where
         I: IntoIterator<Item = VirtualKey>,
@@ -143,6 +146,7 @@ impl AppState {
         self.active_mode
     }
 
+    #[cfg(test)]
     pub fn has_active_action_keys(&self) -> bool {
         !self.active_keys.is_empty() || !self.active_trigger_chords.is_empty()
     }
