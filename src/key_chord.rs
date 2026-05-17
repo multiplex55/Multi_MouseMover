@@ -87,12 +87,64 @@ impl KeyChord {
 
     pub fn matches_event(&self, event: &KeyEvent) -> bool {
         self.key == event.key
-            && self.ctrl == event.ctrl_down
-            && self.alt == event.alt_down
-            && (!self.right_alt || event.right_alt_down)
-            && self.shift == event.shift_down
+            && modifier_matches(self.ctrl, event.ctrl_down, is_ctrl_key(self.key))
+            && modifier_matches(self.alt, event.alt_down, is_alt_key(self.key))
+            && ((!self.right_alt || event.right_alt_down)
+                || (!self.right_alt && event.right_alt_down && self.key == VirtualKey::RightAlt))
+            && modifier_matches(self.shift, event.shift_down, is_shift_key(self.key))
             && self.win == event.win_down
     }
+
+    pub fn matches_event_allowing_shift_modifier(&self, event: &KeyEvent) -> bool {
+        self.key == event.key
+            && self.is_unmodified()
+            && event.shift_down
+            && !event.ctrl_down
+            && !event.alt_down
+            && !event.right_alt_down
+            && !event.win_down
+    }
+
+    pub fn matches_key_down_event(&self, event: &KeyEvent) -> bool {
+        self.matches_event(event) || self.matches_event_allowing_shift_modifier(event)
+    }
+
+    pub fn matches_dispatch_event(&self, event: &KeyEvent) -> bool {
+        if event.is_down {
+            self.matches_key_down_event(event)
+        } else {
+            self.matches_event(event)
+        }
+    }
+
+    fn is_unmodified(&self) -> bool {
+        !self.ctrl && !self.alt && !self.right_alt && !self.shift && !self.win
+    }
+}
+
+fn modifier_matches(chord_modifier: bool, event_modifier: bool, self_key: bool) -> bool {
+    chord_modifier == event_modifier || (!chord_modifier && event_modifier && self_key)
+}
+
+fn is_shift_key(key: VirtualKey) -> bool {
+    matches!(
+        key,
+        VirtualKey::Shift | VirtualKey::LeftShift | VirtualKey::RightShift
+    )
+}
+
+fn is_ctrl_key(key: VirtualKey) -> bool {
+    matches!(
+        key,
+        VirtualKey::Ctrl | VirtualKey::LeftCtrl | VirtualKey::RightCtrl
+    )
+}
+
+fn is_alt_key(key: VirtualKey) -> bool {
+    matches!(
+        key,
+        VirtualKey::Alt | VirtualKey::LeftAlt | VirtualKey::RightAlt
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,6 +386,48 @@ mod tests {
 
         event.shift_down = true;
         assert!(!chord.matches_event(&event));
+    }
+
+    #[test]
+    fn modifier_self_keys_match_their_own_down_modifier_state() {
+        let cases = [
+            (VirtualKey::LeftShift, false, false, false, true),
+            (VirtualKey::RightShift, false, false, false, true),
+            (VirtualKey::LeftCtrl, true, false, false, false),
+            (VirtualKey::RightCtrl, true, false, false, false),
+            (VirtualKey::LeftAlt, false, true, false, false),
+            (VirtualKey::RightAlt, false, true, true, false),
+        ];
+
+        for (key, ctrl_down, alt_down, right_alt_down, shift_down) in cases {
+            let chord = KeyChord::from_key(key);
+            let mut event = KeyEvent::new(key, true);
+            event.ctrl_down = ctrl_down;
+            event.alt_down = alt_down;
+            event.right_alt_down = right_alt_down;
+            event.shift_down = shift_down;
+
+            assert!(chord.matches_event(&event), "{key:?}");
+        }
+    }
+
+    #[test]
+    fn shift_relaxed_match_only_accepts_plain_chord_with_extra_shift() {
+        let plain_w = KeyChord::parse("W").unwrap();
+        let shift_w = KeyChord::parse("Shift+W").unwrap();
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.shift_down = true;
+
+        assert!(plain_w.matches_event_allowing_shift_modifier(&event));
+        assert!(!shift_w.matches_event_allowing_shift_modifier(&event));
+
+        event.ctrl_down = true;
+        assert!(!plain_w.matches_event_allowing_shift_modifier(&event));
+
+        event.ctrl_down = false;
+        event.alt_down = true;
+        event.right_alt_down = true;
+        assert!(!plain_w.matches_event_allowing_shift_modifier(&event));
     }
 
     #[test]

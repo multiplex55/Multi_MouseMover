@@ -346,15 +346,14 @@ impl AppState {
         }
 
         self.active_mode
-            && (self
-                .bound_chords
-                .iter()
-                .any(|chord| chord.matches_event(event))
-                || (!event.is_down
-                    && self
-                        .active_trigger_chords
-                        .iter()
-                        .any(|chord| chord.key == event.key)))
+            && (self.bound_chords.iter().any(|chord| {
+                chord.matches_dispatch_event(event)
+                    || (!event.is_down && self.active_trigger_chords.contains(chord))
+            }) || (!event.is_down
+                && self
+                    .active_trigger_chords
+                    .iter()
+                    .any(|chord| chord.key == event.key)))
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, action: Option<Action>) {
@@ -473,7 +472,7 @@ impl AppState {
         if let Some(chord) = self
             .bound_chords
             .iter()
-            .filter(|chord| chord.matches_event(&event))
+            .filter(|chord| chord.matches_key_down_event(&event))
             .max_by_key(|chord| chord.specificity())
             .copied()
         {
@@ -608,6 +607,12 @@ mod tests {
         state
     }
 
+    fn state_with_bound_chords(chords: impl IntoIterator<Item = KeyChord>) -> AppState {
+        let mut state = AppState::default();
+        state.set_bound_chords(chords);
+        state
+    }
+
     fn collect_commands(state: &mut AppState) -> Vec<AppCommand> {
         let mut commands = Vec::new();
         while let Some(command) = state.pop_command() {
@@ -681,6 +686,46 @@ mod tests {
         ctrl_w.ctrl_down = true;
 
         assert!(state.should_swallow_key(&ctrl_w));
+    }
+
+    #[test]
+    fn shifted_plain_key_is_swallowed_like_action_lookup() {
+        let state = state_with_bound_key(VirtualKey::W);
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.shift_down = true;
+
+        assert!(state.should_swallow_key(&event));
+    }
+
+    #[test]
+    fn right_alt_chord_is_swallowed_but_ctrl_plain_key_is_not() {
+        let state = state_with_bound_chords([
+            KeyChord::parse("W").unwrap(),
+            KeyChord::parse("RightAlt+W").unwrap(),
+        ]);
+        let mut right_alt_w = KeyEvent::new(VirtualKey::W, true);
+        right_alt_w.alt_down = true;
+        right_alt_w.right_alt_down = true;
+        let mut ctrl_w = KeyEvent::new(VirtualKey::W, true);
+        ctrl_w.ctrl_down = true;
+
+        assert!(state.should_swallow_key(&right_alt_w));
+        assert!(!state.should_swallow_key(&ctrl_w));
+    }
+
+    #[test]
+    fn shift_self_keys_are_swallowed_like_action_lookup() {
+        let state = state_with_bound_chords([
+            KeyChord::parse("LeftShift").unwrap(),
+            KeyChord::parse("RightShift").unwrap(),
+        ]);
+
+        for key in [VirtualKey::LeftShift, VirtualKey::RightShift] {
+            let mut event = KeyEvent::new(key, true);
+            event.shift_down = true;
+
+            assert!(state.should_swallow_key(&event), "{key:?}");
+        }
     }
 
     #[test]

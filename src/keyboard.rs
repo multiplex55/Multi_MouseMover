@@ -643,13 +643,20 @@ impl KeyBindings {
     }
 
     pub fn get_action_for_event(&self, event: &KeyEvent) -> Option<Action> {
-        let exact_match = self
+        if let Some(action) = self
             .bindings
             .iter()
-            .find_map(|(chord, action)| chord.matches_event(event).then(|| action.clone()));
+            .find_map(|(chord, action)| chord.matches_event(event).then(|| action.clone()))
+        {
+            return Some(action);
+        }
 
-        if exact_match.is_some() || event.is_down {
-            return exact_match;
+        if event.is_down {
+            return self.bindings.iter().find_map(|(chord, action)| {
+                chord
+                    .matches_event_allowing_shift_modifier(event)
+                    .then(|| action.clone())
+            });
         }
 
         self.bindings
@@ -756,5 +763,64 @@ mod tests {
         event.right_alt_down = false;
 
         assert_eq!(bindings.get_action_for_event(&event), Some(Action::MoveUp));
+    }
+
+    #[test]
+    fn shifted_plain_key_resolves_to_plain_binding() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("W").unwrap(), Action::MoveUp);
+
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.shift_down = true;
+
+        assert_eq!(bindings.get_action_for_event(&event), Some(Action::MoveUp));
+    }
+
+    #[test]
+    fn right_alt_binding_wins_over_shift_relaxed_plain_key() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("W").unwrap(), Action::MoveUp);
+        bindings.add_chord_binding(
+            KeyChord::parse("RightAlt+W").unwrap(),
+            Action::MoveToTopEdge,
+        );
+
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.alt_down = true;
+        event.right_alt_down = true;
+
+        assert_eq!(
+            bindings.get_action_for_event(&event),
+            Some(Action::MoveToTopEdge)
+        );
+    }
+
+    #[test]
+    fn ctrl_plain_key_does_not_resolve_to_plain_binding() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("W").unwrap(), Action::MoveUp);
+
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.ctrl_down = true;
+
+        assert_eq!(bindings.get_action_for_event(&event), None);
+    }
+
+    #[test]
+    fn shift_self_keys_resolve_to_slow_mouse() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("LeftShift").unwrap(), Action::SlowMouse);
+        bindings.add_chord_binding(KeyChord::parse("RightShift").unwrap(), Action::SlowMouse);
+
+        for key in [VirtualKey::LeftShift, VirtualKey::RightShift] {
+            let mut event = KeyEvent::new(key, true);
+            event.shift_down = true;
+
+            assert_eq!(
+                bindings.get_action_for_event(&event),
+                Some(Action::SlowMouse),
+                "{key:?}"
+            );
+        }
     }
 }
