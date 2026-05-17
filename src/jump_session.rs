@@ -1,7 +1,7 @@
 use crate::{
     jump_grid::{code_to_index, expected_len, letters_needed},
     keyboard::VirtualKey,
-    JumpTargetRegionMode,
+    JumpAimPoint, JumpTargetRegionMode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +29,9 @@ impl JumpRegion {
 pub struct JumpStage {
     pub width: u32,
     pub height: u32,
+    pub aim_point: JumpAimPoint,
+    pub aim_offset_x_px: i32,
+    pub aim_offset_y_px: i32,
     pub target_margin_percent: u8,
     pub visual_context_margin_percent: u8,
     pub target_region_mode: JumpTargetRegionMode,
@@ -39,6 +42,9 @@ impl JumpStage {
         Self {
             width,
             height,
+            aim_point: JumpAimPoint::Center,
+            aim_offset_x_px: 0,
+            aim_offset_y_px: 0,
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
@@ -49,6 +55,9 @@ impl JumpStage {
         Self {
             width,
             height,
+            aim_point: JumpAimPoint::Center,
+            aim_offset_x_px: 0,
+            aim_offset_y_px: 0,
             target_margin_percent,
             visual_context_margin_percent: 0,
             target_region_mode: JumpTargetRegionMode::ExpandedTarget,
@@ -58,6 +67,9 @@ impl JumpStage {
     pub fn with_target_region_mode(
         width: u32,
         height: u32,
+        aim_point: JumpAimPoint,
+        aim_offset_x_px: i32,
+        aim_offset_y_px: i32,
         target_margin_percent: u8,
         visual_context_margin_percent: u8,
         target_region_mode: JumpTargetRegionMode,
@@ -65,6 +77,9 @@ impl JumpStage {
         Self {
             width,
             height,
+            aim_point,
+            aim_offset_x_px,
+            aim_offset_y_px,
             target_margin_percent,
             visual_context_margin_percent,
             target_region_mode,
@@ -89,6 +104,7 @@ pub struct JumpSession {
     pub input: String,
     pub path: Vec<(usize, usize)>,
     pub region_history: Vec<JumpRegion>,
+    pub final_adjust: Option<FinalAdjustState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +112,11 @@ pub enum JumpSessionUpdate {
     Consumed,
     Invalid,
     Cancelled,
+    AwaitingFinalAdjust {
+        x: i32,
+        y: i32,
+        region: JumpRegion,
+    },
     StageAdvanced {
         stage_index: usize,
         region: JumpRegion,
@@ -109,6 +130,15 @@ pub enum JumpSessionUpdate {
         y: i32,
         region: JumpRegion,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FinalAdjustState {
+    pub original_x: i32,
+    pub original_y: i32,
+    pub x: i32,
+    pub y: i32,
+    pub region: JumpRegion,
 }
 
 pub fn subdivide_region(
@@ -187,6 +217,7 @@ impl JumpSession {
             input: String::new(),
             path: Vec::new(),
             region_history: vec![current_region],
+            final_adjust: None,
         })
     }
 
@@ -288,10 +319,95 @@ impl JumpSession {
         } else {
             self.current_region = region;
             self.region_history.push(region);
-            let (x, y) = region.center();
+            let (x, y) = resolve_stage_aim(region, stage);
             JumpSessionUpdate::Completed { x, y, region }
         }
     }
+
+    pub fn begin_final_adjust(&mut self, x: i32, y: i32, region: JumpRegion) -> JumpSessionUpdate {
+        self.final_adjust = Some(FinalAdjustState {
+            original_x: x,
+            original_y: y,
+            x,
+            y,
+            region,
+        });
+        JumpSessionUpdate::AwaitingFinalAdjust { x, y, region }
+    }
+
+    pub fn nudge_final_adjust(&mut self, dx: i32, dy: i32) -> Option<JumpSessionUpdate> {
+        let adjust = self.final_adjust.as_mut()?;
+        adjust.x = (adjust.x + dx)
+            .max(self.session_region.left)
+            .min(self.session_region.left + self.session_region.width);
+        adjust.y = (adjust.y + dy)
+            .max(self.session_region.top)
+            .min(self.session_region.top + self.session_region.height);
+        Some(JumpSessionUpdate::AwaitingFinalAdjust {
+            x: adjust.x,
+            y: adjust.y,
+            region: adjust.region,
+        })
+    }
+
+    pub fn confirm_final_adjust(&mut self) -> Option<JumpSessionUpdate> {
+        let adjust = self.final_adjust.take()?;
+        Some(JumpSessionUpdate::Completed {
+            x: adjust.x,
+            y: adjust.y,
+            region: adjust.region,
+        })
+    }
+
+    pub fn cancel_final_adjust(&mut self) -> Option<JumpSessionUpdate> {
+        self.final_adjust.take()?;
+        Some(JumpSessionUpdate::Cancelled)
+    }
+
+    pub fn back_from_final_adjust(&mut self) -> Option<JumpSessionUpdate> {
+        self.final_adjust.take()?;
+        self.path.pop();
+        self.region_history.pop();
+        if self.stage_index > 0 {
+            self.stage_index -= 1;
+        }
+        self.current_region = self
+            .region_history
+            .last()
+            .copied()
+            .unwrap_or(self.session_region);
+        self.input.clear();
+        Some(JumpSessionUpdate::StageBacktracked {
+            stage_index: self.stage_index,
+            region: self.current_region,
+        })
+    }
+}
+
+pub fn resolve_stage_aim(region: JumpRegion, stage: JumpStage) -> (i32, i32) {
+    let (base_x, base_y) = match stage.aim_point {
+        JumpAimPoint::Center | JumpAimPoint::CustomOffset => region.center(),
+        JumpAimPoint::TopLeft => (region.left, region.top),
+        JumpAimPoint::TopRight => (region.left + region.width, region.top),
+        JumpAimPoint::BottomLeft => (region.left, region.top + region.height),
+        JumpAimPoint::BottomRight => (region.left + region.width, region.top + region.height),
+    };
+
+    let x = if matches!(stage.aim_point, JumpAimPoint::CustomOffset) {
+        base_x + stage.aim_offset_x_px
+    } else {
+        base_x
+    };
+    let y = if matches!(stage.aim_point, JumpAimPoint::CustomOffset) {
+        base_y + stage.aim_offset_y_px
+    } else {
+        base_y
+    };
+
+    (
+        x.max(region.left).min(region.left + region.width),
+        y.max(region.top).min(region.top + region.height),
+    )
 }
 
 fn target_region_for_stage(
@@ -318,10 +434,10 @@ impl JumpStage {
 #[cfg(test)]
 mod tests {
     use super::{
-        expand_region_within, subdivide_region, JumpRegion, JumpSession, JumpSessionUpdate,
-        JumpStage,
+        expand_region_within, resolve_stage_aim, subdivide_region, JumpRegion, JumpSession,
+        JumpSessionUpdate, JumpStage,
     };
-    use crate::{keyboard::VirtualKey, JumpTargetRegionMode};
+    use crate::{keyboard::VirtualKey, JumpAimPoint, JumpTargetRegionMode};
 
     fn base_region() -> JumpRegion {
         JumpRegion {
@@ -353,6 +469,15 @@ mod tests {
         JumpSession::new(base_region(), staged_grids()).unwrap()
     }
 
+    fn aim_stage(aim_point: JumpAimPoint, x: i32, y: i32) -> JumpStage {
+        JumpStage {
+            aim_point,
+            aim_offset_x_px: x,
+            aim_offset_y_px: y,
+            ..JumpStage::new(1, 1)
+        }
+    }
+
     fn press(session: &mut JumpSession, key: VirtualKey) -> Option<JumpSessionUpdate> {
         session.handle_key(key, true)
     }
@@ -376,6 +501,60 @@ mod tests {
             }
             .center(),
             (0, 16)
+        );
+    }
+
+    #[test]
+    fn aim_resolver_supports_center_corners_and_custom_offset() {
+        let region = JumpRegion {
+            left: 10,
+            top: 20,
+            width: 30,
+            height: 40,
+        };
+
+        assert_eq!(
+            resolve_stage_aim(region, aim_stage(JumpAimPoint::Center, 9, 9)),
+            (25, 40)
+        );
+        assert_eq!(
+            resolve_stage_aim(region, aim_stage(JumpAimPoint::TopLeft, 9, 9)),
+            (10, 20)
+        );
+        assert_eq!(
+            resolve_stage_aim(region, aim_stage(JumpAimPoint::TopRight, 9, 9)),
+            (40, 20)
+        );
+        assert_eq!(
+            resolve_stage_aim(region, aim_stage(JumpAimPoint::BottomLeft, 9, 9)),
+            (10, 60)
+        );
+        assert_eq!(
+            resolve_stage_aim(region, aim_stage(JumpAimPoint::BottomRight, 9, 9)),
+            (40, 60)
+        );
+        assert_eq!(
+            resolve_stage_aim(region, aim_stage(JumpAimPoint::CustomOffset, 3, -4)),
+            (28, 36)
+        );
+    }
+
+    #[test]
+    fn aim_resolver_clamps_custom_offsets_to_selected_region_bounds() {
+        let region = JumpRegion {
+            left: 10,
+            top: 20,
+            width: 30,
+            height: 40,
+        };
+
+        assert_eq!(
+            resolve_stage_aim(region, aim_stage(JumpAimPoint::CustomOffset, 100, 100)),
+            (40, 60)
+        );
+        assert_eq!(
+            resolve_stage_aim(region, aim_stage(JumpAimPoint::CustomOffset, -100, -100)),
+            (10, 20)
         );
     }
 
@@ -792,6 +971,9 @@ mod tests {
             JumpStage::with_target_region_mode(
                 5,
                 5,
+                crate::JumpAimPoint::Center,
+                0,
+                0,
                 0,
                 25,
                 JumpTargetRegionMode::RegionWithContext,

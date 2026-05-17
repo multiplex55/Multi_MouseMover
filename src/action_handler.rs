@@ -1,5 +1,5 @@
 use crate::monitor::{current_monitor_rect_for_cursor, MonitorEdge, MonitorRect};
-use crate::{action, Config};
+use crate::{action, app_state::KeyEvent, keyboard::VirtualKey, Config, FinalAdjustConfig};
 use action::Action;
 use enigo::*;
 use std::collections::HashSet;
@@ -15,6 +15,14 @@ pub struct MovementTick {
     pub dy: f64,
     pub speed: i32,
     pub moving: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinalAdjustControl {
+    Nudge { dx: i32, dy: i32 },
+    Confirm,
+    Cancel,
+    Back,
 }
 
 pub trait MouseBackend {
@@ -355,6 +363,86 @@ pub fn edge_target(rect: MonitorRect, edge: MonitorEdge, offset_px: i32) -> (i32
     rect.edge_midpoint(edge, offset_px)
 }
 
+pub fn final_adjust_control_for_event(
+    event: &KeyEvent,
+    action: Option<Action>,
+    config: &FinalAdjustConfig,
+) -> Option<FinalAdjustControl> {
+    if !event.is_down {
+        return None;
+    }
+
+    if matches_configured_key(event.key, &config.confirm_key) {
+        return Some(FinalAdjustControl::Confirm);
+    }
+    if matches_configured_key(event.key, &config.cancel_key) {
+        return Some(FinalAdjustControl::Cancel);
+    }
+    if matches_configured_key(event.key, &config.back_key) {
+        return Some(FinalAdjustControl::Back);
+    }
+
+    let (dx, dy) = final_adjust_direction(event.key, action)?;
+    let step = if final_adjust_modifier_down(event, &config.modifier_key) {
+        config.large_step_px
+    } else {
+        config.small_step_px
+    };
+    Some(FinalAdjustControl::Nudge {
+        dx: dx * step,
+        dy: dy * step,
+    })
+}
+
+fn matches_configured_key(key: VirtualKey, configured: &str) -> bool {
+    VirtualKey::from_string(configured) == Some(key)
+}
+
+fn final_adjust_direction(key: VirtualKey, action: Option<Action>) -> Option<(i32, i32)> {
+    match action {
+        Some(Action::MoveUp) => Some((0, -1)),
+        Some(Action::MoveDown) => Some((0, 1)),
+        Some(Action::MoveLeft) => Some((-1, 0)),
+        Some(Action::MoveRight) => Some((1, 0)),
+        Some(Action::MoveUpRight) => Some((1, -1)),
+        Some(Action::MoveUpLeft) => Some((-1, -1)),
+        Some(Action::MoveDownRight) => Some((1, 1)),
+        Some(Action::MoveDownLeft) => Some((-1, 1)),
+        _ => match key {
+            VirtualKey::Up => Some((0, -1)),
+            VirtualKey::Down => Some((0, 1)),
+            VirtualKey::Left => Some((-1, 0)),
+            VirtualKey::Right => Some((1, 0)),
+            _ => None,
+        },
+    }
+}
+
+fn final_adjust_modifier_down(event: &KeyEvent, configured: &str) -> bool {
+    match VirtualKey::from_string(configured) {
+        Some(VirtualKey::Shift | VirtualKey::LeftShift | VirtualKey::RightShift) => {
+            event.shift_down
+                || matches!(
+                    event.key,
+                    VirtualKey::Shift | VirtualKey::LeftShift | VirtualKey::RightShift
+                )
+        }
+        Some(VirtualKey::Ctrl | VirtualKey::LeftCtrl | VirtualKey::RightCtrl) => {
+            event.ctrl_down
+                || matches!(
+                    event.key,
+                    VirtualKey::Ctrl | VirtualKey::LeftCtrl | VirtualKey::RightCtrl
+                )
+        }
+        Some(VirtualKey::Alt | VirtualKey::LeftAlt) => {
+            event.alt_down || matches!(event.key, VirtualKey::Alt | VirtualKey::LeftAlt)
+        }
+        Some(VirtualKey::RightAlt) => event.right_alt_down || event.key == VirtualKey::RightAlt,
+        Some(key) => event.key == key,
+        None => false,
+    }
+}
+
 fn debug_diagnostics_enabled() -> bool {
     env::var(DEBUG_DIAGNOSTICS_ENV)
         .map(|value| {
@@ -498,6 +586,18 @@ mod tests {
 
     fn actions(actions: &[Action]) -> HashSet<Action> {
         actions.iter().copied().collect()
+    }
+
+    fn final_adjust_config() -> FinalAdjustConfig {
+        FinalAdjustConfig {
+            enabled: true,
+            small_step_px: 2,
+            large_step_px: 9,
+            modifier_key: "Shift".to_string(),
+            confirm_key: "Enter".to_string(),
+            cancel_key: "Escape".to_string(),
+            back_key: "Backspace".to_string(),
+        }
     }
 
     fn tick(
@@ -697,5 +797,48 @@ mod tests {
         assert_eq!(edge_target(rect, MonitorEdge::Left, 1), (11, 70));
         assert_eq!(edge_target(rect, MonitorEdge::Right, 1), (208, 70));
         assert_eq!(edge_target(rect, MonitorEdge::Top, 7), (110, 27));
+    }
+
+    #[test]
+    fn final_adjust_nudge_uses_small_step_without_modifier() {
+        let event = KeyEvent::new(VirtualKey::Right, true);
+
+        assert_eq!(
+            final_adjust_control_for_event(&event, Some(Action::MoveRight), &final_adjust_config()),
+            Some(FinalAdjustControl::Nudge { dx: 2, dy: 0 })
+        );
+    }
+
+    #[test]
+    fn final_adjust_nudge_uses_large_step_with_modifier() {
+        let mut event = KeyEvent::new(VirtualKey::Down, true);
+        event.shift_down = true;
+
+        assert_eq!(
+            final_adjust_control_for_event(&event, Some(Action::MoveDown), &final_adjust_config()),
+            Some(FinalAdjustControl::Nudge { dx: 0, dy: 9 })
+        );
+    }
+
+    #[test]
+    fn final_adjust_control_keys_are_matched_from_config() {
+        let config = final_adjust_config();
+
+        assert_eq!(
+            final_adjust_control_for_event(&KeyEvent::new(VirtualKey::Enter, true), None, &config),
+            Some(FinalAdjustControl::Confirm)
+        );
+        assert_eq!(
+            final_adjust_control_for_event(&KeyEvent::new(VirtualKey::Escape, true), None, &config),
+            Some(FinalAdjustControl::Cancel)
+        );
+        assert_eq!(
+            final_adjust_control_for_event(
+                &KeyEvent::new(VirtualKey::Backspace, true),
+                None,
+                &config
+            ),
+            Some(FinalAdjustControl::Back)
+        );
     }
 }

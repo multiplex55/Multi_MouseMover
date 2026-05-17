@@ -56,6 +56,9 @@ move_cursor_after_each_stage = false
 enabled = true
 width = 10
 height = 10
+aim_point = "center"
+aim_offset_x_px = 0
+aim_offset_y_px = 0
 target_margin_percent = 0
 visual_context_margin_percent = 0
 
@@ -63,6 +66,9 @@ visual_context_margin_percent = 0
 enabled = true
 width = 8
 height = 8
+aim_point = "center"
+aim_offset_x_px = 0
+aim_offset_y_px = 0
 target_margin_percent = 0
 visual_context_margin_percent = 1
 
@@ -70,8 +76,20 @@ visual_context_margin_percent = 1
 enabled = true
 width = 5
 height = 5
+aim_point = "center"
+aim_offset_x_px = 0
+aim_offset_y_px = 0
 target_margin_percent = 0
 visual_context_margin_percent = 5
+
+[final_adjust]
+enabled = false
+small_step_px = 1
+large_step_px = 10
+modifier_key = "Shift"
+confirm_key = "Enter"
+cancel_key = "Escape"
+back_key = "Backspace"
 
 # Mouse movement parameters
 acceleration      = 2 # Pixels per acceleration step

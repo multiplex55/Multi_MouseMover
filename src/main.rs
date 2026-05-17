@@ -46,6 +46,8 @@ const MAX_JUMP_REGION_MARGIN_PERCENT: u8 = 50;
 const MIN_JUMP_ZOOM_SCALE: f32 = 1.0;
 const MAX_JUMP_ZOOM_SCALE: f32 = 10.0;
 const MAX_EDGE_JUMP_OFFSET_PX: i32 = 10_000;
+const MAX_JUMP_AIM_OFFSET_PX: i32 = 10_000;
+const MAX_FINAL_ADJUST_STEP_PX: i32 = 10_000;
 
 static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_DECODED: AtomicU64 = AtomicU64::new(0);
@@ -166,6 +168,7 @@ struct Config {
     polling_rate: u64,
     grid_size: GridSize,
     jump: JumpConfig,
+    final_adjust: FinalAdjustConfig,
     wheel: WheelConfig,
     edge_jump: EdgeJumpConfig,
     starting_speed: i32,    // Initial speed in pixels
@@ -182,12 +185,56 @@ impl Default for Config {
             polling_rate: DEFAULT_POLLING_RATE_MS,
             grid_size: GridSize::default(),
             jump: JumpConfig::default(),
+            final_adjust: FinalAdjustConfig::default(),
             wheel: WheelConfig::default(),
             edge_jump: EdgeJumpConfig::default(),
             starting_speed: 1,
             acceleration: 2,
             acceleration_rate: 1,
             top_speed: 6,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum JumpAimPoint {
+    Center,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    CustomOffset,
+}
+
+impl Default for JumpAimPoint {
+    fn default() -> Self {
+        Self::Center
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
+pub struct FinalAdjustConfig {
+    enabled: bool,
+    small_step_px: i32,
+    large_step_px: i32,
+    modifier_key: String,
+    confirm_key: String,
+    cancel_key: String,
+    back_key: String,
+}
+
+impl Default for FinalAdjustConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            small_step_px: 1,
+            large_step_px: 10,
+            modifier_key: "Shift".to_string(),
+            confirm_key: "Enter".to_string(),
+            cancel_key: "Escape".to_string(),
+            back_key: "Backspace".to_string(),
         }
     }
 }
@@ -333,6 +380,9 @@ impl Default for JumpConfig {
                 enabled: false,
                 width: 5,
                 height: 5,
+                aim_point: JumpAimPoint::Center,
+                aim_offset_x_px: 0,
+                aim_offset_y_px: 0,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 10,
                 zoom_scale: 1.5,
@@ -345,6 +395,9 @@ impl Default for JumpConfig {
                 enabled: false,
                 width: 3,
                 height: 3,
+                aim_point: JumpAimPoint::Center,
+                aim_offset_x_px: 0,
+                aim_offset_y_px: 0,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 5,
                 zoom_scale: 2.5,
@@ -411,6 +464,9 @@ struct JumpStageConfig {
     enabled: bool,
     width: u32,
     height: u32,
+    aim_point: JumpAimPoint,
+    aim_offset_x_px: i32,
+    aim_offset_y_px: i32,
     target_margin_percent: u8,
     visual_context_margin_percent: u8,
     zoom_scale: f32,
@@ -426,6 +482,9 @@ struct JumpStageConfigToml {
     enabled: bool,
     width: u32,
     height: u32,
+    aim_point: JumpAimPoint,
+    aim_offset_x_px: i32,
+    aim_offset_y_px: i32,
     target_margin_percent: u8,
     visual_context_margin_percent: Option<u8>,
     zoom_scale: f32,
@@ -441,6 +500,9 @@ impl Default for JumpStageConfigToml {
             enabled: default.enabled,
             width: default.width,
             height: default.height,
+            aim_point: default.aim_point,
+            aim_offset_x_px: default.aim_offset_x_px,
+            aim_offset_y_px: default.aim_offset_y_px,
             target_margin_percent: default.target_margin_percent,
             visual_context_margin_percent: None,
             zoom_scale: default.zoom_scale,
@@ -476,6 +538,9 @@ impl<'de> Deserialize<'de> for JumpStageConfig {
             enabled: fields.enabled,
             width: fields.width,
             height: fields.height,
+            aim_point: fields.aim_point,
+            aim_offset_x_px: fields.aim_offset_x_px,
+            aim_offset_y_px: fields.aim_offset_y_px,
             target_margin_percent: fields.target_margin_percent,
             visual_context_margin_percent,
             zoom_scale: fields.zoom_scale,
@@ -493,6 +558,9 @@ impl JumpStageConfig {
             enabled: true,
             width: 0,
             height: 0,
+            aim_point: JumpAimPoint::Center,
+            aim_offset_x_px: 0,
+            aim_offset_y_px: 0,
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
             zoom_scale: 1.0,
@@ -510,6 +578,9 @@ impl Default for JumpStageConfig {
             enabled: false,
             width: 1,
             height: 1,
+            aim_point: JumpAimPoint::Center,
+            aim_offset_x_px: 0,
+            aim_offset_y_px: 0,
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
             zoom_scale: 1.0,
@@ -527,6 +598,7 @@ impl Config {
             self.polling_rate = DEFAULT_POLLING_RATE_MS;
         }
         self.normalize_jump_config();
+        self.normalize_final_adjust_config();
         self.normalize_wheel_config();
         self.normalize_edge_jump_config();
         self.runtime_system_bindings()?;
@@ -543,6 +615,43 @@ impl Config {
                 MAX_EDGE_JUMP_OFFSET_PX, MAX_EDGE_JUMP_OFFSET_PX
             ));
             self.edge_jump.offset_px = MAX_EDGE_JUMP_OFFSET_PX;
+        }
+    }
+
+    fn normalize_final_adjust_config(&mut self) {
+        self.final_adjust.small_step_px = normalize_final_adjust_step(
+            "final_adjust.small_step_px",
+            self.final_adjust.small_step_px,
+            FinalAdjustConfig::default().small_step_px,
+        );
+        self.final_adjust.large_step_px = normalize_final_adjust_step(
+            "final_adjust.large_step_px",
+            self.final_adjust.large_step_px,
+            FinalAdjustConfig::default().large_step_px,
+        );
+        if self.final_adjust.large_step_px < self.final_adjust.small_step_px {
+            warn_config_normalized(
+                "final_adjust.large_step_px is below final_adjust.small_step_px; using small step",
+            );
+            self.final_adjust.large_step_px = self.final_adjust.small_step_px;
+        }
+
+        let defaults = FinalAdjustConfig::default();
+        if VirtualKey::from_string(&self.final_adjust.modifier_key).is_none() {
+            warn_config_normalized("final_adjust.modifier_key is invalid; using Shift");
+            self.final_adjust.modifier_key = defaults.modifier_key;
+        }
+        if VirtualKey::from_string(&self.final_adjust.confirm_key).is_none() {
+            warn_config_normalized("final_adjust.confirm_key is invalid; using Enter");
+            self.final_adjust.confirm_key = defaults.confirm_key;
+        }
+        if VirtualKey::from_string(&self.final_adjust.cancel_key).is_none() {
+            warn_config_normalized("final_adjust.cancel_key is invalid; using Escape");
+            self.final_adjust.cancel_key = defaults.cancel_key;
+        }
+        if VirtualKey::from_string(&self.final_adjust.back_key).is_none() {
+            warn_config_normalized("final_adjust.back_key is invalid; using Backspace");
+            self.final_adjust.back_key = defaults.back_key;
         }
     }
 
@@ -719,6 +828,10 @@ fn warn_config_normalized(message: &str) {
 fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
     stage.width = normalize_jump_stage_size(name, "width", stage.width);
     stage.height = normalize_jump_stage_size(name, "height", stage.height);
+    stage.aim_offset_x_px =
+        normalize_jump_aim_offset(name, "aim_offset_x_px", stage.aim_offset_x_px);
+    stage.aim_offset_y_px =
+        normalize_jump_aim_offset(name, "aim_offset_y_px", stage.aim_offset_y_px);
     if stage.target_region_mode_invalid {
         warn_config_normalized(&format!(
             "{name}.target_region_mode is invalid; using exact_region"
@@ -756,6 +869,43 @@ fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
         stage.visual_context_margin_percent = MAX_JUMP_REGION_MARGIN_PERCENT;
     }
     stage.zoom_scale = normalize_jump_zoom_scale(name, stage.zoom_scale);
+}
+
+fn normalize_jump_aim_offset(name: &str, field: &str, value: i32) -> i32 {
+    value
+        .clamp(-MAX_JUMP_AIM_OFFSET_PX, MAX_JUMP_AIM_OFFSET_PX)
+        .tap(|clamped| {
+            if *clamped != value {
+                warn_config_normalized(&format!(
+                    "{name}.{field}={value} is outside +/-{}; clamping",
+                    MAX_JUMP_AIM_OFFSET_PX
+                ));
+            }
+        })
+}
+
+trait Tap: Sized {
+    fn tap<F: FnOnce(&Self)>(self, f: F) -> Self {
+        f(&self);
+        self
+    }
+}
+
+impl<T> Tap for T {}
+
+fn normalize_final_adjust_step(name: &str, value: i32, default_value: i32) -> i32 {
+    if value < 1 {
+        warn_config_normalized(&format!("{name} is below 1; using {default_value}"));
+        default_value
+    } else if value > MAX_FINAL_ADJUST_STEP_PX {
+        warn_config_normalized(&format!(
+            "{name} is above {}; clamping to {}",
+            MAX_FINAL_ADJUST_STEP_PX, MAX_FINAL_ADJUST_STEP_PX
+        ));
+        MAX_FINAL_ADJUST_STEP_PX
+    } else {
+        value
+    }
 }
 
 fn normalize_jump_stage_size(name: &str, field: &str, value: u32) -> u32 {
@@ -1010,11 +1160,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     if is_down { "down" } else { "up" }
                 )
             }
-            AppCommand::JumpInput(event) => {
+            AppCommand::JumpInput(event, action) => {
                 println!(
-                    "[command] JumpInput key={:?} state={}",
+                    "[command] JumpInput key={:?} state={} action={:?}",
                     event.key,
-                    if event.is_down { "down" } else { "up" }
+                    if event.is_down { "down" } else { "up" },
+                    action
                 )
             }
         }
@@ -1065,14 +1216,15 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 sync_jump_overlay(resolution);
             }
         }
-        AppCommand::JumpInput(event) => {
+        AppCommand::JumpInput(event, action) => {
             let (jump_result, view) = {
                 let mut app_state = APP_STATE.write().unwrap();
-                let jump_result = app_state.handle_jump_input(event);
+                let jump_result = app_state.handle_jump_input(event, action);
                 let view = match jump_result {
                     None
                     | Some(JumpSessionUpdate::Consumed)
                     | Some(JumpSessionUpdate::Invalid)
+                    | Some(JumpSessionUpdate::AwaitingFinalAdjust { .. })
                     | Some(JumpSessionUpdate::StageAdvanced { .. })
                     | Some(JumpSessionUpdate::StageBacktracked { .. }) => app_state.jump_view(),
                     Some(JumpSessionUpdate::Cancelled | JumpSessionUpdate::Completed { .. }) => {
@@ -1083,7 +1235,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             };
 
             match jump_result {
-                None | Some(JumpSessionUpdate::Consumed) | Some(JumpSessionUpdate::Invalid) => {
+                None
+                | Some(JumpSessionUpdate::Consumed)
+                | Some(JumpSessionUpdate::Invalid)
+                | Some(JumpSessionUpdate::AwaitingFinalAdjust { .. }) => {
                     if let Some(view) = view {
                         update_jump_overlay(view);
                     }

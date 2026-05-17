@@ -1,8 +1,9 @@
 use crate::action::Action;
+use crate::action_handler::{final_adjust_control_for_event, FinalAdjustControl};
 use crate::jump_session::{
     expand_region_within, JumpRegion, JumpSession, JumpSessionUpdate, JumpStage,
 };
-use crate::jump_view::{JumpOverlayView, JumpStageMetadata};
+use crate::jump_view::{FinalAdjustOverlayView, JumpOverlayView, JumpStageMetadata};
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
 use crate::keyboard::VirtualKey;
 use crate::Config;
@@ -41,7 +42,7 @@ pub enum AppCommand {
     Exit,
     EnterJumpMode { activation_key: VirtualKey },
     KeyAction { action: Action, is_down: bool },
-    JumpInput(KeyEvent),
+    JumpInput(KeyEvent, Option<Action>),
 }
 
 #[derive(Debug)]
@@ -65,6 +66,7 @@ pub enum JumpState {
         activation_key: VirtualKey,
         activation_key_released: bool,
         stage_metadata: Vec<JumpStageMetadata>,
+        final_adjust_config: crate::FinalAdjustConfig,
     },
 }
 
@@ -191,6 +193,9 @@ impl AppState {
                 JumpStage::with_target_region_mode(
                     stage.grid_size.0,
                     stage.grid_size.1,
+                    stage.aim_point,
+                    stage.aim_offset_x_px,
+                    stage.aim_offset_y_px,
                     stage.target_margin_percent,
                     stage.visual_context_margin_percent,
                     stage.target_region_mode,
@@ -208,26 +213,53 @@ impl AppState {
             activation_key,
             activation_key_released: false,
             stage_metadata,
+            final_adjust_config: config.final_adjust.clone(),
         };
         true
     }
 
-    pub fn handle_jump_input(&mut self, event: KeyEvent) -> Option<JumpSessionUpdate> {
+    pub fn handle_jump_input(
+        &mut self,
+        event: KeyEvent,
+        action: Option<Action>,
+    ) -> Option<JumpSessionUpdate> {
         if self.is_activation_key_event(&event) {
             return Some(JumpSessionUpdate::Consumed);
         }
 
-        let JumpState::Active { session, .. } = &mut self.jump else {
+        let JumpState::Active {
+            session,
+            final_adjust_config,
+            ..
+        } = &mut self.jump
+        else {
             return None;
         };
 
-        session.handle_key(event.key, event.is_down)
+        if session.final_adjust.is_some() {
+            return match final_adjust_control_for_event(&event, action, final_adjust_config) {
+                Some(FinalAdjustControl::Nudge { dx, dy }) => session.nudge_final_adjust(dx, dy),
+                Some(FinalAdjustControl::Confirm) => session.confirm_final_adjust(),
+                Some(FinalAdjustControl::Cancel) => session.cancel_final_adjust(),
+                Some(FinalAdjustControl::Back) => session.back_from_final_adjust(),
+                None => Some(JumpSessionUpdate::Consumed),
+            };
+        }
+
+        let update = session.handle_key(event.key, event.is_down);
+        if final_adjust_config.enabled {
+            if let Some(JumpSessionUpdate::Completed { x, y, region }) = update {
+                return Some(session.begin_final_adjust(x, y, region));
+            }
+        }
+        update
     }
 
     pub fn jump_view(&self) -> Option<JumpOverlayView> {
         let JumpState::Active {
             session,
             stage_metadata,
+            final_adjust_config,
             ..
         } = &self.jump
         else {
@@ -263,6 +295,17 @@ impl AppState {
             client_draw_region,
             grid_size: session.current_grid(),
             input: session.input.clone(),
+            final_adjust: session.final_adjust.map(|adjust| FinalAdjustOverlayView {
+                original_point: (adjust.original_x, adjust.original_y),
+                candidate_point: (adjust.x, adjust.y),
+                region: adjust.region,
+                small_step_px: final_adjust_config.small_step_px,
+                large_step_px: final_adjust_config.large_step_px,
+                modifier_key: final_adjust_config.modifier_key.clone(),
+                confirm_key: final_adjust_config.confirm_key.clone(),
+                cancel_key: final_adjust_config.cancel_key.clone(),
+                back_key: final_adjust_config.back_key.clone(),
+            }),
         })
     }
 
@@ -312,7 +355,7 @@ impl AppState {
                 return;
             }
 
-            self.enqueue_command(AppCommand::JumpInput(event));
+            self.enqueue_command(AppCommand::JumpInput(event, action));
             return;
         }
 
@@ -446,6 +489,9 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
     let mut stages = vec![JumpStageMetadata {
         index: 0,
         grid_size: (config.jump.coarse.width, config.jump.coarse.height),
+        aim_point: config.jump.coarse.aim_point,
+        aim_offset_x_px: config.jump.coarse.aim_offset_x_px,
+        aim_offset_y_px: config.jump.coarse.aim_offset_y_px,
         target_margin_percent: config.jump.coarse.target_margin_percent,
         visual_context_margin_percent: config.jump.coarse.visual_context_margin_percent,
         zoom_scale: config.jump.coarse.zoom_scale,
@@ -456,6 +502,9 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
         stages.push(JumpStageMetadata {
             index: stages.len(),
             grid_size: (config.jump.fine.width, config.jump.fine.height),
+            aim_point: config.jump.fine.aim_point,
+            aim_offset_x_px: config.jump.fine.aim_offset_x_px,
+            aim_offset_y_px: config.jump.fine.aim_offset_y_px,
             target_margin_percent: config.jump.fine.target_margin_percent,
             visual_context_margin_percent: config.jump.fine.visual_context_margin_percent,
             zoom_scale: config.jump.fine.zoom_scale,
@@ -467,6 +516,9 @@ fn jump_stage_metadata(config: &Config) -> Vec<JumpStageMetadata> {
         stages.push(JumpStageMetadata {
             index: stages.len(),
             grid_size: (config.jump.precise.width, config.jump.precise.height),
+            aim_point: config.jump.precise.aim_point,
+            aim_offset_x_px: config.jump.precise.aim_offset_x_px,
+            aim_offset_y_px: config.jump.precise.aim_offset_y_px,
             target_margin_percent: config.jump.precise.target_margin_percent,
             visual_context_margin_percent: config.jump.precise.visual_context_margin_percent,
             zoom_scale: config.jump.precise.zoom_scale,
@@ -497,6 +549,14 @@ mod tests {
     fn enter_jump_mode(state: &mut AppState, activation_key: VirtualKey) {
         let config = Config::default().normalize().unwrap();
         assert!(state.enter_jump_mode(&config, jump_region(), activation_key));
+    }
+
+    fn final_adjust_config(enabled: bool) -> Config {
+        let mut config = Config::default();
+        config.final_adjust.enabled = enabled;
+        config.final_adjust.small_step_px = 2;
+        config.final_adjust.large_step_px = 9;
+        config.normalize().unwrap()
     }
 
     fn state_with_bound_key(key: VirtualKey) -> AppState {
@@ -753,7 +813,7 @@ mod tests {
 
         assert_eq!(
             collect_commands(&mut state),
-            vec![AppCommand::JumpInput(event)]
+            vec![AppCommand::JumpInput(event, None)]
         );
     }
 
@@ -776,8 +836,118 @@ mod tests {
         enter_jump_mode(&mut state, VirtualKey::J);
 
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::Escape, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::Escape, true), None),
             Some(JumpSessionUpdate::Cancelled)
+        );
+    }
+
+    #[test]
+    fn completed_jump_finishes_immediately_when_final_adjust_is_disabled() {
+        let config = final_adjust_config(false);
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::F));
+
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true), None),
+            Some(JumpSessionUpdate::Completed {
+                x: 95,
+                y: 5,
+                region: JumpRegion {
+                    left: 90,
+                    top: 0,
+                    width: 10,
+                    height: 10,
+                },
+            })
+        );
+        assert!(state.jump_view().unwrap().final_adjust.is_none());
+    }
+
+    #[test]
+    fn completed_jump_enters_final_adjust_when_enabled() {
+        let config = final_adjust_config(true);
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::F));
+
+        state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None);
+
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true), None),
+            Some(JumpSessionUpdate::AwaitingFinalAdjust {
+                x: 95,
+                y: 5,
+                region: JumpRegion {
+                    left: 90,
+                    top: 0,
+                    width: 10,
+                    height: 10,
+                },
+            })
+        );
+
+        let view = state.jump_view().unwrap();
+        let adjust = view.final_adjust.unwrap();
+        assert_eq!(adjust.original_point, (95, 5));
+        assert_eq!(adjust.candidate_point, (95, 5));
+    }
+
+    #[test]
+    fn final_adjust_nudge_and_confirm_complete_at_candidate_point() {
+        let config = final_adjust_config(true);
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::F));
+        state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None);
+        state.handle_jump_input(KeyEvent::new(VirtualKey::J, true), None);
+
+        assert_eq!(
+            state.handle_jump_input(
+                KeyEvent::new(VirtualKey::Right, true),
+                Some(Action::MoveRight)
+            ),
+            Some(JumpSessionUpdate::AwaitingFinalAdjust {
+                x: 97,
+                y: 5,
+                region: JumpRegion {
+                    left: 90,
+                    top: 0,
+                    width: 10,
+                    height: 10,
+                },
+            })
+        );
+
+        let mut large_down = KeyEvent::new(VirtualKey::Down, true);
+        large_down.shift_down = true;
+        assert_eq!(
+            state.handle_jump_input(large_down, Some(Action::MoveDown)),
+            Some(JumpSessionUpdate::AwaitingFinalAdjust {
+                x: 97,
+                y: 14,
+                region: JumpRegion {
+                    left: 90,
+                    top: 0,
+                    width: 10,
+                    height: 10,
+                },
+            })
+        );
+
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::Enter, true), None),
+            Some(JumpSessionUpdate::Completed {
+                x: 97,
+                y: 14,
+                region: JumpRegion {
+                    left: 90,
+                    top: 0,
+                    width: 10,
+                    height: 10,
+                },
+            })
         );
     }
 
@@ -787,16 +957,16 @@ mod tests {
         enter_jump_mode(&mut state, VirtualKey::J);
 
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true), None),
             Some(JumpSessionUpdate::Consumed)
         );
         assert_eq!(state.jump_view().unwrap().input, "");
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::J, false)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, false), None),
             Some(JumpSessionUpdate::Consumed)
         );
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true), None),
             Some(JumpSessionUpdate::Consumed)
         );
         assert_eq!(state.jump_view().unwrap().input, "J");
@@ -893,11 +1063,11 @@ mod tests {
         let mut state = AppState::default();
         assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
             Some(JumpSessionUpdate::Consumed)
         );
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -937,11 +1107,11 @@ mod tests {
         let mut state = AppState::default();
         assert!(state.enter_jump_mode(&config, jump_region(), VirtualKey::J));
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
             Some(JumpSessionUpdate::Consumed)
         );
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -953,7 +1123,7 @@ mod tests {
             })
         );
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::D, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::D, true), None),
             Some(JumpSessionUpdate::Consumed)
         );
 
@@ -962,11 +1132,11 @@ mod tests {
         assert_eq!(before_backtrack.input, "D");
 
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::Backspace, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::Backspace, true), None),
             Some(JumpSessionUpdate::Consumed)
         );
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::Backspace, true)),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::Backspace, true), None),
             Some(JumpSessionUpdate::StageBacktracked {
                 stage_index: 0,
                 region: jump_region(),
@@ -1004,8 +1174,8 @@ mod tests {
 
         for key in [VirtualKey::B, VirtualKey::B] {
             assert_eq!(
-                low_state.handle_jump_input(KeyEvent::new(key, true)),
-                high_state.handle_jump_input(KeyEvent::new(key, true))
+                low_state.handle_jump_input(KeyEvent::new(key, true), None),
+                high_state.handle_jump_input(KeyEvent::new(key, true), None)
             );
         }
 
@@ -1068,7 +1238,7 @@ mod tests {
 
         assert_eq!(
             collect_commands(&mut state),
-            vec![AppCommand::JumpInput(event)]
+            vec![AppCommand::JumpInput(event, None)]
         );
     }
 

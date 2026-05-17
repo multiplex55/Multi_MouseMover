@@ -67,6 +67,10 @@ fn input_color() -> COLORREF {
     RGB(0, 255, 255)
 }
 
+fn final_adjust_color() -> COLORREF {
+    RGB(255, 64, 64)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransparencyMode {
     ColorKey { color: COLORREF, alpha: u8 },
@@ -112,6 +116,17 @@ fn draw_mode_for_view(view: &JumpOverlayView) -> DrawMode {
 }
 
 fn format_jump_indicator(view: &JumpOverlayView) -> String {
+    if let Some(adjust) = &view.final_adjust {
+        return format!(
+            "Adjust: arrows move, {}+arrows {}px, {} ok, {} cancel, {} back",
+            adjust.modifier_key,
+            adjust.large_step_px,
+            adjust.confirm_key,
+            adjust.cancel_key,
+            adjust.back_key
+        );
+    }
+
     format!(
         "Jump {}/{}: {}_",
         view.stage_index + 1,
@@ -466,6 +481,31 @@ impl JumpOverlay {
         )
     }
 
+    fn draw_final_adjust(&self, hdc: HDC, view: &JumpOverlayView) {
+        let Some(adjust) = &view.final_adjust else {
+            return;
+        };
+        let Some((x, y)) = source_screen_to_client(
+            adjust.candidate_point.0,
+            adjust.candidate_point.1,
+            preview_source_region_for_view(view),
+            view.client_draw_region,
+        ) else {
+            return;
+        };
+
+        unsafe {
+            let pen = CreatePen(PS_SOLID, 2, final_adjust_color());
+            let old_pen = SelectObject(hdc, pen.into());
+            let _ = MoveToEx(hdc, x - 12, y, None);
+            let _ = LineTo(hdc, x + 13, y);
+            let _ = MoveToEx(hdc, x, y - 12, None);
+            let _ = LineTo(hdc, x, y + 13);
+            let _ = SelectObject(hdc, old_pen);
+            let _ = DeleteObject(pen.into());
+        }
+    }
+
     fn draw_background(&self, hdc: HDC, client_rect: &RECT, view: &JumpOverlayView) {
         unsafe {
             match self.effective_draw_mode() {
@@ -577,6 +617,7 @@ impl JumpOverlay {
                 let indicator_x = grid_rect.left + (width / 2) - 60;
                 let indicator_y = grid_rect.top + 16;
                 let _ = TextOutW(hdc, indicator_x, indicator_y, &indicator_utf16);
+                self.draw_final_adjust(hdc, view);
 
                 let _ = SetTextColor(hdc, old_text_color);
                 let _ = SetBkMode(hdc, BACKGROUND_MODE(old_bk_mode as u32));
@@ -662,7 +703,7 @@ mod tests {
     };
     use crate::jump_session::JumpRegion;
     use crate::jump_view::{JumpOverlayView, JumpStageMetadata};
-    use crate::JumpTargetRegionMode;
+    use crate::{JumpAimPoint, JumpTargetRegionMode};
     use windows::Win32::UI::WindowsAndMessaging::{WS_EX_NOACTIVATE, WS_EX_TRANSPARENT};
 
     #[test]
@@ -830,6 +871,9 @@ mod tests {
             JumpStageMetadata {
                 index: 1,
                 grid_size: (10, 10),
+                aim_point: JumpAimPoint::Center,
+                aim_offset_x_px: 0,
+                aim_offset_y_px: 0,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 20,
                 zoom_scale: 1.0,
@@ -861,6 +905,9 @@ mod tests {
             JumpStageMetadata {
                 index: 1,
                 grid_size: (10, 10),
+                aim_point: JumpAimPoint::Center,
+                aim_offset_x_px: 0,
+                aim_offset_y_px: 0,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 20,
                 zoom_scale: 1.0,
@@ -899,6 +946,9 @@ mod tests {
             JumpStageMetadata {
                 index: 1,
                 grid_size: (10, 10),
+                aim_point: JumpAimPoint::Center,
+                aim_offset_x_px: 0,
+                aim_offset_y_px: 0,
                 target_margin_percent: 0,
                 visual_context_margin_percent: 50,
                 zoom_scale: 1.0,
@@ -965,6 +1015,9 @@ mod tests {
         JumpStageMetadata {
             index,
             grid_size: (10, 10),
+            aim_point: JumpAimPoint::Center,
+            aim_offset_x_px: 0,
+            aim_offset_y_px: 0,
             target_margin_percent: 10,
             visual_context_margin_percent: 20,
             zoom_scale: 1.0,
@@ -1003,6 +1056,7 @@ mod tests {
             },
             grid_size: (10, 10),
             input: input.to_string(),
+            final_adjust: None,
         }
     }
 }

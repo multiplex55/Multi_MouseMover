@@ -1,13 +1,29 @@
-use crate::{jump_session::JumpRegion, JumpTargetRegionMode};
+use crate::{jump_session::JumpRegion, JumpAimPoint, JumpTargetRegionMode};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct JumpStageMetadata {
     pub index: usize,
     pub grid_size: (u32, u32),
+    pub aim_point: JumpAimPoint,
+    pub aim_offset_x_px: i32,
+    pub aim_offset_y_px: i32,
     pub target_margin_percent: u8,
     pub visual_context_margin_percent: u8,
     pub zoom_scale: f32,
     pub target_region_mode: JumpTargetRegionMode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinalAdjustOverlayView {
+    pub original_point: (i32, i32),
+    pub candidate_point: (i32, i32),
+    pub region: JumpRegion,
+    pub small_step_px: i32,
+    pub large_step_px: i32,
+    pub modifier_key: String,
+    pub confirm_key: String,
+    pub cancel_key: String,
+    pub back_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,4 +37,5 @@ pub struct JumpOverlayView {
     pub client_draw_region: JumpRegion,
     pub grid_size: (u32, u32),
     pub input: String,
+    pub final_adjust: Option<FinalAdjustOverlayView>,
 }
