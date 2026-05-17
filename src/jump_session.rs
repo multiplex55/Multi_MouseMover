@@ -292,8 +292,163 @@ mod tests {
     }
 
     #[test]
+    fn subdivide_region_splits_even_grid_uniformly() {
+        let region = JumpRegion {
+            left: 20,
+            top: 40,
+            width: 120,
+            height: 80,
+        };
+
+        assert_eq!(
+            subdivide_region(region, (4, 2), 0, 0),
+            Some(JumpRegion {
+                left: 20,
+                top: 40,
+                width: 30,
+                height: 40,
+            })
+        );
+        assert_eq!(
+            subdivide_region(region, (4, 2), 1, 3),
+            Some(JumpRegion {
+                left: 110,
+                top: 80,
+                width: 30,
+                height: 40,
+            })
+        );
+    }
+
+    #[test]
+    fn subdivide_region_keeps_non_even_rounding_stable_across_full_span() {
+        let region = JumpRegion {
+            left: 10,
+            top: 20,
+            width: 101,
+            height: 103,
+        };
+
+        let expected_cols = [
+            JumpRegion {
+                left: 10,
+                top: 20,
+                width: 14,
+                height: 103,
+            },
+            JumpRegion {
+                left: 24,
+                top: 20,
+                width: 15,
+                height: 103,
+            },
+            JumpRegion {
+                left: 39,
+                top: 20,
+                width: 14,
+                height: 103,
+            },
+            JumpRegion {
+                left: 53,
+                top: 20,
+                width: 15,
+                height: 103,
+            },
+            JumpRegion {
+                left: 68,
+                top: 20,
+                width: 14,
+                height: 103,
+            },
+            JumpRegion {
+                left: 82,
+                top: 20,
+                width: 15,
+                height: 103,
+            },
+            JumpRegion {
+                left: 97,
+                top: 20,
+                width: 14,
+                height: 103,
+            },
+        ];
+
+        let mut next_left = region.left;
+        for (col, expected) in expected_cols.into_iter().enumerate() {
+            let child = subdivide_region(region, (7, 1), 0, col).unwrap();
+            assert_eq!(child, expected);
+            assert_eq!(child.left, next_left);
+            next_left += child.width;
+        }
+        assert_eq!(next_left, region.left + region.width);
+
+        let mut next_top = region.top;
+        for row in 0..9 {
+            let child = subdivide_region(region, (1, 9), row, 0).unwrap();
+            assert_eq!(child.top, next_top);
+            assert!(matches!(child.height, 11 | 12));
+            next_top += child.height;
+        }
+        assert_eq!(next_top, region.top + region.height);
+    }
+
+    #[test]
+    fn subdivide_region_guarantees_minimum_positive_cell_size_when_possible() {
+        let region = JumpRegion {
+            left: 5,
+            top: 7,
+            width: 3,
+            height: 2,
+        };
+
+        for row in 0..2 {
+            for col in 0..3 {
+                let child = subdivide_region(region, (3, 2), row, col).unwrap();
+                assert!(child.width >= 1, "{child:?}");
+                assert!(child.height >= 1, "{child:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn subdivide_region_handles_negative_virtual_origin() {
+        let region = JumpRegion {
+            left: -1920,
+            top: 0,
+            width: 3840,
+            height: 1080,
+        };
+
+        let left_child = subdivide_region(region, (4, 3), 1, 0).unwrap();
+        assert_eq!(
+            left_child,
+            JumpRegion {
+                left: -1920,
+                top: 360,
+                width: 960,
+                height: 360,
+            }
+        );
+        assert_eq!(left_child.center(), (-1440, 540));
+
+        let middle_left_child = subdivide_region(region, (4, 3), 0, 1).unwrap();
+        assert_eq!(
+            middle_left_child,
+            JumpRegion {
+                left: -960,
+                top: 0,
+                width: 960,
+                height: 360,
+            }
+        );
+        assert_eq!(middle_left_child.center(), (-480, 180));
+    }
+
+    #[test]
     fn subdivide_region_rejects_invalid_inputs() {
         assert_eq!(subdivide_region(base_region(), (0, 2), 0, 0), None);
+        assert_eq!(subdivide_region(base_region(), (2, 0), 0, 0), None);
         assert_eq!(subdivide_region(base_region(), (2, 2), 2, 0), None);
         assert_eq!(subdivide_region(base_region(), (2, 2), 0, 2), None);
         assert_eq!(
@@ -308,6 +463,13 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn subdivide_region_rejects_each_out_of_range_row_and_column_edge() {
+        assert_eq!(subdivide_region(base_region(), (3, 2), 2, 0), None);
+        assert_eq!(subdivide_region(base_region(), (3, 2), 0, 3), None);
+        assert_eq!(subdivide_region(base_region(), (3, 2), 2, 3), None);
     }
 
     #[test]
