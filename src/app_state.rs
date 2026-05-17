@@ -574,7 +574,8 @@ fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
 mod tests {
     use super::*;
     use crate::indicator::{
-        resolve_indicator_state, IndicatorInput, IndicatorState, WheelIndicatorInput,
+        resolve_indicator_state, IndicatorInput, IndicatorState, MouseIndicatorInput,
+        WheelIndicatorInput,
     };
     use crate::key_chord::KeyChord;
 
@@ -902,6 +903,11 @@ mod tests {
             app_active: state.active_mode(),
             jump_active: state.is_jump_active(),
             active_actions: &active_actions,
+            mouse: MouseIndicatorInput {
+                active: true,
+                current_speed: 5,
+                default_speed: 3,
+            },
             wheel: WheelIndicatorInput {
                 active: true,
                 current_speed: 12,

@@ -23,7 +23,10 @@ key_bindings = [
     ["RightAlt+S", "move_to_bottom_edge"],
     ["RightAlt+D", "move_to_right_edge"],
     ["V", "wheel_speed_up"],
-    ["B", "wheel_speed_down"]
+    ["B", "wheel_speed_down"],
+    ["C", "mouse_speed_up"],
+    ["X", "mouse_speed_down"],
+    ["Z", "mouse_speed_reset"]
 ]
 
 [system_bindings]
@@ -131,12 +134,20 @@ acceleration_rate = 1 # Polling cycles before applying acceleration
 starting_speed    = 1 # Initial speed in pixels
 top_speed         = 6
 
+[mouse_speed]
+default_speed = 1
+min_speed = 1
+max_speed = 12
+speed_step = 1
+flash_indicator_ms = 700
+
 [wheel]
 default_speed = 3
 min_speed = 1
 max_speed = 12
 speed_step = 1
 tick_interval = 8
+speed_indicator_ms = 700
 
 [edge_jump]
 offset_px = 1

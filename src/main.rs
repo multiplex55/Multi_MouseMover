@@ -15,7 +15,10 @@ mod screen_capture;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, JumpOverlayResolution, KeyEvent};
-use indicator::{resolve_indicator_state, IndicatorInput, WheelIndicatorInput};
+use indicator::{
+    resolve_indicator_state, IndicatorInput, IndicatorState, MouseIndicatorInput,
+    WheelIndicatorInput,
+};
 use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
 };
@@ -40,6 +43,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 const DEFAULT_POLLING_RATE_MS: u64 = 8;
 const DEFAULT_WHEEL_SPEED_INDICATOR_MS: u64 = 700;
+const DEFAULT_MOUSE_SPEED_FLASH_MS: u64 = 700;
 const MAX_MESSAGES_PER_TICK: usize = 64;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const DEBUG_HEARTBEAT_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
@@ -174,6 +178,7 @@ struct Config {
     grid_size: GridSize,
     jump: JumpConfig,
     final_adjust: FinalAdjustConfig,
+    mouse_speed: MouseSpeedConfig,
     wheel: WheelConfig,
     edge_jump: EdgeJumpConfig,
     starting_speed: i32,    // Initial speed in pixels
@@ -191,6 +196,7 @@ impl Default for Config {
             grid_size: GridSize::default(),
             jump: JumpConfig::default(),
             final_adjust: FinalAdjustConfig::default(),
+            mouse_speed: MouseSpeedConfig::default(),
             wheel: WheelConfig::default(),
             edge_jump: EdgeJumpConfig::default(),
             starting_speed: 1,
@@ -256,6 +262,28 @@ impl Default for EdgeJumpConfig {
         Self {
             offset_px: 1,
             use_work_area: false,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct MouseSpeedConfig {
+    default_speed: i32,
+    min_speed: i32,
+    max_speed: i32,
+    speed_step: i32,
+    flash_indicator_ms: u64,
+}
+
+impl Default for MouseSpeedConfig {
+    fn default() -> Self {
+        Self {
+            default_speed: 1,
+            min_speed: 1,
+            max_speed: 12,
+            speed_step: 1,
+            flash_indicator_ms: DEFAULT_MOUSE_SPEED_FLASH_MS,
         }
     }
 }
@@ -750,8 +778,10 @@ impl Config {
         }
         self.normalize_jump_config();
         self.normalize_final_adjust_config();
+        self.normalize_mouse_speed_config();
         self.normalize_wheel_config();
         self.normalize_edge_jump_config();
+        self.starting_speed = self.mouse_speed.default_speed;
         self.runtime_system_bindings()?;
         Ok(self)
     }
@@ -803,6 +833,43 @@ impl Config {
         if VirtualKey::from_string(&self.final_adjust.back_key).is_none() {
             warn_config_normalized("final_adjust.back_key is invalid; using Backspace");
             self.final_adjust.back_key = defaults.back_key;
+        }
+    }
+
+    fn normalize_mouse_speed_config(&mut self) {
+        if self.mouse_speed.min_speed < 1 {
+            warn_config_normalized("mouse_speed.min_speed is below 1; clamping to 1");
+            self.mouse_speed.min_speed = 1;
+        }
+
+        if self.mouse_speed.max_speed < self.mouse_speed.min_speed {
+            warn_config_normalized(
+                "mouse_speed.max_speed is below mouse_speed.min_speed; clamping to min",
+            );
+            self.mouse_speed.max_speed = self.mouse_speed.min_speed;
+        }
+
+        if self.mouse_speed.speed_step < 1 {
+            warn_config_normalized("mouse_speed.speed_step is below 1; clamping to 1");
+            self.mouse_speed.speed_step = 1;
+        }
+
+        self.mouse_speed.default_speed = self
+            .mouse_speed
+            .default_speed
+            .clamp(self.mouse_speed.min_speed, self.mouse_speed.max_speed);
+
+        if self.mouse_speed.flash_indicator_ms == 0 {
+            warn_config_normalized("mouse_speed.flash_indicator_ms is 0; using default");
+            self.mouse_speed.flash_indicator_ms = DEFAULT_MOUSE_SPEED_FLASH_MS;
+        }
+
+        if self.starting_speed != Config::default().starting_speed
+            && self.mouse_speed.default_speed == MouseSpeedConfig::default().default_speed
+        {
+            self.mouse_speed.default_speed = self
+                .starting_speed
+                .clamp(self.mouse_speed.min_speed, self.mouse_speed.max_speed);
         }
     }
 
@@ -1693,6 +1760,11 @@ fn main() {
                 app_active: app_state.active_mode(),
                 jump_active: app_state.is_jump_active(),
                 active_actions: &action_handler.active_keys,
+                mouse: MouseIndicatorInput {
+                    active: action_handler.mouse_master.mouse_speed_indicator_active(),
+                    current_speed: action_handler.mouse_master.mouse_speed_baseline,
+                    default_speed: action_handler.mouse_master.config.mouse_speed.default_speed,
+                },
                 wheel: WheelIndicatorInput {
                     active: wheel_direction_active
                         || action_handler.mouse_master.wheel_speed_indicator_active(),
@@ -1834,6 +1906,7 @@ mod tests {
         assert_eq!(config.jump.visuals, defaults.jump.visuals);
         assert_eq!(config.jump.coarse.width, defaults.grid_size.width);
         assert_eq!(config.jump.coarse.height, defaults.grid_size.height);
+        assert_eq!(config.mouse_speed, defaults.mouse_speed);
         assert_eq!(config.wheel, defaults.wheel);
         assert_eq!(config.edge_jump, defaults.edge_jump);
         assert_eq!(config.starting_speed, defaults.starting_speed);
@@ -1893,7 +1966,10 @@ mod tests {
                 ["RightAlt+S", "move_to_bottom_edge"],
                 ["RightAlt+D", "move_to_right_edge"],
                 ["V", "wheel_speed_up"],
-                ["B", "wheel_speed_down"]
+                ["B", "wheel_speed_down"],
+                ["C", "mouse_speed_up"],
+                ["X", "mouse_speed_down"],
+                ["Z", "mouse_speed_reset"]
             ]
             "#,
         );
@@ -1915,6 +1991,9 @@ mod tests {
             ("RightAlt+D", Action::MoveToRightEdge),
             ("V", Action::WheelSpeedUp),
             ("B", Action::WheelSpeedDown),
+            ("C", Action::MouseSpeedUp),
+            ("X", Action::MouseSpeedDown),
+            ("Z", Action::MouseSpeedReset),
         ];
 
         assert_eq!(config.key_bindings.len(), expected.len());
@@ -2514,9 +2593,44 @@ mod tests {
     }
 
     #[test]
+    fn mouse_speed_config_parses_and_normalizes_bounds() {
+        let config = parse_config(
+            r#"
+            [mouse_speed]
+            default_speed = 99
+            min_speed = 2
+            max_speed = 8
+            speed_step = 0
+            flash_indicator_ms = 0
+            "#,
+        );
+
+        assert_eq!(config.mouse_speed.default_speed, 8);
+        assert_eq!(config.mouse_speed.min_speed, 2);
+        assert_eq!(config.mouse_speed.max_speed, 8);
+        assert_eq!(config.mouse_speed.speed_step, 1);
+        assert_eq!(
+            config.mouse_speed.flash_indicator_ms,
+            DEFAULT_MOUSE_SPEED_FLASH_MS
+        );
+        assert_eq!(config.starting_speed, config.mouse_speed.default_speed);
+    }
+
+    #[test]
+    fn legacy_starting_speed_seeds_mouse_speed_default_when_section_is_absent() {
+        let config = parse_config("starting_speed = 4");
+
+        assert_eq!(config.mouse_speed.default_speed, 4);
+        assert_eq!(config.starting_speed, 4);
+    }
+
+    #[test]
     fn wheel_and_edge_jump_sections_parse_with_sane_defaults() {
         let config = parse_config(
             r#"
+            [mouse_speed]
+            default_speed = 5
+
             [wheel]
             default_speed = 5
 
@@ -2526,6 +2640,11 @@ mod tests {
             "#,
         );
 
+        assert_eq!(config.mouse_speed.default_speed, 5);
+        assert_eq!(
+            config.mouse_speed.min_speed,
+            MouseSpeedConfig::default().min_speed
+        );
         assert_eq!(config.wheel.default_speed, 5);
         assert_eq!(config.wheel.min_speed, WheelConfig::default().min_speed);
         assert_eq!(config.wheel.max_speed, WheelConfig::default().max_speed);
@@ -2573,6 +2692,9 @@ mod tests {
         assert!(!Action::LeftClick.is_continuous());
         assert!(!Action::MoveToTopEdge.is_continuous());
         assert!(!Action::WheelSpeedUp.is_continuous());
+        assert!(!Action::MouseSpeedUp.is_continuous());
+        assert!(!Action::MouseSpeedDown.is_continuous());
+        assert!(!Action::MouseSpeedReset.is_continuous());
         assert!(!Action::ClickThenDisable.is_continuous());
         assert!(!Action::ToggleDragMode.is_continuous());
     }
@@ -2812,6 +2934,85 @@ mod tests {
                 JumpOverlayResolution::Hidden
             );
         }
+    }
+
+    #[test]
+    fn indicator_state_reflects_runtime_mouse_speed_increase_flash() {
+        let mut config = Config::default();
+        config.mouse_speed = MouseSpeedConfig {
+            default_speed: 2,
+            min_speed: 1,
+            max_speed: 5,
+            speed_step: 2,
+            flash_indicator_ms: 700,
+        };
+        config.starting_speed = 2;
+        let mouse_master = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let mut action_handler = ActionHandler::new(mouse_master);
+
+        action_handler
+            .mouse_master
+            .handle_action(Action::MouseSpeedUp);
+
+        let indicator = resolve_indicator_state(IndicatorInput {
+            app_active: true,
+            jump_active: false,
+            active_actions: &action_handler.active_keys,
+            mouse: MouseIndicatorInput {
+                active: action_handler.mouse_master.mouse_speed_indicator_active(),
+                current_speed: action_handler.mouse_master.mouse_speed_baseline,
+                default_speed: action_handler.mouse_master.config.mouse_speed.default_speed,
+            },
+            wheel: WheelIndicatorInput {
+                active: false,
+                current_speed: action_handler.mouse_master.current_wheel_speed,
+                default_speed: action_handler.mouse_master.config.wheel.default_speed,
+            },
+            left_button_held: false,
+        });
+
+        assert_eq!(indicator, IndicatorState::MouseSpeedFast);
+    }
+
+    #[test]
+    fn indicator_state_reflects_runtime_mouse_speed_reset_flash() {
+        let mut config = Config::default();
+        config.mouse_speed = MouseSpeedConfig {
+            default_speed: 3,
+            min_speed: 1,
+            max_speed: 5,
+            speed_step: 2,
+            flash_indicator_ms: 700,
+        };
+        config.starting_speed = 3;
+        let mouse_master = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let mut action_handler = ActionHandler::new(mouse_master);
+
+        action_handler
+            .mouse_master
+            .handle_action(Action::MouseSpeedDown);
+        action_handler
+            .mouse_master
+            .handle_action(Action::MouseSpeedReset);
+
+        let indicator = resolve_indicator_state(IndicatorInput {
+            app_active: true,
+            jump_active: false,
+            active_actions: &action_handler.active_keys,
+            mouse: MouseIndicatorInput {
+                active: action_handler.mouse_master.mouse_speed_indicator_active(),
+                current_speed: action_handler.mouse_master.mouse_speed_baseline,
+                default_speed: action_handler.mouse_master.config.mouse_speed.default_speed,
+            },
+            wheel: WheelIndicatorInput {
+                active: false,
+                current_speed: action_handler.mouse_master.current_wheel_speed,
+                default_speed: action_handler.mouse_master.config.wheel.default_speed,
+            },
+            left_button_held: false,
+        });
+
+        assert_eq!(indicator, IndicatorState::MouseSpeedNormal);
     }
 
     #[test]

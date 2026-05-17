@@ -84,13 +84,32 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     pub backend: B,
     pub config: Config,
     pub current_mode: ModeState,
+    pub mouse_speed_baseline: i32,
     pub current_speed: i32,
     pub current_wheel_speed: i32,
     pub acceleration_counter: u32,
-    pub top_speed: i32,
+    pub top_speed_behavior: TopSpeedBehavior,
     pub left_button_held: bool,
     last_wheel_tick: Option<Instant>,
+    mouse_speed_flash_until: Option<Instant>,
     wheel_speed_flash_until: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TopSpeedBehavior {
+    acceleration_headroom: i32,
+}
+
+impl TopSpeedBehavior {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            acceleration_headroom: (config.top_speed - config.starting_speed).max(0),
+        }
+    }
+
+    fn top_speed_for_baseline(self, baseline: i32) -> i32 {
+        baseline + self.acceleration_headroom
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -112,12 +131,14 @@ impl<B: MouseBackend> MouseMaster<B> {
             backend,
             config: config.clone(),
             current_mode: ModeState::Active,
-            current_speed: config.starting_speed,
+            mouse_speed_baseline: config.mouse_speed.default_speed,
+            current_speed: config.mouse_speed.default_speed,
             current_wheel_speed: config.wheel.default_speed,
             acceleration_counter: 0,
-            top_speed: config.top_speed,
+            top_speed_behavior: TopSpeedBehavior::from_config(&config),
             left_button_held: false,
             last_wheel_tick: None,
+            mouse_speed_flash_until: None,
             wheel_speed_flash_until: None,
         }
     }
@@ -159,6 +180,9 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::WheelRight => self.wheel_right(),
             Action::WheelSpeedUp => self.increase_wheel_speed(),
             Action::WheelSpeedDown => self.decrease_wheel_speed(),
+            Action::MouseSpeedUp => self.increase_mouse_speed(),
+            Action::MouseSpeedDown => self.decrease_mouse_speed(),
+            Action::MouseSpeedReset => self.reset_mouse_speed_tier(),
             Action::Exit => self.exit(),
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
@@ -281,6 +305,46 @@ impl<B: MouseBackend> MouseMaster<B> {
         self.flash_wheel_speed_indicator();
     }
 
+    pub fn increase_mouse_speed(&mut self) {
+        self.mouse_speed_baseline = (self.mouse_speed_baseline
+            + self.config.mouse_speed.speed_step)
+            .min(self.config.mouse_speed.max_speed);
+        self.reset_acceleration_to_baseline();
+        self.flash_mouse_speed_indicator();
+    }
+
+    pub fn decrease_mouse_speed(&mut self) {
+        self.mouse_speed_baseline = (self.mouse_speed_baseline
+            - self.config.mouse_speed.speed_step)
+            .max(self.config.mouse_speed.min_speed);
+        self.reset_acceleration_to_baseline();
+        self.flash_mouse_speed_indicator();
+    }
+
+    pub fn reset_mouse_speed_tier(&mut self) {
+        self.mouse_speed_baseline = self.config.mouse_speed.default_speed;
+        self.reset_acceleration_to_baseline();
+        self.flash_mouse_speed_indicator();
+    }
+
+    pub fn flash_mouse_speed_indicator(&mut self) {
+        self.flash_mouse_speed_indicator_at(Instant::now());
+    }
+
+    pub fn flash_mouse_speed_indicator_at(&mut self, now: Instant) {
+        self.mouse_speed_flash_until =
+            Some(now + Duration::from_millis(self.config.mouse_speed.flash_indicator_ms));
+    }
+
+    pub fn mouse_speed_indicator_active(&self) -> bool {
+        self.mouse_speed_indicator_active_at(Instant::now())
+    }
+
+    pub fn mouse_speed_indicator_active_at(&self, now: Instant) -> bool {
+        self.mouse_speed_flash_until
+            .is_some_and(|flash_until| now < flash_until)
+    }
+
     pub fn flash_wheel_speed_indicator(&mut self) {
         self.flash_wheel_speed_indicator_at(Instant::now());
     }
@@ -307,7 +371,8 @@ impl<B: MouseBackend> MouseMaster<B> {
         let tick = calculate_movement(
             active_actions,
             &self.config,
-            self.top_speed,
+            self.top_speed_behavior,
+            self.mouse_speed_baseline,
             &mut self.current_speed,
             &mut self.acceleration_counter,
         );
@@ -402,9 +467,13 @@ impl<B: MouseBackend> MouseMaster<B> {
 
     /// Resets the speed and acceleration counter when motion stops
     pub fn reset_speed(&mut self) {
-        self.current_speed = self.config.starting_speed;
-        self.acceleration_counter = 0;
+        self.reset_acceleration_to_baseline();
         self.last_wheel_tick = None;
+    }
+
+    fn reset_acceleration_to_baseline(&mut self) {
+        self.current_speed = self.mouse_speed_baseline;
+        self.acceleration_counter = 0;
     }
 
     pub fn prepare_exit(&mut self) {
@@ -539,7 +608,8 @@ fn debug_diagnostics_enabled() -> bool {
 fn calculate_movement(
     active_actions: &HashSet<Action>,
     config: &Config,
-    top_speed: i32,
+    top_speed_behavior: TopSpeedBehavior,
+    baseline_speed: i32,
     current_speed: &mut i32,
     acceleration_counter: &mut u32,
 ) -> MovementTick {
@@ -573,7 +643,7 @@ fn calculate_movement(
     }
 
     if dx == 0 && dy == 0 {
-        *current_speed = config.starting_speed;
+        *current_speed = baseline_speed;
         *acceleration_counter = 0;
         return MovementTick {
             dx: 0.0,
@@ -584,11 +654,16 @@ fn calculate_movement(
     }
 
     let speed = if active_actions.contains(&Action::SlowMouse) {
-        *current_speed = config.starting_speed;
+        *current_speed = baseline_speed;
         *acceleration_counter = 0;
         *current_speed
     } else {
-        advance_speed(config, top_speed, current_speed, acceleration_counter)
+        advance_speed(
+            config,
+            top_speed_behavior.top_speed_for_baseline(baseline_speed),
+            current_speed,
+            acceleration_counter,
+        )
     };
 
     let mut scaled_dx = f64::from(dx * speed);
@@ -631,6 +706,13 @@ mod tests {
     fn test_config() -> Config {
         Config {
             starting_speed: 2,
+            mouse_speed: crate::MouseSpeedConfig {
+                default_speed: 2,
+                min_speed: 1,
+                max_speed: 12,
+                speed_step: 1,
+                flash_indicator_ms: 700,
+            },
             acceleration: 3,
             acceleration_rate: 2,
             top_speed: 10,
@@ -710,13 +792,15 @@ mod tests {
     fn tick(
         active_actions: &HashSet<Action>,
         config: &Config,
+        baseline_speed: i32,
         current_speed: &mut i32,
         acceleration_counter: &mut u32,
     ) -> MovementTick {
         calculate_movement(
             active_actions,
             config,
-            config.top_speed,
+            TopSpeedBehavior::from_config(config),
+            baseline_speed,
             current_speed,
             acceleration_counter,
         )
@@ -732,6 +816,7 @@ mod tests {
         let movement = tick(
             &active_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
@@ -751,12 +836,14 @@ mod tests {
         let first = tick(
             &active_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
         let second = tick(
             &active_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
@@ -781,6 +868,7 @@ mod tests {
         let movement = tick(
             &active_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
@@ -799,6 +887,7 @@ mod tests {
         let movement = tick(
             &active_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
@@ -819,6 +908,7 @@ mod tests {
         let movement = tick(
             &active_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
@@ -838,6 +928,7 @@ mod tests {
         let movement = tick(
             &active_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
@@ -858,18 +949,21 @@ mod tests {
         let slow_tick = tick(
             &slow_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
         let first_after_release = tick(
             &movement_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
         let second_after_release = tick(
             &movement_actions,
             &config,
+            config.starting_speed,
             &mut current_speed,
             &mut acceleration_counter,
         );
@@ -954,6 +1048,99 @@ mod tests {
             mouse.wheel_speed_indicator_active_at(now + flash_duration - Duration::from_millis(1))
         );
         assert!(!mouse.wheel_speed_indicator_active_at(now + flash_duration));
+    }
+
+    #[test]
+    fn mouse_speed_increase_and_decrease_clamp_to_configured_bounds() {
+        let config = Config {
+            mouse_speed: crate::MouseSpeedConfig {
+                default_speed: 5,
+                min_speed: 3,
+                max_speed: 7,
+                speed_step: 4,
+                flash_indicator_ms: 700,
+            },
+            ..Config::default()
+        };
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        mouse.increase_mouse_speed();
+        assert_eq!(mouse.mouse_speed_baseline, 7);
+        assert_eq!(mouse.current_speed, 7);
+
+        mouse.decrease_mouse_speed();
+        assert_eq!(mouse.mouse_speed_baseline, 3);
+        assert_eq!(mouse.current_speed, 3);
+    }
+
+    #[test]
+    fn mouse_speed_reset_returns_to_default_tier() {
+        let config = Config {
+            mouse_speed: crate::MouseSpeedConfig {
+                default_speed: 5,
+                min_speed: 1,
+                max_speed: 9,
+                speed_step: 2,
+                flash_indicator_ms: 700,
+            },
+            ..Config::default()
+        };
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        mouse.increase_mouse_speed();
+        mouse.increase_mouse_speed();
+        mouse.reset_mouse_speed_tier();
+
+        assert_eq!(mouse.mouse_speed_baseline, 5);
+        assert_eq!(mouse.current_speed, 5);
+        assert_eq!(mouse.acceleration_counter, 0);
+    }
+
+    #[test]
+    fn mouse_speed_change_triggers_flash_indicator() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+        let now = Instant::now();
+
+        mouse.increase_mouse_speed();
+
+        assert!(mouse.mouse_speed_indicator_active_at(now));
+    }
+
+    #[test]
+    fn slow_mouse_release_restores_selected_tier_baseline() {
+        let mut config = test_config();
+        config.mouse_speed.default_speed = 4;
+        config.starting_speed = 4;
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
+        let movement_actions = actions(&[Action::MoveRight]);
+
+        let slow_tick = mouse.tick_movement(&slow_actions, Duration::from_millis(8));
+        let release_tick = mouse.tick_movement(&movement_actions, Duration::from_millis(8));
+
+        assert_eq!(slow_tick.speed, 4);
+        assert_eq!(release_tick.speed, 4);
+        assert_eq!(mouse.mouse_speed_baseline, 4);
+    }
+
+    #[test]
+    fn movement_key_release_resets_acceleration_to_selected_tier() {
+        let mut config = test_config();
+        config.mouse_speed.default_speed = 4;
+        config.starting_speed = 4;
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let movement_actions = actions(&[Action::MoveRight]);
+
+        mouse.tick_movement(&movement_actions, Duration::from_millis(8));
+        mouse.tick_movement(&movement_actions, Duration::from_millis(8));
+        assert!(mouse.current_speed > mouse.mouse_speed_baseline);
+
+        let release_tick = mouse.tick_movement(&HashSet::new(), Duration::from_millis(8));
+
+        assert!(!release_tick.moving);
+        assert_eq!(release_tick.speed, 4);
+        assert_eq!(mouse.current_speed, 4);
+        assert_eq!(mouse.acceleration_counter, 0);
     }
 
     #[test]

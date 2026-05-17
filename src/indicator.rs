@@ -8,6 +8,9 @@ pub enum IndicatorState {
     ActiveSlow,
     DraggingLeft,
     JumpMode,
+    MouseSpeedSlow,
+    MouseSpeedNormal,
+    MouseSpeedFast,
     WheelScrollingSlow,
     WheelScrollingNormal,
     WheelScrollingFast,
@@ -21,10 +24,18 @@ pub struct WheelIndicatorInput {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MouseIndicatorInput {
+    pub active: bool,
+    pub current_speed: i32,
+    pub default_speed: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IndicatorInput<'a> {
     pub app_active: bool,
     pub jump_active: bool,
     pub active_actions: &'a HashSet<Action>,
+    pub mouse: MouseIndicatorInput,
     pub wheel: WheelIndicatorInput,
     pub left_button_held: bool,
 }
@@ -51,11 +62,25 @@ pub fn resolve_indicator_state(input: IndicatorInput<'_>) -> IndicatorState {
         return wheel_state(input.wheel.current_speed, input.wheel.default_speed);
     }
 
+    if input.mouse.active {
+        return mouse_state(input.mouse.current_speed, input.mouse.default_speed);
+    }
+
     if input.active_actions.contains(&Action::SlowMouse) {
         return IndicatorState::ActiveSlow;
     }
 
     IndicatorState::ActiveNormal
+}
+
+fn mouse_state(current_speed: i32, default_speed: i32) -> IndicatorState {
+    if current_speed < default_speed {
+        IndicatorState::MouseSpeedSlow
+    } else if current_speed > default_speed {
+        IndicatorState::MouseSpeedFast
+    } else {
+        IndicatorState::MouseSpeedNormal
+    }
 }
 
 fn wheel_state(current_speed: i32, default_speed: i32) -> IndicatorState {
@@ -83,12 +108,20 @@ mod tests {
         wheel_active: bool,
         current_wheel_speed: i32,
         default_wheel_speed: i32,
+        mouse_active: bool,
+        current_mouse_speed: i32,
+        default_mouse_speed: i32,
         left_button_held: bool,
     ) -> IndicatorState {
         resolve_indicator_state(IndicatorInput {
             app_active,
             jump_active,
             active_actions: &active_actions,
+            mouse: MouseIndicatorInput {
+                active: mouse_active,
+                current_speed: current_mouse_speed,
+                default_speed: default_mouse_speed,
+            },
             wheel: WheelIndicatorInput {
                 active: wheel_active,
                 current_speed: current_wheel_speed,
@@ -109,6 +142,9 @@ mod tests {
                 12,
                 3,
                 true,
+                5,
+                3,
+                true,
             ),
             IndicatorState::Hidden
         );
@@ -125,6 +161,9 @@ mod tests {
                 1,
                 3,
                 true,
+                5,
+                3,
+                true,
             ),
             IndicatorState::JumpMode
         );
@@ -133,7 +172,7 @@ mod tests {
     #[test]
     fn jump_mode_overrides_normal_active_indicator_state() {
         assert_eq!(
-            resolve(true, true, HashSet::new(), false, 3, 3, false),
+            resolve(true, true, HashSet::new(), false, 3, 3, false, 3, 3, false),
             IndicatorState::JumpMode
         );
     }
@@ -147,6 +186,9 @@ mod tests {
                 actions(&[Action::SlowMouse, Action::WheelDown]),
                 true,
                 1,
+                3,
+                true,
+                5,
                 3,
                 true,
             ),
@@ -164,6 +206,9 @@ mod tests {
                 true,
                 1,
                 3,
+                false,
+                3,
+                3,
                 false
             ),
             IndicatorState::WheelScrollingSlow
@@ -173,6 +218,9 @@ mod tests {
                 true,
                 false,
                 actions(&[Action::WheelDown]),
+                false,
+                3,
+                3,
                 false,
                 3,
                 3,
@@ -187,6 +235,9 @@ mod tests {
                 actions(&[Action::WheelDown]),
                 false,
                 5,
+                3,
+                false,
+                3,
                 3,
                 false,
             ),
@@ -205,6 +256,9 @@ mod tests {
                 3,
                 3,
                 false,
+                3,
+                3,
+                false,
             ),
             IndicatorState::ActiveSlow
         );
@@ -213,8 +267,24 @@ mod tests {
     #[test]
     fn active_without_more_specific_state_is_normal() {
         assert_eq!(
-            resolve(true, false, HashSet::new(), false, 3, 3, false),
+            resolve(true, false, HashSet::new(), false, 3, 3, false, 3, 3, false),
             IndicatorState::ActiveNormal
+        );
+    }
+
+    #[test]
+    fn mouse_speed_flash_classifies_selected_tier() {
+        assert_eq!(
+            resolve(true, false, HashSet::new(), false, 3, 3, true, 1, 3, false,),
+            IndicatorState::MouseSpeedSlow
+        );
+        assert_eq!(
+            resolve(true, false, HashSet::new(), false, 3, 3, true, 3, 3, false,),
+            IndicatorState::MouseSpeedNormal
+        );
+        assert_eq!(
+            resolve(true, false, HashSet::new(), false, 3, 3, true, 5, 3, false,),
+            IndicatorState::MouseSpeedFast
         );
     }
 }

@@ -449,6 +449,21 @@ fn indicator_visual(state: IndicatorState) -> IndicatorVisual {
             pip_count: 0,
             draw_outline: true,
         },
+        IndicatorState::MouseSpeedSlow => IndicatorVisual {
+            base_color: RGB(80, 180, 255),
+            pip_count: 1,
+            draw_outline: true,
+        },
+        IndicatorState::MouseSpeedNormal => IndicatorVisual {
+            base_color: RGB(80, 255, 180),
+            pip_count: 2,
+            draw_outline: true,
+        },
+        IndicatorState::MouseSpeedFast => IndicatorVisual {
+            base_color: RGB(255, 80, 120),
+            pip_count: 3,
+            draw_outline: true,
+        },
         IndicatorState::WheelScrollingSlow => IndicatorVisual {
             base_color: RGB(255, 180, 0),
             pip_count: 1,
@@ -623,6 +638,30 @@ mod tests {
         );
         assert_eq!(
             indicator_visual(IndicatorState::WheelScrollingFast).pip_count,
+            3
+        );
+    }
+
+    #[test]
+    fn mouse_speed_states_render_distinct_colors_and_pips() {
+        assert_ne!(
+            indicator_visual(IndicatorState::MouseSpeedSlow).base_color,
+            indicator_visual(IndicatorState::MouseSpeedNormal).base_color
+        );
+        assert_ne!(
+            indicator_visual(IndicatorState::MouseSpeedNormal).base_color,
+            indicator_visual(IndicatorState::MouseSpeedFast).base_color
+        );
+        assert_eq!(
+            indicator_visual(IndicatorState::MouseSpeedSlow).pip_count,
+            1
+        );
+        assert_eq!(
+            indicator_visual(IndicatorState::MouseSpeedNormal).pip_count,
+            2
+        );
+        assert_eq!(
+            indicator_visual(IndicatorState::MouseSpeedFast).pip_count,
             3
         );
     }
