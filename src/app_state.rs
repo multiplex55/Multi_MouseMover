@@ -44,6 +44,8 @@ pub enum AppCommand {
         active: bool,
     },
     Exit,
+    ReloadConfig,
+    PanicReset,
     ToggleHelp,
     HideHelp,
     EnterJumpMode {
@@ -442,6 +444,16 @@ impl AppState {
 
         if event.is_down && matches!(action.as_ref(), Some(Action::ShowHelp)) {
             self.enqueue_command(AppCommand::ToggleHelp);
+            return;
+        }
+
+        if event.is_down && matches!(action.as_ref(), Some(Action::ReloadConfig)) {
+            self.enqueue_command(AppCommand::ReloadConfig);
+            return;
+        }
+
+        if event.is_down && matches!(action.as_ref(), Some(Action::PanicReset)) {
+            self.enqueue_command(AppCommand::PanicReset);
             return;
         }
 

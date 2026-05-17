@@ -633,6 +633,10 @@ impl KeyBindings {
             .sort_by(|(left, _), (right, _)| right.specificity().cmp(&left.specificity()));
     }
 
+    pub fn clear(&mut self) {
+        self.bindings.clear();
+    }
+
     /// Get the action for a key
     #[allow(dead_code)]
     pub fn get_action(&self, key: VirtualKey) -> Option<&Action> {

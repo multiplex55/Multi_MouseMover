@@ -33,7 +33,7 @@ use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::{env, error::Error, fs, io};
@@ -159,6 +159,7 @@ lazy_static! {
     };
     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
     static ref APP_STATE: RwLock<AppState> = RwLock::new(AppState::default());
+    static ref CONFIG_WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 }
 
 thread_local! {
@@ -181,7 +182,9 @@ struct Config {
     final_adjust: FinalAdjustConfig,
     status_overlay: StatusOverlayConfig,
     mouse_speed: MouseSpeedConfig,
+    movement_profiles: HashMap<String, MouseSpeedConfig>,
     wheel: WheelConfig,
+    wheel_profiles: HashMap<String, WheelProfileConfig>,
     edge_jump: EdgeJumpConfig,
     starting_speed: i32,    // Initial speed in pixels
     acceleration: i32,      // Increment value for acceleration
@@ -200,7 +203,9 @@ impl Default for Config {
             final_adjust: FinalAdjustConfig::default(),
             status_overlay: StatusOverlayConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
+            movement_profiles: HashMap::new(),
             wheel: WheelConfig::default(),
+            wheel_profiles: HashMap::new(),
             edge_jump: EdgeJumpConfig::default(),
             starting_speed: 1,
             acceleration: 2,
@@ -302,6 +307,8 @@ pub struct WheelConfig {
     speed_step: i32,
     tick_interval: u64,
     speed_indicator_ms: u64,
+    vertical_multiplier: i32,
+    horizontal_multiplier: i32,
 }
 
 impl Default for WheelConfig {
@@ -313,6 +320,36 @@ impl Default for WheelConfig {
             speed_step: 1,
             tick_interval: DEFAULT_POLLING_RATE_MS,
             speed_indicator_ms: DEFAULT_WHEEL_SPEED_INDICATOR_MS,
+            vertical_multiplier: 1,
+            horizontal_multiplier: 1,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct WheelProfileConfig {
+    default_speed: Option<i32>,
+    min_speed: Option<i32>,
+    max_speed: Option<i32>,
+    speed_step: Option<i32>,
+    tick_interval: Option<u64>,
+    speed_indicator_ms: Option<u64>,
+    vertical_multiplier: Option<i32>,
+    horizontal_multiplier: Option<i32>,
+}
+
+impl Default for WheelProfileConfig {
+    fn default() -> Self {
+        Self {
+            default_speed: None,
+            min_speed: None,
+            max_speed: None,
+            speed_step: None,
+            tick_interval: None,
+            speed_indicator_ms: None,
+            vertical_multiplier: None,
+            horizontal_multiplier: None,
         }
     }
 }
@@ -785,6 +822,7 @@ impl Config {
         self.normalize_final_adjust_config();
         self.normalize_mouse_speed_config();
         self.normalize_wheel_config();
+        self.normalize_runtime_profiles();
         self.normalize_edge_jump_config();
         self.starting_speed = self.mouse_speed.default_speed;
         self.runtime_system_bindings()?;
@@ -908,6 +946,37 @@ impl Config {
             warn_config_normalized("wheel.speed_indicator_ms is 0; using default");
             self.wheel.speed_indicator_ms = DEFAULT_WHEEL_SPEED_INDICATOR_MS;
         }
+
+        if self.wheel.vertical_multiplier < 1 {
+            warn_config_normalized("wheel.vertical_multiplier is below 1; clamping to 1");
+            self.wheel.vertical_multiplier = 1;
+        }
+
+        if self.wheel.horizontal_multiplier < 1 {
+            warn_config_normalized("wheel.horizontal_multiplier is below 1; clamping to 1");
+            self.wheel.horizontal_multiplier = 1;
+        }
+    }
+
+    fn normalize_runtime_profiles(&mut self) {
+        let movement_profile_names: Vec<String> = self.movement_profiles.keys().cloned().collect();
+        for name in movement_profile_names {
+            if let Some(profile) = self.movement_profiles.get_mut(&name) {
+                normalize_mouse_speed_settings(&format!("movement_profiles.{name}"), profile);
+            }
+        }
+
+        let wheel_profile_names: Vec<String> = self.wheel_profiles.keys().cloned().collect();
+        for name in wheel_profile_names {
+            if let Some(profile) = self.wheel_profiles.get(&name).copied() {
+                let mut resolved = self.resolve_wheel_profile_from(profile);
+                normalize_wheel_settings(
+                    &format!("wheel_profiles.{name}"),
+                    &mut resolved,
+                    self.polling_rate,
+                );
+            }
+        }
     }
 
     fn normalize_jump_config(&mut self) {
@@ -1001,6 +1070,66 @@ impl Config {
         Ok(jump)
     }
 
+    fn resolved_movement_profile(
+        &self,
+        profile_name: Option<&str>,
+    ) -> Result<MouseSpeedConfig, String> {
+        let Some(profile_name) = profile_name else {
+            return Ok(self.mouse_speed);
+        };
+        self.movement_profiles
+            .get(profile_name)
+            .copied()
+            .ok_or_else(|| format!("movement profile '{profile_name}' does not exist"))
+    }
+
+    fn resolved_wheel_profile(&self, profile_name: Option<&str>) -> Result<WheelConfig, String> {
+        let Some(profile_name) = profile_name else {
+            return Ok(self.wheel);
+        };
+        let profile = self
+            .wheel_profiles
+            .get(profile_name)
+            .copied()
+            .ok_or_else(|| format!("wheel profile '{profile_name}' does not exist"))?;
+        let mut wheel = self.resolve_wheel_profile_from(profile);
+        normalize_wheel_settings(
+            &format!("wheel_profiles.{profile_name}"),
+            &mut wheel,
+            self.polling_rate,
+        );
+        Ok(wheel)
+    }
+
+    fn resolve_wheel_profile_from(&self, profile: WheelProfileConfig) -> WheelConfig {
+        let mut wheel = self.wheel;
+        if let Some(value) = profile.default_speed {
+            wheel.default_speed = value;
+        }
+        if let Some(value) = profile.min_speed {
+            wheel.min_speed = value;
+        }
+        if let Some(value) = profile.max_speed {
+            wheel.max_speed = value;
+        }
+        if let Some(value) = profile.speed_step {
+            wheel.speed_step = value;
+        }
+        if let Some(value) = profile.tick_interval {
+            wheel.tick_interval = value;
+        }
+        if let Some(value) = profile.speed_indicator_ms {
+            wheel.speed_indicator_ms = value;
+        }
+        if let Some(value) = profile.vertical_multiplier {
+            wheel.vertical_multiplier = value;
+        }
+        if let Some(value) = profile.horizontal_multiplier {
+            wheel.horizontal_multiplier = value;
+        }
+        wheel
+    }
+
     fn load_from_file(path: &str) -> Result<Self, Box<dyn Error>> {
         // Try to read the config from the provided path relative to the current
         // working directory.  If that fails, fall back to looking in the same
@@ -1061,6 +1190,7 @@ impl Config {
 
     fn initialize_bindings(&self) {
         let mut key_actions = KEY_ACTIONS.write().unwrap(); // Acquire write lock
+        key_actions.clear();
 
         for (key, action_str) in &self.key_bindings {
             if let Ok(chord) = KeyChord::parse(key) {
@@ -1102,7 +1232,81 @@ impl Config {
 }
 
 fn warn_config_normalized(message: &str) {
+    if let Ok(mut warnings) = CONFIG_WARNINGS.lock() {
+        warnings.push(message.to_string());
+    }
     eprintln!("[config warning] {message}");
+}
+
+fn take_config_warnings() -> Vec<String> {
+    CONFIG_WARNINGS
+        .lock()
+        .map(|mut warnings| std::mem::take(&mut *warnings))
+        .unwrap_or_default()
+}
+
+fn normalize_mouse_speed_settings(name: &str, settings: &mut MouseSpeedConfig) {
+    if settings.min_speed < 1 {
+        warn_config_normalized(&format!("{name}.min_speed is below 1; clamping to 1"));
+        settings.min_speed = 1;
+    }
+    if settings.max_speed < settings.min_speed {
+        warn_config_normalized(&format!(
+            "{name}.max_speed is below {name}.min_speed; clamping to min"
+        ));
+        settings.max_speed = settings.min_speed;
+    }
+    if settings.speed_step < 1 {
+        warn_config_normalized(&format!("{name}.speed_step is below 1; clamping to 1"));
+        settings.speed_step = 1;
+    }
+    settings.default_speed = settings
+        .default_speed
+        .clamp(settings.min_speed, settings.max_speed);
+    if settings.flash_indicator_ms == 0 {
+        warn_config_normalized(&format!("{name}.flash_indicator_ms is 0; using default"));
+        settings.flash_indicator_ms = DEFAULT_MOUSE_SPEED_FLASH_MS;
+    }
+}
+
+fn normalize_wheel_settings(name: &str, settings: &mut WheelConfig, polling_rate: u64) {
+    if settings.min_speed < 1 {
+        warn_config_normalized(&format!("{name}.min_speed is below 1; clamping to 1"));
+        settings.min_speed = 1;
+    }
+    if settings.max_speed < settings.min_speed {
+        warn_config_normalized(&format!(
+            "{name}.max_speed is below {name}.min_speed; clamping to min"
+        ));
+        settings.max_speed = settings.min_speed;
+    }
+    if settings.speed_step < 1 {
+        warn_config_normalized(&format!("{name}.speed_step is below 1; clamping to 1"));
+        settings.speed_step = 1;
+    }
+    settings.default_speed = settings
+        .default_speed
+        .clamp(settings.min_speed, settings.max_speed);
+    if settings.tick_interval == 0 {
+        warn_config_normalized(&format!("{name}.tick_interval is 0; using polling_rate"));
+        settings.tick_interval = polling_rate;
+    }
+    if settings.speed_indicator_ms == 0 {
+        warn_config_normalized(&format!("{name}.speed_indicator_ms is 0; using default"));
+        settings.speed_indicator_ms = DEFAULT_WHEEL_SPEED_INDICATOR_MS;
+    }
+    if settings.vertical_multiplier < 1 {
+        warn_config_normalized(&format!(
+            "{name}.vertical_multiplier is below 1; clamping to 1"
+        ));
+        settings.vertical_multiplier = 1;
+    }
+    if settings.horizontal_multiplier < 1 {
+        warn_config_normalized(&format!(
+            "{name}.horizontal_multiplier is below 1; clamping to 1"
+        ));
+        settings.horizontal_multiplier = 1;
+    }
 }
 
 fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
@@ -1439,9 +1643,54 @@ fn execute_key_action_command<B: MouseBackend>(
     }
 
     if is_down {
+        if action == Action::ReloadConfig || action == Action::PanicReset {
+            return None;
+        }
         action_handler.execute_action(&action);
     }
     None
+}
+
+fn apply_loaded_config<B: MouseBackend>(
+    action_handler: &mut ActionHandler<B>,
+    app_state: &mut AppState,
+    config: Config,
+) -> Result<JumpOverlayResolution, Box<dyn Error>> {
+    let active = action_handler.mouse_master.current_mode == ModeState::Active;
+    action_handler.mouse_master.release_left_button_if_held();
+    action_handler.clear_active_keys();
+    app_state.clear_active_action_keys_and_exit_jump_mode();
+    action_handler
+        .mouse_master
+        .apply_config_preserving_mode(config.clone());
+    action_handler.mouse_master.set_active_mode(active);
+    app_state.set_active_mode(active);
+    Ok(app_state.resolve_jump_overlay())
+}
+
+fn reload_config() -> Result<(), Box<dyn Error>> {
+    let config = Config::load_from_file("config.toml")?;
+    config.runtime_system_bindings()?;
+    let resolution = {
+        let mut action_handler = ACTION_HANDLER.write().unwrap();
+        let mut app_state = APP_STATE.write().unwrap();
+        apply_loaded_config(&mut action_handler, &mut app_state, config.clone())?
+    };
+    config.initialize_bindings();
+    config.initialize_system_bindings()?;
+    sync_jump_overlay(resolution);
+    println!("[reload] config reloaded");
+    Ok(())
+}
+
+fn panic_reset() -> JumpOverlayResolution {
+    let mut action_handler = ACTION_HANDLER.write().unwrap();
+    let mut app_state = APP_STATE.write().unwrap();
+    action_handler.mouse_master.hard_reset_runtime();
+    action_handler.clear_active_keys();
+    app_state.clear_active_action_keys_and_exit_jump_mode();
+    app_state.hide_help();
+    app_state.resolve_jump_overlay()
 }
 
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
@@ -1452,6 +1701,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 println!("[command] SetActiveMode active={active}")
             }
             AppCommand::Exit => println!("[command] Exit"),
+            AppCommand::ReloadConfig => println!("[command] ReloadConfig"),
+            AppCommand::PanicReset => println!("[command] PanicReset"),
             AppCommand::ToggleHelp => println!("[command] ToggleHelp"),
             AppCommand::HideHelp => println!("[command] HideHelp"),
             AppCommand::EnterJumpMode {
@@ -1498,6 +1749,16 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::Exit => {
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
+        }
+        AppCommand::ReloadConfig => {
+            if let Err(err) = reload_config() {
+                eprintln!("[reload] keeping existing config: {err}");
+            }
+        }
+        AppCommand::PanicReset => {
+            let resolution = panic_reset();
+            sync_jump_overlay(resolution);
+            help_overlay::hide_help_overlay();
         }
         AppCommand::ToggleHelp => {
             let visible = {
@@ -1683,6 +1944,53 @@ fn startup_summary_line() -> String {
     format!("{APP_DISPLAY_NAME} ({APP_CRATE_ID}) Program Start!")
 }
 
+fn startup_validation_summary(config: &Config, warnings: &[String]) -> String {
+    let mut lines = vec![
+        format!("polling_rate={}ms", config.polling_rate),
+        format!(
+            "mouse_speed default={} range={}..{} step={} profiles={}",
+            config.mouse_speed.default_speed,
+            config.mouse_speed.min_speed,
+            config.mouse_speed.max_speed,
+            config.mouse_speed.speed_step,
+            config.movement_profiles.len()
+        ),
+        format!(
+            "wheel default={} range={}..{} step={} tick={}ms axis_multipliers=v{} h{} profiles={}",
+            config.wheel.default_speed,
+            config.wheel.min_speed,
+            config.wheel.max_speed,
+            config.wheel.speed_step,
+            config.wheel.tick_interval,
+            config.wheel.vertical_multiplier,
+            config.wheel.horizontal_multiplier,
+            config.wheel_profiles.len()
+        ),
+        format!(
+            "jump mode={:?} start_region={:?} profiles={}",
+            config.jump.mode,
+            config.jump.start_region,
+            config.jump.profiles.len()
+        ),
+    ];
+
+    if warnings.is_empty() {
+        lines.push("warnings=0".to_string());
+    } else {
+        lines.push(format!("warnings={}", warnings.len()));
+        lines.extend(warnings.iter().map(|warning| format!("warning: {warning}")));
+    }
+
+    lines.join("\n")
+}
+
+fn print_startup_validation_summary(config: &Config) {
+    println!(
+        "[startup validation]\n{}",
+        startup_validation_summary(config, &take_config_warnings())
+    );
+}
+
 unsafe fn install_keyboard_hook() -> windows::core::Result<()> {
     println!("🔹 Attempting to Get Module Handle...");
     let h_instance = GetModuleHandleW(None)?;
@@ -1709,7 +2017,12 @@ fn main() {
     std::panic::set_hook(Box::new(|info| {
         eprintln!("Application panicked: {}", info);
         if let Ok(mut action_handler) = ACTION_HANDLER.write() {
-            action_handler.mouse_master.release_left_button_if_held();
+            action_handler.mouse_master.hard_reset_runtime();
+            action_handler.clear_active_keys();
+        }
+        if let Ok(mut app_state) = APP_STATE.write() {
+            app_state.clear_active_action_keys_and_exit_jump_mode();
+            app_state.hide_help();
         }
         // Drop the hook guard so the keyboard is unhooked
         KEYBOARD_HOOK_HANDLE.with(|slot| {
@@ -1731,6 +2044,7 @@ fn main() {
         }
     };
     println!("✅ Config Loaded");
+    print_startup_validation_summary(&config);
 
     config.initialize_bindings();
     println!("✅ Key Bindings Initialized");
@@ -2755,6 +3069,109 @@ mod tests {
         assert!(summary.contains(APP_DISPLAY_NAME));
         assert!(summary.contains("multi_mousemover"));
         assert!(!summary.contains(LEGACY_PACKAGE_NAME));
+    }
+
+    #[test]
+    fn startup_validation_summary_formats_runtime_settings_and_warnings() {
+        let mut config = Config::default().normalize().unwrap();
+        config.movement_profiles.insert(
+            "fast".to_string(),
+            MouseSpeedConfig {
+                default_speed: 5,
+                min_speed: 1,
+                max_speed: 12,
+                speed_step: 2,
+                flash_indicator_ms: 700,
+            },
+        );
+
+        let summary = startup_validation_summary(&config, &["wheel.min_speed clamped".to_string()]);
+
+        assert!(summary.contains("polling_rate=8ms"));
+        assert!(summary.contains("mouse_speed default=1 range=1..12 step=1 profiles=1"));
+        assert!(summary.contains("wheel default=3 range=1..12 step=1 tick=8ms"));
+        assert!(summary.contains("warnings=1"));
+        assert!(summary.contains("warning: wheel.min_speed clamped"));
+    }
+
+    #[test]
+    fn normalized_values_emit_collectable_warnings() {
+        let _ = take_config_warnings();
+
+        let config = parse_config(
+            r#"
+            [wheel]
+            min_speed = 0
+            vertical_multiplier = 0
+            "#,
+        );
+        let warnings = take_config_warnings();
+
+        assert_eq!(config.wheel.min_speed, 1);
+        assert_eq!(config.wheel.vertical_multiplier, 1);
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("wheel.min_speed is below 1")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("wheel.vertical_multiplier is below 1")));
+    }
+
+    #[test]
+    fn reload_success_applies_config_and_clears_runtime_state() {
+        let mut old_config = Config::default().normalize().unwrap();
+        old_config.mouse_speed.default_speed = 2;
+        let mut new_config = Config::default().normalize().unwrap();
+        new_config.mouse_speed.default_speed = 5;
+        new_config.starting_speed = 5;
+
+        let mut action_handler = ActionHandler::new(MouseMaster::new_with_backend(
+            old_config,
+            FakeBackend::default(),
+        ));
+        let mut app_state = AppState::default();
+        app_state.set_bound_keys([VirtualKey::A]);
+        app_state.route_key_event(KeyEvent::new(VirtualKey::A, true), Some(Action::MoveLeft));
+        action_handler.process_active_keys(Action::MoveLeft, true);
+        action_handler.mouse_master.press_left_button_for_drag();
+
+        let resolution =
+            apply_loaded_config(&mut action_handler, &mut app_state, new_config).unwrap();
+
+        assert_eq!(resolution, JumpOverlayResolution::Hidden);
+        assert!(!action_handler.mouse_master.left_button_held());
+        assert!(action_handler.active_keys.is_empty());
+        assert!(!app_state.has_active_action_keys());
+        assert_eq!(
+            action_handler.mouse_master.config.mouse_speed.default_speed,
+            5
+        );
+    }
+
+    #[test]
+    fn reload_validation_failure_can_rollback_without_mutating_runtime_config() {
+        let old_config = Config::default().normalize().unwrap();
+        let action_handler = ActionHandler::new(MouseMaster::new_with_backend(
+            old_config.clone(),
+            FakeBackend::default(),
+        ));
+        let _app_state = AppState::default();
+        let validation = parse_config_error(
+            r#"
+            [system_bindings]
+            toggle_active = "Ctrl+DefinitelyNotAKey"
+            "#,
+        );
+
+        assert!(validation.contains("system_bindings.toggle_active"));
+        assert_eq!(
+            action_handler
+                .mouse_master
+                .config
+                .system_bindings
+                .toggle_active,
+            old_config.system_bindings.toggle_active
+        );
     }
 
     #[test]

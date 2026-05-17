@@ -24,9 +24,16 @@ key_bindings = [
     ["RightAlt+D", "move_to_right_edge"],
     ["V", "wheel_speed_up"],
     ["B", "wheel_speed_down"],
+    ["G", "wheel_speed_reset"],
     ["C", "mouse_speed_up"],
     ["X", "mouse_speed_down"],
     ["Z", "mouse_speed_reset"],
+    ["RightAlt+C", "movement_profile_next"],
+    ["RightAlt+X", "movement_profile_previous"],
+    ["RightAlt+V", "wheel_profile_next"],
+    ["RightAlt+B", "wheel_profile_previous"],
+    ["RightAlt+R", "reload_config"],
+    ["RightAlt+Escape", "panic_reset"],
     ["Slash", "show_help"]
 ]
 
@@ -120,6 +127,65 @@ center_marker = false
 separators = true
 hide_threshold_px = 0
 
+[jump.profiles.fast]
+mode = "single"
+cursor_between_stages = "none"
+
+[jump.profiles.fast.coarse]
+enabled = true
+width = 14
+height = 10
+visual_context_margin_percent = 0
+zoom_scale = 1.0
+
+[jump.profiles.precise]
+mode = "precision"
+cursor_between_stages = "preview_only"
+
+[jump.profiles.precise.coarse]
+enabled = true
+width = 8
+height = 6
+visual_context_margin_percent = 0
+zoom_scale = 1.0
+
+[jump.profiles.precise.fine]
+enabled = true
+width = 6
+height = 6
+visual_context_margin_percent = 3
+zoom_scale = 2.0
+
+[jump.profiles.precise.precise]
+enabled = true
+width = 5
+height = 5
+visual_context_margin_percent = 8
+zoom_scale = 3.0
+
+[jump.profiles.window]
+mode = "precision"
+start_region = "active_window_bounds"
+preview_edge_behavior = "shift_into_bounds"
+
+[jump.profiles.window.coarse]
+enabled = true
+width = 8
+height = 6
+visual_context_margin_percent = 2
+zoom_scale = 1.5
+
+[jump.profiles.monitor]
+mode = "precision"
+start_region = "current_monitor"
+
+[jump.profiles.monitor.coarse]
+enabled = true
+width = 10
+height = 8
+visual_context_margin_percent = 0
+zoom_scale = 1.0
+
 [final_adjust]
 enabled = false
 small_step_px = 1
@@ -159,6 +225,27 @@ max_speed = 12
 speed_step = 1
 flash_indicator_ms = 700
 
+[movement_profiles.fast]
+default_speed = 5
+min_speed = 2
+max_speed = 18
+speed_step = 2
+flash_indicator_ms = 700
+
+[movement_profiles.precise]
+default_speed = 1
+min_speed = 1
+max_speed = 4
+speed_step = 1
+flash_indicator_ms = 700
+
+[movement_profiles.window]
+default_speed = 3
+min_speed = 1
+max_speed = 10
+speed_step = 1
+flash_indicator_ms = 700
+
 [wheel]
 default_speed = 3
 min_speed = 1
@@ -166,6 +253,33 @@ max_speed = 12
 speed_step = 1
 tick_interval = 8
 speed_indicator_ms = 700
+vertical_multiplier = 1
+horizontal_multiplier = 1
+
+[wheel_profiles.fast]
+default_speed = 6
+min_speed = 1
+max_speed = 18
+speed_step = 2
+tick_interval = 8
+speed_indicator_ms = 700
+vertical_multiplier = 1
+horizontal_multiplier = 1
+
+[wheel_profiles.precise]
+default_speed = 1
+min_speed = 1
+max_speed = 5
+speed_step = 1
+tick_interval = 12
+speed_indicator_ms = 700
+vertical_multiplier = 1
+horizontal_multiplier = 1
+
+[wheel_profiles.horizontal]
+default_speed = 3
+horizontal_multiplier = 3
+vertical_multiplier = 1
 
 [edge_jump]
 offset_px = 1

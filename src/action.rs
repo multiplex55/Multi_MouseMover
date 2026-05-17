@@ -36,12 +36,21 @@ pub enum Action {
     WheelRight,
     WheelSpeedUp,
     WheelSpeedDown,
+    WheelSpeedReset,
+    WheelProfileNext,
+    WheelProfilePrevious,
+    WheelProfileSelect(String),
     MouseSpeedUp,
     MouseSpeedDown,
     MouseSpeedReset,
+    MovementProfileNext,
+    MovementProfilePrevious,
+    MovementProfileSelect(String),
 
     // Control actions.
     Exit,
+    ReloadConfig,
+    PanicReset,
     SlowMouse,
     JumpMode,
     JumpModeProfile(String),
@@ -78,13 +87,53 @@ impl Action {
             "wheel_right" | "scroll_right" => Some(Self::WheelRight),
             "wheel_speed_up" => Some(Self::WheelSpeedUp),
             "wheel_speed_down" => Some(Self::WheelSpeedDown),
+            "wheel_speed_reset" => Some(Self::WheelSpeedReset),
+            "wheel_profile_next" => Some(Self::WheelProfileNext),
+            "wheel_profile_previous" | "wheel_profile_prev" => Some(Self::WheelProfilePrevious),
             "mouse_speed_up" => Some(Self::MouseSpeedUp),
             "mouse_speed_down" => Some(Self::MouseSpeedDown),
             "mouse_speed_reset" => Some(Self::MouseSpeedReset),
+            "movement_profile_next" | "mouse_profile_next" => Some(Self::MovementProfileNext),
+            "movement_profile_previous"
+            | "movement_profile_prev"
+            | "mouse_profile_previous"
+            | "mouse_profile_prev" => Some(Self::MovementProfilePrevious),
             "exit" => Some(Self::Exit),
+            "reload_config" => Some(Self::ReloadConfig),
+            "panic_reset" => Some(Self::PanicReset),
             "slow_mouse" => Some(Self::SlowMouse),
             "jump_mode" => Some(Self::JumpMode),
             "show_help" | "help" | "toggle_help" => Some(Self::ShowHelp),
+            action
+                if action.starts_with("movement_profile:")
+                    || action.starts_with("mouse_profile:")
+                    || action.starts_with("select_movement_profile:") =>
+            {
+                action.split_once(':').and_then(|(_, profile)| {
+                    (!profile.is_empty()).then(|| Self::MovementProfileSelect(profile.to_string()))
+                })
+            }
+            action
+                if action.starts_with("movement_profile.")
+                    || action.starts_with("mouse_profile.") =>
+            {
+                action.split_once('.').and_then(|(_, profile)| {
+                    (!profile.is_empty()).then(|| Self::MovementProfileSelect(profile.to_string()))
+                })
+            }
+            action
+                if action.starts_with("wheel_profile:")
+                    || action.starts_with("select_wheel_profile:") =>
+            {
+                action.split_once(':').and_then(|(_, profile)| {
+                    (!profile.is_empty()).then(|| Self::WheelProfileSelect(profile.to_string()))
+                })
+            }
+            action if action.starts_with("wheel_profile.") => {
+                action.split_once('.').and_then(|(_, profile)| {
+                    (!profile.is_empty()).then(|| Self::WheelProfileSelect(profile.to_string()))
+                })
+            }
             action if action.starts_with("jump_mode_profile:") => {
                 action.split_once(':').and_then(|(_, profile)| {
                     (!profile.is_empty()).then(|| Self::JumpModeProfile(profile.to_string()))
@@ -139,9 +188,16 @@ mod tests {
             ("wheel_right", Action::WheelRight),
             ("wheel_speed_up", Action::WheelSpeedUp),
             ("wheel_speed_down", Action::WheelSpeedDown),
+            ("wheel_speed_reset", Action::WheelSpeedReset),
             ("mouse_speed_up", Action::MouseSpeedUp),
             ("mouse_speed_down", Action::MouseSpeedDown),
             ("mouse_speed_reset", Action::MouseSpeedReset),
+            ("movement_profile_next", Action::MovementProfileNext),
+            ("movement_profile_previous", Action::MovementProfilePrevious),
+            ("wheel_profile_next", Action::WheelProfileNext),
+            ("wheel_profile_previous", Action::WheelProfilePrevious),
+            ("reload_config", Action::ReloadConfig),
+            ("panic_reset", Action::PanicReset),
             ("center_current_monitor", Action::CenterCurrentMonitor),
             ("click_then_disable", Action::ClickThenDisable),
             ("toggle_drag_mode", Action::ToggleDragMode),
@@ -199,6 +255,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_profile_action_strings() {
+        assert_eq!(
+            Action::from_string("movement_profile:fast"),
+            Some(Action::MovementProfileSelect("fast".to_string()))
+        );
+        assert_eq!(
+            Action::from_string("wheel_profile.precise"),
+            Some(Action::WheelProfileSelect("precise".to_string()))
+        );
+        assert_eq!(
+            Action::from_string("jump_mode_profile:window"),
+            Some(Action::JumpModeProfile("window".to_string()))
+        );
+    }
+
+    #[test]
     fn continuous_move_actions_are_movement() {
         let movement_actions = [
             Action::MoveUp,
@@ -235,7 +307,10 @@ mod tests {
             Action::WheelRight,
             Action::WheelSpeedUp,
             Action::WheelSpeedDown,
+            Action::WheelSpeedReset,
             Action::Exit,
+            Action::ReloadConfig,
+            Action::PanicReset,
             Action::SlowMouse,
             Action::JumpMode,
             Action::ShowHelp,
@@ -284,7 +359,10 @@ mod tests {
             Action::ToggleDragMode,
             Action::WheelSpeedUp,
             Action::WheelSpeedDown,
+            Action::WheelSpeedReset,
             Action::Exit,
+            Action::ReloadConfig,
+            Action::PanicReset,
             Action::JumpMode,
             Action::ShowHelp,
         ];

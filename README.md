@@ -40,6 +40,8 @@ Default bindings are defined in `config.toml` under the `key_bindings` table.  S
 | `LeftShift`/`RightShift` | Slow movement |
 | `Escape`     | Exit the program|
 | `F`          | Enter jump mode |
+| `RightAlt+R` | Reload config |
+| `RightAlt+Escape` | Panic reset |
 
 Holding **Alt + E** toggles between *Active* and *Idle* modes where keybinds are processed or ignored respectively.
 
@@ -52,6 +54,20 @@ Example sequence:
 1. Hit `F` – the grid overlay appears.
 2. Enter the letter pair shown in the target cell.
 3. The mouse jumps to that position and the overlay hides.
+
+Jump profiles live under `jump.profiles.<name>` and override the base `[jump]`
+settings only for that launch. Bind one with either action syntax:
+
+```toml
+["F", "jump_mode"]
+["RightAlt+F", "jump_mode_profile:precise"]
+["RightAlt+W", "jump_mode_profile.window"]
+```
+
+The default `config.toml` includes practical `fast`, `precise`, `window`, and
+`monitor` jump profiles. Profile tables merge over the base jump config, so a
+profile can set only `start_region`, `mode`, or one stage without repeating the
+entire jump block.
 
 ## Configuration Options
 
@@ -67,11 +83,22 @@ Example sequence:
 - `jump.preview_edge_behavior` – `clamp`, `shift_into_bounds`, `allow_asymmetric_context`, or `disable_context_near_edges`.
 - `jump.visuals` – toggles selected-region outline, preview outline, active-grid outline, cell centers, and final crosshair.
 - `jump.coarse`, `jump.fine`, `jump.precise` – per-stage geometry and label settings.
+- `jump.profiles.<name>` – named jump overrides selected with `jump_mode_profile:<name>`.
 - `starting_speed` – initial mouse speed in pixels per step.
 - `acceleration` and `acceleration_rate` – how quickly speed increases when holding a direction.
 - `top_speed` – maximum mouse speed.
-- `wheel` – wheel speed, bounds, tick interval, and indicator duration.
+- `movement_profiles.<name>` – named mouse speed profiles selected with `movement_profile:<name>`, `movement_profile_next`, or `movement_profile_previous`.
+- `wheel` – wheel speed, bounds, tick interval, indicator duration, and vertical/horizontal axis multipliers.
+- `wheel_profiles.<name>` – named wheel overrides selected with `wheel_profile:<name>`, `wheel_profile_next`, or `wheel_profile_previous`.
 - `edge_jump` – edge-jump offset and work-area behavior.
+
+Runtime action syntax:
+
+- Mouse speed: `mouse_speed_up`, `mouse_speed_down`, `mouse_speed_reset`.
+- Movement profiles: `movement_profile_next`, `movement_profile_previous`, `movement_profile:<name>`, or `movement_profile.<name>`.
+- Wheel speed: `wheel_speed_up`, `wheel_speed_down`, `wheel_speed_reset`.
+- Wheel profiles: `wheel_profile_next`, `wheel_profile_previous`, `wheel_profile:<name>`, or `wheel_profile.<name>`.
+- Config/runtime safety: `reload_config` reloads `config.toml` and keeps the old config on validation failure; `panic_reset` releases drag, clears active keys, exits jump mode, hides overlays, and resets runtime speeds.
 
 Each jump stage supports:
 
@@ -156,7 +183,8 @@ hide_threshold_px = 0
 
 Deprecated compatibility fields are still accepted: `jump.move_cursor_after_each_stage = true` maps to `cursor_between_stages = "move_to_region_center"`, and `false` maps to `"none"` when `cursor_between_stages` is absent. Stage-level `preview_margin_percent` maps to `visual_context_margin_percent` only when the modern field is absent.
 
-Adjust these values to suit your workflow. After editing the file restart the application to apply changes.
+Adjust these values to suit your workflow. After editing the file, use the
+`reload_config` action or restart the application to apply changes.
 
 ## Troubleshooting
 

@@ -87,6 +87,10 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     pub mouse_speed_baseline: i32,
     pub current_speed: i32,
     pub current_wheel_speed: i32,
+    pub active_movement_profile: Option<String>,
+    pub active_wheel_profile: Option<String>,
+    pub effective_mouse_speed: crate::MouseSpeedConfig,
+    pub effective_wheel: crate::WheelConfig,
     pub acceleration_counter: u32,
     pub top_speed_behavior: TopSpeedBehavior,
     pub left_button_held: bool,
@@ -134,6 +138,10 @@ impl<B: MouseBackend> MouseMaster<B> {
             mouse_speed_baseline: config.mouse_speed.default_speed,
             current_speed: config.mouse_speed.default_speed,
             current_wheel_speed: config.wheel.default_speed,
+            active_movement_profile: None,
+            active_wheel_profile: None,
+            effective_mouse_speed: config.mouse_speed,
+            effective_wheel: config.wheel,
             acceleration_counter: 0,
             top_speed_behavior: TopSpeedBehavior::from_config(&config),
             left_button_held: false,
@@ -180,14 +188,37 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::WheelRight => self.wheel_right(),
             Action::WheelSpeedUp => self.increase_wheel_speed(),
             Action::WheelSpeedDown => self.decrease_wheel_speed(),
+            Action::WheelSpeedReset => self.reset_wheel_speed_tier(),
+            Action::WheelProfileNext => {
+                self.select_next_wheel_profile();
+            }
+            Action::WheelProfilePrevious => {
+                self.select_previous_wheel_profile();
+            }
+            Action::WheelProfileSelect(profile) => {
+                self.select_wheel_profile(&profile);
+            }
             Action::MouseSpeedUp => self.increase_mouse_speed(),
             Action::MouseSpeedDown => self.decrease_mouse_speed(),
             Action::MouseSpeedReset => self.reset_mouse_speed_tier(),
+            Action::MovementProfileNext => {
+                self.select_next_movement_profile();
+            }
+            Action::MovementProfilePrevious => {
+                self.select_previous_movement_profile();
+            }
+            Action::MovementProfileSelect(profile) => {
+                self.select_movement_profile(&profile);
+            }
             Action::Exit => self.exit(),
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
-            Action::JumpMode | Action::JumpModeProfile(_) | Action::ShowHelp => {}
+            Action::ReloadConfig
+            | Action::PanicReset
+            | Action::JumpMode
+            | Action::JumpModeProfile(_)
+            | Action::ShowHelp => {}
         }
     }
     /// Toggles between `Idle` and `Active` mode
@@ -278,51 +309,68 @@ impl<B: MouseBackend> MouseMaster<B> {
     }
 
     pub fn wheel_up(&mut self) {
-        self.scroll_wheel(-self.current_wheel_speed, Axis::Vertical);
+        self.scroll_wheel(
+            -self.current_wheel_speed * self.effective_wheel.vertical_multiplier,
+            Axis::Vertical,
+        );
     }
 
     pub fn wheel_down(&mut self) {
-        self.scroll_wheel(self.current_wheel_speed, Axis::Vertical);
+        self.scroll_wheel(
+            self.current_wheel_speed * self.effective_wheel.vertical_multiplier,
+            Axis::Vertical,
+        );
     }
 
     pub fn wheel_left(&mut self) {
-        self.scroll_wheel(-self.current_wheel_speed, Axis::Horizontal);
+        self.scroll_wheel(
+            -self.current_wheel_speed * self.effective_wheel.horizontal_multiplier,
+            Axis::Horizontal,
+        );
     }
 
     pub fn wheel_right(&mut self) {
-        self.scroll_wheel(self.current_wheel_speed, Axis::Horizontal);
+        self.scroll_wheel(
+            self.current_wheel_speed * self.effective_wheel.horizontal_multiplier,
+            Axis::Horizontal,
+        );
     }
 
     pub fn increase_wheel_speed(&mut self) {
-        self.current_wheel_speed = (self.current_wheel_speed + self.config.wheel.speed_step)
-            .min(self.config.wheel.max_speed);
+        self.current_wheel_speed = (self.current_wheel_speed + self.effective_wheel.speed_step)
+            .min(self.effective_wheel.max_speed);
         self.flash_wheel_speed_indicator();
     }
 
     pub fn decrease_wheel_speed(&mut self) {
-        self.current_wheel_speed = (self.current_wheel_speed - self.config.wheel.speed_step)
-            .max(self.config.wheel.min_speed);
+        self.current_wheel_speed = (self.current_wheel_speed - self.effective_wheel.speed_step)
+            .max(self.effective_wheel.min_speed);
+        self.flash_wheel_speed_indicator();
+    }
+
+    pub fn reset_wheel_speed_tier(&mut self) {
+        self.current_wheel_speed = self.effective_wheel.default_speed;
         self.flash_wheel_speed_indicator();
     }
 
     pub fn increase_mouse_speed(&mut self) {
         self.mouse_speed_baseline = (self.mouse_speed_baseline
-            + self.config.mouse_speed.speed_step)
-            .min(self.config.mouse_speed.max_speed);
+            + self.effective_mouse_speed.speed_step)
+            .min(self.effective_mouse_speed.max_speed);
         self.reset_acceleration_to_baseline();
         self.flash_mouse_speed_indicator();
     }
 
     pub fn decrease_mouse_speed(&mut self) {
         self.mouse_speed_baseline = (self.mouse_speed_baseline
-            - self.config.mouse_speed.speed_step)
-            .max(self.config.mouse_speed.min_speed);
+            - self.effective_mouse_speed.speed_step)
+            .max(self.effective_mouse_speed.min_speed);
         self.reset_acceleration_to_baseline();
         self.flash_mouse_speed_indicator();
     }
 
     pub fn reset_mouse_speed_tier(&mut self) {
-        self.mouse_speed_baseline = self.config.mouse_speed.default_speed;
+        self.mouse_speed_baseline = self.effective_mouse_speed.default_speed;
         self.reset_acceleration_to_baseline();
         self.flash_mouse_speed_indicator();
     }
@@ -333,7 +381,7 @@ impl<B: MouseBackend> MouseMaster<B> {
 
     pub fn flash_mouse_speed_indicator_at(&mut self, now: Instant) {
         self.mouse_speed_flash_until =
-            Some(now + Duration::from_millis(self.config.mouse_speed.flash_indicator_ms));
+            Some(now + Duration::from_millis(self.effective_mouse_speed.flash_indicator_ms));
     }
 
     pub fn mouse_speed_indicator_active(&self) -> bool {
@@ -351,7 +399,7 @@ impl<B: MouseBackend> MouseMaster<B> {
 
     pub fn flash_wheel_speed_indicator_at(&mut self, now: Instant) {
         self.wheel_speed_flash_until =
-            Some(now + Duration::from_millis(self.config.wheel.speed_indicator_ms));
+            Some(now + Duration::from_millis(self.effective_wheel.speed_indicator_ms));
     }
 
     pub fn wheel_speed_indicator_active(&self) -> bool {
@@ -411,7 +459,7 @@ impl<B: MouseBackend> MouseMaster<B> {
         };
 
         let now = Instant::now();
-        let interval = Duration::from_millis(self.config.wheel.tick_interval);
+        let interval = Duration::from_millis(self.effective_wheel.tick_interval);
         if self
             .last_wheel_tick
             .is_some_and(|last_tick| now.duration_since(last_tick) < interval)
@@ -474,6 +522,101 @@ impl<B: MouseBackend> MouseMaster<B> {
     fn reset_acceleration_to_baseline(&mut self) {
         self.current_speed = self.mouse_speed_baseline;
         self.acceleration_counter = 0;
+    }
+
+    pub fn apply_config_preserving_mode(&mut self, config: Config) {
+        let active = self.current_mode == ModeState::Active;
+        self.config = config;
+        self.top_speed_behavior = TopSpeedBehavior::from_config(&self.config);
+        let movement_profile = self.active_movement_profile.clone();
+        if !self.apply_movement_profile(movement_profile.as_deref()) {
+            self.apply_movement_profile(None);
+        }
+        let wheel_profile = self.active_wheel_profile.clone();
+        if !self.apply_wheel_profile(wheel_profile.as_deref()) {
+            self.apply_wheel_profile(None);
+        }
+        self.set_active_mode(active);
+        self.reset_speed();
+    }
+
+    pub fn hard_reset_runtime(&mut self) {
+        self.release_left_button_if_held();
+        self.apply_movement_profile(None);
+        self.apply_wheel_profile(None);
+        self.reset_speed();
+        self.mouse_speed_flash_until = None;
+        self.wheel_speed_flash_until = None;
+    }
+
+    pub fn select_movement_profile(&mut self, name: &str) -> bool {
+        self.apply_movement_profile(Some(name))
+    }
+
+    pub fn select_next_movement_profile(&mut self) -> bool {
+        let profiles = self.profile_names(self.config.movement_profiles.keys());
+        let next = next_profile_name(&profiles, self.active_movement_profile.as_deref(), 1);
+        self.apply_movement_profile(next.as_deref())
+    }
+
+    pub fn select_previous_movement_profile(&mut self) -> bool {
+        let profiles = self.profile_names(self.config.movement_profiles.keys());
+        let next = next_profile_name(&profiles, self.active_movement_profile.as_deref(), -1);
+        self.apply_movement_profile(next.as_deref())
+    }
+
+    pub fn select_wheel_profile(&mut self, name: &str) -> bool {
+        self.apply_wheel_profile(Some(name))
+    }
+
+    pub fn select_next_wheel_profile(&mut self) -> bool {
+        let profiles = self.profile_names(self.config.wheel_profiles.keys());
+        let next = next_profile_name(&profiles, self.active_wheel_profile.as_deref(), 1);
+        self.apply_wheel_profile(next.as_deref())
+    }
+
+    pub fn select_previous_wheel_profile(&mut self) -> bool {
+        let profiles = self.profile_names(self.config.wheel_profiles.keys());
+        let next = next_profile_name(&profiles, self.active_wheel_profile.as_deref(), -1);
+        self.apply_wheel_profile(next.as_deref())
+    }
+
+    fn apply_movement_profile(&mut self, profile: Option<&str>) -> bool {
+        let Ok(settings) = self.config.resolved_movement_profile(profile) else {
+            eprintln!(
+                "[movement] profile '{}' does not exist",
+                profile.unwrap_or_default()
+            );
+            return false;
+        };
+        self.active_movement_profile = profile.map(str::to_string);
+        self.effective_mouse_speed = settings;
+        self.mouse_speed_baseline = settings.default_speed;
+        self.reset_acceleration_to_baseline();
+        self.flash_mouse_speed_indicator();
+        true
+    }
+
+    fn apply_wheel_profile(&mut self, profile: Option<&str>) -> bool {
+        let Ok(settings) = self.config.resolved_wheel_profile(profile) else {
+            eprintln!(
+                "[wheel] profile '{}' does not exist",
+                profile.unwrap_or_default()
+            );
+            return false;
+        };
+        self.active_wheel_profile = profile.map(str::to_string);
+        self.effective_wheel = settings;
+        self.current_wheel_speed = settings.default_speed;
+        self.last_wheel_tick = None;
+        self.flash_wheel_speed_indicator();
+        true
+    }
+
+    fn profile_names<'a>(&self, names: impl Iterator<Item = &'a String>) -> Vec<String> {
+        let mut profiles: Vec<String> = names.cloned().collect();
+        profiles.sort();
+        profiles
     }
 
     pub fn prepare_exit(&mut self) {
@@ -697,6 +840,23 @@ fn advance_speed(
 
     *current_speed = (*current_speed).min(top_speed);
     *current_speed
+}
+
+fn next_profile_name(profiles: &[String], current: Option<&str>, direction: i32) -> Option<String> {
+    if profiles.is_empty() {
+        return None;
+    }
+
+    let current_index = current
+        .and_then(|name| profiles.iter().position(|profile| profile == name))
+        .unwrap_or(if direction >= 0 {
+            profiles.len() - 1
+        } else {
+            0
+        });
+    let len = profiles.len() as i32;
+    let next_index = (current_index as i32 + direction).rem_euclid(len) as usize;
+    profiles.get(next_index).cloned()
 }
 
 #[cfg(test)]
@@ -987,6 +1147,8 @@ mod tests {
                 speed_step: 4,
                 tick_interval: 8,
                 speed_indicator_ms: 700,
+                vertical_multiplier: 1,
+                horizontal_multiplier: 1,
             },
             ..Config::default()
         };
@@ -1017,6 +1179,8 @@ mod tests {
                 speed_step: 4,
                 tick_interval: 8,
                 speed_indicator_ms: 700,
+                vertical_multiplier: 1,
+                horizontal_multiplier: 1,
             },
             ..Config::default()
         };
@@ -1049,6 +1213,94 @@ mod tests {
             mouse.wheel_speed_indicator_active_at(now + flash_duration - Duration::from_millis(1))
         );
         assert!(!mouse.wheel_speed_indicator_active_at(now + flash_duration));
+    }
+
+    #[test]
+    fn movement_profile_selection_accepts_valid_names_and_rejects_invalid_names() {
+        let mut config = test_config();
+        config.movement_profiles.insert(
+            "fast".to_string(),
+            crate::MouseSpeedConfig {
+                default_speed: 6,
+                min_speed: 1,
+                max_speed: 12,
+                speed_step: 2,
+                flash_indicator_ms: 700,
+            },
+        );
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        assert!(mouse.select_movement_profile("fast"));
+        assert_eq!(mouse.active_movement_profile.as_deref(), Some("fast"));
+        assert_eq!(mouse.mouse_speed_baseline, 6);
+
+        assert!(!mouse.select_movement_profile("missing"));
+        assert_eq!(mouse.active_movement_profile.as_deref(), Some("fast"));
+        assert_eq!(mouse.mouse_speed_baseline, 6);
+    }
+
+    #[test]
+    fn wheel_profile_selection_applies_axis_multipliers_and_rejects_invalid_names() {
+        let mut config = test_config();
+        config.wheel_profiles.insert(
+            "horizontal".to_string(),
+            crate::WheelProfileConfig {
+                default_speed: Some(4),
+                min_speed: Some(1),
+                max_speed: Some(9),
+                speed_step: Some(1),
+                tick_interval: Some(8),
+                speed_indicator_ms: Some(700),
+                vertical_multiplier: Some(1),
+                horizontal_multiplier: Some(3),
+            },
+        );
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        assert!(mouse.select_wheel_profile("horizontal"));
+        mouse.wheel_right();
+        assert_eq!(mouse.backend.scrolls, vec![(12, Axis::Horizontal)]);
+
+        assert!(!mouse.select_wheel_profile("missing"));
+        assert_eq!(mouse.active_wheel_profile.as_deref(), Some("horizontal"));
+        assert_eq!(mouse.current_wheel_speed, 4);
+    }
+
+    #[test]
+    fn panic_reset_releases_drag_and_resets_runtime_speeds() {
+        let mut config = test_config();
+        config.movement_profiles.insert(
+            "fast".to_string(),
+            crate::MouseSpeedConfig {
+                default_speed: 7,
+                min_speed: 1,
+                max_speed: 12,
+                speed_step: 1,
+                flash_indicator_ms: 700,
+            },
+        );
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        mouse.handle_action(Action::ToggleDragMode);
+        mouse.select_movement_profile("fast");
+        mouse.increase_wheel_speed();
+        mouse.hard_reset_runtime();
+
+        assert!(!mouse.left_button_held());
+        assert_eq!(mouse.active_movement_profile, None);
+        assert_eq!(mouse.active_wheel_profile, None);
+        assert_eq!(
+            mouse.mouse_speed_baseline,
+            mouse.config.mouse_speed.default_speed
+        );
+        assert_eq!(mouse.current_wheel_speed, mouse.config.wheel.default_speed);
+        assert_eq!(
+            mouse.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+            ]
+        );
     }
 
     #[test]
