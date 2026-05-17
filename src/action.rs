@@ -75,6 +75,31 @@ impl Action {
             _ => None,
         }
     }
+
+    pub fn is_movement(self) -> bool {
+        matches!(
+            self,
+            Self::MoveUp
+                | Self::MoveDown
+                | Self::MoveLeft
+                | Self::MoveRight
+                | Self::MoveUpRight
+                | Self::MoveUpLeft
+                | Self::MoveDownRight
+                | Self::MoveDownLeft
+        )
+    }
+
+    pub fn is_wheel_direction(self) -> bool {
+        matches!(
+            self,
+            Self::WheelUp | Self::WheelDown | Self::WheelLeft | Self::WheelRight
+        )
+    }
+
+    pub fn is_continuous(self) -> bool {
+        self.is_movement() || self == Self::SlowMouse || self.is_wheel_direction()
+    }
 }
 
 #[cfg(test)]
@@ -139,7 +164,7 @@ mod tests {
         ];
 
         for action in movement_actions {
-            assert!(ActionHandler::is_movement_action(action));
+            assert!(action.is_movement());
         }
     }
 
@@ -167,7 +192,53 @@ mod tests {
         ];
 
         for action in non_movement_actions {
-            assert!(!ActionHandler::is_movement_action(action));
+            assert!(!action.is_movement());
+        }
+    }
+
+    #[test]
+    fn continuous_actions_include_movement_slow_mode_and_wheel_directions() {
+        let continuous_actions = [
+            Action::MoveUp,
+            Action::MoveDown,
+            Action::MoveLeft,
+            Action::MoveRight,
+            Action::MoveUpRight,
+            Action::MoveUpLeft,
+            Action::MoveDownRight,
+            Action::MoveDownLeft,
+            Action::SlowMouse,
+            Action::WheelUp,
+            Action::WheelDown,
+            Action::WheelLeft,
+            Action::WheelRight,
+        ];
+
+        for action in continuous_actions {
+            assert!(action.is_continuous(), "{action:?}");
+        }
+    }
+
+    #[test]
+    fn one_shot_actions_are_not_continuous() {
+        let one_shot_actions = [
+            Action::MoveToTopEdge,
+            Action::MoveToBottomEdge,
+            Action::MoveToLeftEdge,
+            Action::MoveToRightEdge,
+            Action::CenterCurrentMonitor,
+            Action::LeftClick,
+            Action::RightClick,
+            Action::MiddleClick,
+            Action::ClickThenDisable,
+            Action::WheelSpeedUp,
+            Action::WheelSpeedDown,
+            Action::Exit,
+            Action::JumpMode,
+        ];
+
+        for action in one_shot_actions {
+            assert!(!action.is_continuous(), "{action:?}");
         }
     }
 }
@@ -225,17 +296,7 @@ impl ActionHandler {
             .tick_movement(&self.active_keys, Duration::from_millis(0))
     }
 
-    pub fn is_movement_action(action: Action) -> bool {
-        matches!(
-            action,
-            Action::MoveUp
-                | Action::MoveDown
-                | Action::MoveLeft
-                | Action::MoveRight
-                | Action::MoveUpRight
-                | Action::MoveUpLeft
-                | Action::MoveDownRight
-                | Action::MoveDownLeft
-        )
+    pub fn is_continuous_action(action: Action) -> bool {
+        action.is_continuous()
     }
 }

@@ -1,10 +1,11 @@
+use crate::monitor::{current_monitor_rect_for_cursor, MonitorEdge, MonitorRect};
 use crate::overlay::OVERLAY;
 use crate::{action, Config};
 use action::Action;
 use enigo::*;
 use std::collections::HashSet;
 use std::env;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DIAGONAL_NORMALIZATION: f64 = std::f64::consts::FRAC_1_SQRT_2;
 const DEBUG_DIAGNOSTICS_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
@@ -17,14 +18,57 @@ pub struct MovementTick {
     pub moving: bool,
 }
 
-pub struct MouseMaster {
-    pub enigo: Enigo,
+pub trait MouseBackend {
+    fn click(&mut self, button: Button) -> Result<(), String>;
+    fn move_abs(&mut self, x: i32, y: i32) -> Result<(), String>;
+    fn location(&self) -> Result<(i32, i32), String>;
+    fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), String>;
+}
+
+pub struct EnigoMouseBackend {
+    enigo: Enigo,
+}
+
+impl EnigoMouseBackend {
+    fn new() -> Self {
+        Self {
+            enigo: Enigo::new(&Settings::default()).unwrap(),
+        }
+    }
+}
+
+impl MouseBackend for EnigoMouseBackend {
+    fn click(&mut self, button: Button) -> Result<(), String> {
+        self.enigo
+            .button(button, Direction::Click)
+            .map_err(|e| e.to_string())
+    }
+
+    fn move_abs(&mut self, x: i32, y: i32) -> Result<(), String> {
+        self.enigo
+            .move_mouse(x, y, Coordinate::Abs)
+            .map_err(|e| e.to_string())
+    }
+
+    fn location(&self) -> Result<(i32, i32), String> {
+        self.enigo.location().map_err(|e| e.to_string())
+    }
+
+    fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), String> {
+        self.enigo.scroll(length, axis).map_err(|e| e.to_string())
+    }
+}
+
+pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
+    pub backend: B,
     pub config: Config,
     pub current_mode: ModeState,
     pub current_speed: i32,
+    pub current_wheel_speed: i32,
     pub acceleration_counter: u32,
     pub top_speed: i32,
     pub left_click_held: bool,
+    last_wheel_tick: Option<Instant>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -33,17 +77,25 @@ pub enum ModeState {
     Active, // Mode where keybinds are processed
 }
 
-impl MouseMaster {
+impl MouseMaster<EnigoMouseBackend> {
     /// Creates a new `MouseMaster` instance
     pub fn new(config: Config) -> Self {
+        Self::new_with_backend(config, EnigoMouseBackend::new())
+    }
+}
+
+impl<B: MouseBackend> MouseMaster<B> {
+    pub fn new_with_backend(config: Config, backend: B) -> Self {
         Self {
-            enigo: Enigo::new(&Settings::default()).unwrap(),
+            backend,
             config: config.clone(),
             current_mode: ModeState::Active,
             current_speed: config.starting_speed,
+            current_wheel_speed: config.wheel.default_speed,
             acceleration_counter: 0,
             top_speed: config.top_speed,
             left_click_held: false,
+            last_wheel_tick: None,
         }
     }
 
@@ -56,28 +108,31 @@ impl MouseMaster {
             Action::MoveRight => self.move_mouse(10, 0),
             Action::LeftClick => self.left_click(),
             Action::RightClick => self.right_click(),
+            Action::MiddleClick => self.middle_click(),
             Action::MoveUpRight => self.move_mouse(10, -10),
             Action::MoveUpLeft => self.move_mouse(-10, -10),
             Action::MoveDownRight => self.move_mouse(10, 10),
             Action::MoveDownLeft => self.move_mouse(-10, 10),
+            Action::MoveToTopEdge => self.move_to_monitor_edge(MonitorEdge::Top),
+            Action::MoveToBottomEdge => self.move_to_monitor_edge(MonitorEdge::Bottom),
+            Action::MoveToLeftEdge => self.move_to_monitor_edge(MonitorEdge::Left),
+            Action::MoveToRightEdge => self.move_to_monitor_edge(MonitorEdge::Right),
+            Action::CenterCurrentMonitor => self.center_current_monitor(),
+            Action::ClickThenDisable => {
+                self.left_click();
+                self.current_mode = ModeState::Idle;
+            }
+            Action::WheelUp => self.wheel_up(),
+            Action::WheelDown => self.wheel_down(),
+            Action::WheelLeft => self.wheel_left(),
+            Action::WheelRight => self.wheel_right(),
+            Action::WheelSpeedUp => self.increase_wheel_speed(),
+            Action::WheelSpeedDown => self.decrease_wheel_speed(),
             Action::Exit => self.exit(),
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
-            Action::JumpMode
-            | Action::MoveToTopEdge
-            | Action::MoveToBottomEdge
-            | Action::MoveToLeftEdge
-            | Action::MoveToRightEdge
-            | Action::CenterCurrentMonitor
-            | Action::MiddleClick
-            | Action::ClickThenDisable
-            | Action::WheelUp
-            | Action::WheelDown
-            | Action::WheelLeft
-            | Action::WheelRight
-            | Action::WheelSpeedUp
-            | Action::WheelSpeedDown => {}
+            Action::JumpMode => {}
         }
     }
     /// Toggles between `Idle` and `Active` mode
@@ -96,7 +151,7 @@ impl MouseMaster {
         println!("[DEBUG] Left Click Pressed!");
         self.left_click_held = true; // ✅ Update state
         self.update_overlay(); // ✅ Notify the overlay
-        if let Err(e) = self.enigo.button(Button::Left, Direction::Click) {
+        if let Err(e) = self.backend.click(Button::Left) {
             eprintln!("Failed to perform left click: {e}");
         }
     }
@@ -119,9 +174,47 @@ impl MouseMaster {
     /// Simulates a right mouse click
     fn right_click(&mut self) {
         // println!("Performing Right Click!");
-        if let Err(e) = self.enigo.button(Button::Right, Direction::Click) {
+        if let Err(e) = self.backend.click(Button::Right) {
             eprintln!("Failed to perform right click: {e}");
         }
+    }
+
+    fn middle_click(&mut self) {
+        if let Err(e) = self.backend.click(Button::Middle) {
+            eprintln!("Failed to perform middle click: {e}");
+        }
+    }
+
+    fn scroll_wheel(&mut self, length: i32, axis: Axis) {
+        if let Err(e) = self.backend.scroll(length, axis) {
+            eprintln!("Failed to scroll wheel: {e}");
+        }
+    }
+
+    pub fn wheel_up(&mut self) {
+        self.scroll_wheel(-self.current_wheel_speed, Axis::Vertical);
+    }
+
+    pub fn wheel_down(&mut self) {
+        self.scroll_wheel(self.current_wheel_speed, Axis::Vertical);
+    }
+
+    pub fn wheel_left(&mut self) {
+        self.scroll_wheel(-self.current_wheel_speed, Axis::Horizontal);
+    }
+
+    pub fn wheel_right(&mut self) {
+        self.scroll_wheel(self.current_wheel_speed, Axis::Horizontal);
+    }
+
+    pub fn increase_wheel_speed(&mut self) {
+        self.current_wheel_speed = (self.current_wheel_speed + self.config.wheel.speed_step)
+            .min(self.config.wheel.max_speed);
+    }
+
+    pub fn decrease_wheel_speed(&mut self) {
+        self.current_wheel_speed = (self.current_wheel_speed - self.config.wheel.speed_step)
+            .max(self.config.wheel.min_speed);
     }
 
     pub fn tick_movement(
@@ -141,6 +234,8 @@ impl MouseMaster {
             self.move_mouse(tick.dx.round() as i32, tick.dy.round() as i32);
         }
 
+        self.tick_wheel(active_actions);
+
         if debug_diagnostics_enabled() {
             println!(
                 "[DEBUG] Mode: {:?} | Active Keys: {:?} | DX: {:.3} | DY: {:.3} | Speed: {} | Accel_Counter: {} | Shift_Held: {} | Movement: {}",
@@ -157,6 +252,30 @@ impl MouseMaster {
 
         tick
     }
+
+    fn tick_wheel(&mut self, active_actions: &HashSet<Action>) {
+        let Some(wheel_action) = active_actions
+            .iter()
+            .find(|action| action.is_wheel_direction())
+            .copied()
+        else {
+            self.last_wheel_tick = None;
+            return;
+        };
+
+        let now = Instant::now();
+        let interval = Duration::from_millis(self.config.wheel.tick_interval);
+        if self
+            .last_wheel_tick
+            .is_some_and(|last_tick| now.duration_since(last_tick) < interval)
+        {
+            return;
+        }
+
+        self.last_wheel_tick = Some(now);
+        self.handle_action(wheel_action);
+    }
+
     /// Moves the mouse by the given `dx` and `dy` offsets with immediate response.
     pub fn move_mouse(&mut self, dx: i32, dy: i32) {
         if dx == 0 && dy == 0 {
@@ -165,11 +284,8 @@ impl MouseMaster {
         }
 
         // Perform the mouse movement
-        if let Ok((current_x, current_y)) = self.enigo.location() {
-            if let Err(e) = self
-                .enigo
-                .move_mouse(current_x + dx, current_y + dy, Coordinate::Abs)
-            {
+        if let Ok((current_x, current_y)) = self.backend.location() {
+            if let Err(e) = self.move_mouse_abs(current_x + dx, current_y + dy) {
                 eprintln!("Failed to move mouse: {e}");
             }
         } else {
@@ -179,8 +295,26 @@ impl MouseMaster {
 
     /// Moves the mouse cursor instantly to the given absolute position
     pub fn move_mouse_to(&mut self, x: i32, y: i32) {
-        if let Err(e) = self.enigo.move_mouse(x, y, Coordinate::Abs) {
+        if let Err(e) = self.move_mouse_abs(x, y) {
             eprintln!("Failed to move mouse to position: {e}");
+        }
+    }
+
+    fn move_mouse_abs(&mut self, x: i32, y: i32) -> Result<(), String> {
+        self.backend.move_abs(x, y)
+    }
+
+    pub fn center_current_monitor(&mut self) {
+        if let Some(rect) = current_monitor_rect_for_cursor() {
+            let (x, y) = rect.center();
+            self.move_mouse_to(x, y);
+        }
+    }
+
+    pub fn move_to_monitor_edge(&mut self, edge: MonitorEdge) {
+        if let Some(rect) = current_monitor_rect_for_cursor() {
+            let (x, y) = edge_target(rect, edge);
+            self.move_mouse_to(x, y);
         }
     }
 
@@ -188,6 +322,7 @@ impl MouseMaster {
     pub fn reset_speed(&mut self) {
         self.current_speed = self.config.starting_speed;
         self.acceleration_counter = 0;
+        self.last_wheel_tick = None;
     }
 
     pub fn exit(&mut self) {
@@ -217,6 +352,10 @@ impl MouseMaster {
         println!("Switched to mode: {}", mode);
         // FUTURE GROWTH
     }
+}
+
+pub fn edge_target(rect: MonitorRect, edge: MonitorEdge) -> (i32, i32) {
+    rect.edge_midpoint(edge, 1)
 }
 
 fn debug_diagnostics_enabled() -> bool {
@@ -330,6 +469,36 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct FakeBackend {
+        location: (i32, i32),
+        clicks: Vec<Button>,
+        moves: Vec<(i32, i32)>,
+        scrolls: Vec<(i32, Axis)>,
+    }
+
+    impl MouseBackend for FakeBackend {
+        fn click(&mut self, button: Button) -> Result<(), String> {
+            self.clicks.push(button);
+            Ok(())
+        }
+
+        fn move_abs(&mut self, x: i32, y: i32) -> Result<(), String> {
+            self.moves.push((x, y));
+            self.location = (x, y);
+            Ok(())
+        }
+
+        fn location(&self) -> Result<(i32, i32), String> {
+            Ok(self.location)
+        }
+
+        fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), String> {
+            self.scrolls.push((length, axis));
+            Ok(())
+        }
+    }
+
     fn actions(actions: &[Action]) -> HashSet<Action> {
         actions.iter().copied().collect()
     }
@@ -434,5 +603,87 @@ mod tests {
         assert_eq!(movement.speed, config.starting_speed);
         assert_eq!(current_speed, config.starting_speed);
         assert_eq!(acceleration_counter, 0);
+    }
+
+    #[test]
+    fn wheel_speed_increase_clamps_to_max() {
+        let config = Config {
+            wheel: crate::WheelConfig {
+                default_speed: 9,
+                min_speed: 1,
+                max_speed: 10,
+                speed_step: 4,
+                tick_interval: 8,
+            },
+            ..Config::default()
+        };
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        mouse.increase_wheel_speed();
+
+        assert_eq!(mouse.current_wheel_speed, 10);
+    }
+
+    #[test]
+    fn wheel_speed_decrease_clamps_to_min() {
+        let config = Config {
+            wheel: crate::WheelConfig {
+                default_speed: 2,
+                min_speed: 1,
+                max_speed: 10,
+                speed_step: 4,
+                tick_interval: 8,
+            },
+            ..Config::default()
+        };
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        mouse.decrease_wheel_speed();
+
+        assert_eq!(mouse.current_wheel_speed, 1);
+    }
+
+    #[test]
+    fn handle_action_routes_clicks_and_wheel_to_backend() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::MiddleClick);
+        mouse.handle_action(Action::WheelUp);
+        mouse.handle_action(Action::WheelRight);
+
+        assert_eq!(mouse.backend.clicks, vec![Button::Middle]);
+        assert_eq!(
+            mouse.backend.scrolls,
+            vec![
+                (-mouse.current_wheel_speed, Axis::Vertical),
+                (mouse.current_wheel_speed, Axis::Horizontal)
+            ]
+        );
+    }
+
+    #[test]
+    fn handle_action_routes_relative_movement_as_absolute_backend_move() {
+        let mut backend = FakeBackend::default();
+        backend.location = (100, 200);
+        let mut mouse = MouseMaster::new_with_backend(test_config(), backend);
+
+        mouse.handle_action(Action::MoveDownRight);
+
+        assert_eq!(mouse.backend.moves, vec![(110, 210)]);
+    }
+
+    #[test]
+    fn edge_target_coordinates_use_one_pixel_monitor_inset() {
+        let rect = MonitorRect {
+            left: 10,
+            top: 20,
+            right: 210,
+            bottom: 120,
+        };
+
+        assert_eq!(edge_target(rect, MonitorEdge::Top), (110, 21));
+        assert_eq!(edge_target(rect, MonitorEdge::Bottom), (110, 118));
+        assert_eq!(edge_target(rect, MonitorEdge::Left), (11, 70));
+        assert_eq!(edge_target(rect, MonitorEdge::Right), (208, 70));
     }
 }

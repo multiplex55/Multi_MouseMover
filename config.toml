@@ -50,3 +50,10 @@ acceleration_rate = 1 # Polling cycles before applying acceleration
 starting_speed    = 1 # Initial speed in pixels
 top_speed         = 6
 
+[wheel]
+default_speed = 3
+min_speed = 1
+max_speed = 12
+speed_step = 1
+tick_interval = 8
+

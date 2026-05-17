@@ -7,6 +7,7 @@ mod jump_session;
 mod jump_view;
 mod key_chord;
 mod keyboard;
+mod monitor;
 mod overlay;
 mod screen_capture;
 
@@ -160,6 +161,7 @@ struct Config {
     polling_rate: u64,
     grid_size: GridSize,
     jump: JumpConfig,
+    wheel: WheelConfig,
     starting_speed: i32,    // Initial speed in pixels
     acceleration: i32,      // Increment value for acceleration
     acceleration_rate: u32, // Polling cycles before applying acceleration
@@ -174,10 +176,33 @@ impl Default for Config {
             polling_rate: DEFAULT_POLLING_RATE_MS,
             grid_size: GridSize::default(),
             jump: JumpConfig::default(),
+            wheel: WheelConfig::default(),
             starting_speed: 1,
             acceleration: 2,
             acceleration_rate: 1,
             top_speed: 6,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct WheelConfig {
+    default_speed: i32,
+    min_speed: i32,
+    max_speed: i32,
+    speed_step: i32,
+    tick_interval: u64,
+}
+
+impl Default for WheelConfig {
+    fn default() -> Self {
+        Self {
+            default_speed: 3,
+            min_speed: 1,
+            max_speed: 12,
+            speed_step: 1,
+            tick_interval: DEFAULT_POLLING_RATE_MS,
         }
     }
 }
@@ -296,8 +321,36 @@ impl Config {
             self.polling_rate = DEFAULT_POLLING_RATE_MS;
         }
         self.normalize_jump_config();
+        self.normalize_wheel_config();
         self.runtime_system_bindings()?;
         Ok(self)
+    }
+
+    fn normalize_wheel_config(&mut self) {
+        if self.wheel.min_speed < 1 {
+            warn_config_normalized("wheel.min_speed is below 1; clamping to 1");
+            self.wheel.min_speed = 1;
+        }
+
+        if self.wheel.max_speed < self.wheel.min_speed {
+            warn_config_normalized("wheel.max_speed is below wheel.min_speed; clamping to min");
+            self.wheel.max_speed = self.wheel.min_speed;
+        }
+
+        if self.wheel.speed_step < 1 {
+            warn_config_normalized("wheel.speed_step is below 1; clamping to 1");
+            self.wheel.speed_step = 1;
+        }
+
+        self.wheel.default_speed = self
+            .wheel
+            .default_speed
+            .clamp(self.wheel.min_speed, self.wheel.max_speed);
+
+        if self.wheel.tick_interval == 0 {
+            warn_config_normalized("wheel.tick_interval is 0; using polling_rate");
+            self.wheel.tick_interval = self.polling_rate;
+        }
     }
 
     fn normalize_jump_config(&mut self) {
@@ -657,9 +710,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if action_handler.mouse_master.current_mode != ModeState::Active {
                 return;
             }
-            action_handler.process_active_keys(action, is_down);
 
-            if is_down && !ActionHandler::is_movement_action(action) {
+            if ActionHandler::is_continuous_action(action) {
+                action_handler.process_active_keys(action, is_down);
+            } else if is_down {
                 action_handler.execute_action(&action);
             }
         }
@@ -918,6 +972,7 @@ mod tests {
         );
         assert_eq!(config.jump.coarse.width, defaults.grid_size.width);
         assert_eq!(config.jump.coarse.height, defaults.grid_size.height);
+        assert_eq!(config.wheel, defaults.wheel);
         assert_eq!(config.starting_speed, defaults.starting_speed);
         assert_eq!(config.acceleration, defaults.acceleration);
         assert_eq!(config.acceleration_rate, defaults.acceleration_rate);
@@ -1054,6 +1109,43 @@ mod tests {
             config.jump.coarse.preview_margin_percent,
             MAX_PREVIEW_MARGIN_PERCENT
         );
+    }
+
+    #[test]
+    fn wheel_config_parses_and_normalizes_bounds() {
+        let config = parse_config(
+            r#"
+            [wheel]
+            default_speed = 99
+            min_speed = 2
+            max_speed = 8
+            speed_step = 0
+            tick_interval = 0
+            "#,
+        );
+
+        assert_eq!(config.wheel.default_speed, 8);
+        assert_eq!(config.wheel.min_speed, 2);
+        assert_eq!(config.wheel.max_speed, 8);
+        assert_eq!(config.wheel.speed_step, 1);
+        assert_eq!(config.wheel.tick_interval, config.polling_rate);
+    }
+
+    #[test]
+    fn continuous_key_actions_track_state_without_immediate_execution() {
+        assert!(ActionHandler::is_continuous_action(Action::MoveLeft));
+        assert!(ActionHandler::is_continuous_action(Action::SlowMouse));
+        assert!(ActionHandler::is_continuous_action(Action::WheelDown));
+    }
+
+    #[test]
+    fn one_shot_key_actions_execute_on_key_down_only() {
+        assert!(!ActionHandler::is_continuous_action(Action::LeftClick));
+        assert!(!ActionHandler::is_continuous_action(Action::MoveToTopEdge));
+        assert!(!ActionHandler::is_continuous_action(Action::WheelSpeedUp));
+        assert!(!ActionHandler::is_continuous_action(
+            Action::ClickThenDisable
+        ));
     }
 
     #[test]
