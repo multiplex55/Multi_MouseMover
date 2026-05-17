@@ -1706,8 +1706,8 @@ mod tests {
     struct FakeBackend {
         location: (i32, i32),
         clicks: Vec<Button>,
-        presses: Vec<Button>,
-        releases: Vec<Button>,
+        button_downs: Vec<Button>,
+        button_ups: Vec<Button>,
         moves: Vec<(i32, i32)>,
         scrolls: Vec<(i32, Axis)>,
     }
@@ -1718,13 +1718,13 @@ mod tests {
             Ok(())
         }
 
-        fn press(&mut self, button: Button) -> Result<(), String> {
-            self.presses.push(button);
+        fn button_down(&mut self, button: Button) -> Result<(), String> {
+            self.button_downs.push(button);
             Ok(())
         }
 
-        fn release(&mut self, button: Button) -> Result<(), String> {
-            self.releases.push(button);
+        fn button_up(&mut self, button: Button) -> Result<(), String> {
+            self.button_ups.push(button);
             Ok(())
         }
 

@@ -27,8 +27,8 @@ pub enum FinalAdjustControl {
 
 pub trait MouseBackend {
     fn click(&mut self, button: Button) -> Result<(), String>;
-    fn press(&mut self, button: Button) -> Result<(), String>;
-    fn release(&mut self, button: Button) -> Result<(), String>;
+    fn button_down(&mut self, button: Button) -> Result<(), String>;
+    fn button_up(&mut self, button: Button) -> Result<(), String>;
     fn move_abs(&mut self, x: i32, y: i32) -> Result<(), String>;
     fn location(&self) -> Result<(i32, i32), String>;
     fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), String>;
@@ -53,13 +53,13 @@ impl MouseBackend for EnigoMouseBackend {
             .map_err(|e| e.to_string())
     }
 
-    fn press(&mut self, button: Button) -> Result<(), String> {
+    fn button_down(&mut self, button: Button) -> Result<(), String> {
         self.enigo
             .button(button, Direction::Press)
             .map_err(|e| e.to_string())
     }
 
-    fn release(&mut self, button: Button) -> Result<(), String> {
+    fn button_up(&mut self, button: Button) -> Result<(), String> {
         self.enigo
             .button(button, Direction::Release)
             .map_err(|e| e.to_string())
@@ -193,13 +193,13 @@ impl<B: MouseBackend> MouseMaster<B> {
 
     fn toggle_drag_mode(&mut self) {
         if self.left_click_held {
-            if let Err(e) = self.backend.release(Button::Left) {
+            if let Err(e) = self.backend.button_up(Button::Left) {
                 eprintln!("Failed to release left button: {e}");
                 return;
             }
             self.left_click_held = false;
         } else {
-            if let Err(e) = self.backend.press(Button::Left) {
+            if let Err(e) = self.backend.button_down(Button::Left) {
                 eprintln!("Failed to hold left button: {e}");
                 return;
             }
@@ -585,12 +585,20 @@ mod tests {
         }
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum MouseOperation {
+        Click(Button),
+        ButtonDown(Button),
+        ButtonUp(Button),
+    }
+
     #[derive(Default)]
     struct FakeBackend {
         location: (i32, i32),
         clicks: Vec<Button>,
-        presses: Vec<Button>,
-        releases: Vec<Button>,
+        button_downs: Vec<Button>,
+        button_ups: Vec<Button>,
+        operations: Vec<MouseOperation>,
         moves: Vec<(i32, i32)>,
         scrolls: Vec<(i32, Axis)>,
     }
@@ -598,16 +606,19 @@ mod tests {
     impl MouseBackend for FakeBackend {
         fn click(&mut self, button: Button) -> Result<(), String> {
             self.clicks.push(button);
+            self.operations.push(MouseOperation::Click(button));
             Ok(())
         }
 
-        fn press(&mut self, button: Button) -> Result<(), String> {
-            self.presses.push(button);
+        fn button_down(&mut self, button: Button) -> Result<(), String> {
+            self.button_downs.push(button);
+            self.operations.push(MouseOperation::ButtonDown(button));
             Ok(())
         }
 
-        fn release(&mut self, button: Button) -> Result<(), String> {
-            self.releases.push(button);
+        fn button_up(&mut self, button: Button) -> Result<(), String> {
+            self.button_ups.push(button);
+            self.operations.push(MouseOperation::ButtonUp(button));
             Ok(())
         }
 
@@ -807,11 +818,44 @@ mod tests {
 
         mouse.handle_action(Action::ToggleDragMode);
         assert!(mouse.left_click_held);
-        assert_eq!(mouse.backend.presses, vec![Button::Left]);
+        assert_eq!(mouse.backend.button_downs, vec![Button::Left]);
 
         mouse.handle_action(Action::ToggleDragMode);
         assert!(!mouse.left_click_held);
-        assert_eq!(mouse.backend.releases, vec![Button::Left]);
+        assert_eq!(mouse.backend.button_ups, vec![Button::Left]);
+    }
+
+    #[test]
+    fn toggle_drag_mode_records_button_down_before_button_up() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::ToggleDragMode);
+        mouse.handle_action(Action::ToggleDragMode);
+
+        assert_eq!(
+            mouse.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+            ]
+        );
+    }
+
+    #[test]
+    fn toggle_drag_mode_does_not_emit_implicit_click() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::ToggleDragMode);
+        mouse.handle_action(Action::ToggleDragMode);
+
+        assert!(mouse.backend.clicks.is_empty());
+        assert_eq!(
+            mouse.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+            ]
+        );
     }
 
     #[test]
