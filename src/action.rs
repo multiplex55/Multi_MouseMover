@@ -45,6 +45,7 @@ pub enum Action {
     SlowMouse,
     JumpMode,
     JumpModeProfile(String),
+    ShowHelp,
 }
 
 impl Action {
@@ -83,6 +84,7 @@ impl Action {
             "exit" => Some(Self::Exit),
             "slow_mouse" => Some(Self::SlowMouse),
             "jump_mode" => Some(Self::JumpMode),
+            "show_help" | "help" | "toggle_help" => Some(Self::ShowHelp),
             action if action.starts_with("jump_mode_profile:") => {
                 action.split_once(':').and_then(|(_, profile)| {
                     (!profile.is_empty()).then(|| Self::JumpModeProfile(profile.to_string()))
@@ -147,6 +149,7 @@ mod tests {
             ("move_to_bottom_edge", Action::MoveToBottomEdge),
             ("move_to_left_edge", Action::MoveToLeftEdge),
             ("move_to_right_edge", Action::MoveToRightEdge),
+            ("show_help", Action::ShowHelp),
         ];
 
         for (input, expected) in cases {
@@ -166,6 +169,8 @@ mod tests {
             ("drag_mode", Action::ToggleDragMode),
             ("toggle_left_drag", Action::ToggleDragMode),
             ("toggle_left_button_hold", Action::ToggleDragMode),
+            ("help", Action::ShowHelp),
+            ("toggle_help", Action::ShowHelp),
         ];
 
         for (input, expected) in cases {
@@ -233,6 +238,7 @@ mod tests {
             Action::Exit,
             Action::SlowMouse,
             Action::JumpMode,
+            Action::ShowHelp,
         ];
 
         for action in non_movement_actions {
@@ -280,6 +286,7 @@ mod tests {
             Action::WheelSpeedDown,
             Action::Exit,
             Action::JumpMode,
+            Action::ShowHelp,
         ];
 
         for action in one_shot_actions {

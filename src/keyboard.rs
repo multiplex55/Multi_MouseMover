@@ -667,6 +667,10 @@ impl KeyBindings {
     pub fn bound_chords(&self) -> impl Iterator<Item = KeyChord> + '_ {
         self.bindings.iter().map(|(chord, _)| *chord)
     }
+
+    pub fn entries(&self) -> impl Iterator<Item = (KeyChord, &Action)> + '_ {
+        self.bindings.iter().map(|(chord, action)| (*chord, action))
+    }
 }
 
 #[cfg(test)]

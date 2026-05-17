@@ -187,7 +187,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
-            Action::JumpMode | Action::JumpModeProfile(_) => {}
+            Action::JumpMode | Action::JumpModeProfile(_) | Action::ShowHelp => {}
         }
     }
     /// Toggles between `Idle` and `Active` mode
@@ -786,6 +786,7 @@ mod tests {
             confirm_key: "Enter".to_string(),
             cancel_key: "Escape".to_string(),
             back_key: "Backspace".to_string(),
+            show_hint: true,
         }
     }
 

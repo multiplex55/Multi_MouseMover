@@ -142,6 +142,9 @@ fn draw_mode_for_view(view: &JumpOverlayView) -> DrawMode {
 
 fn format_jump_indicator(view: &JumpOverlayView) -> String {
     if let Some(adjust) = &view.final_adjust {
+        if !adjust.show_hint {
+            return "Adjust".to_string();
+        }
         return format!(
             "Adjust: arrows move, {}+arrows {}px, {} ok, {} cancel, {} back",
             adjust.modifier_key,
@@ -949,6 +952,25 @@ mod tests {
     }
 
     #[test]
+    fn final_adjust_hint_respects_visibility_toggle() {
+        let mut view = view(0, 1, "");
+        view.final_adjust = Some(FinalAdjustOverlayView {
+            original_point: (0, 0),
+            candidate_point: (1, 1),
+            region: view.target_region,
+            small_step_px: 1,
+            large_step_px: 10,
+            modifier_key: "Shift".to_string(),
+            confirm_key: "Enter".to_string(),
+            cancel_key: "Escape".to_string(),
+            back_key: "Backspace".to_string(),
+            show_hint: false,
+        });
+
+        assert_eq!(format_jump_indicator(&view), "Adjust");
+    }
+
+    #[test]
     fn transparency_mode_is_colorkey_black() {
         assert_eq!(
             transparency_mode(),
@@ -1074,6 +1096,7 @@ mod tests {
             confirm_key: "Enter".to_string(),
             cancel_key: "Escape".to_string(),
             back_key: "Backspace".to_string(),
+            show_hint: true,
         });
         view.visuals = JumpVisuals {
             selected_region_outline: false,

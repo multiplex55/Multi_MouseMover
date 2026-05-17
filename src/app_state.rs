@@ -44,6 +44,8 @@ pub enum AppCommand {
         active: bool,
     },
     Exit,
+    ToggleHelp,
+    HideHelp,
     EnterJumpMode {
         activation_key: VirtualKey,
         profile: Option<String>,
@@ -66,6 +68,7 @@ pub struct AppState {
     active_mode: bool,
     preserve_global_shortcuts: bool,
     system_bindings: RuntimeSystemBindings,
+    help_visible: bool,
 }
 
 #[derive(Debug)]
@@ -99,6 +102,7 @@ impl Default for AppState {
             active_mode: true,
             preserve_global_shortcuts: true,
             system_bindings: RuntimeSystemBindings::default(),
+            help_visible: false,
         }
     }
 }
@@ -191,6 +195,34 @@ impl AppState {
 
     pub fn is_jump_active(&self) -> bool {
         matches!(self.jump, JumpState::Active { .. })
+    }
+
+    pub fn jump_stage_status(&self) -> Option<(usize, usize)> {
+        match &self.jump {
+            JumpState::Active { session, .. } => {
+                Some((session.stage_index + 1, session.stages.len()))
+            }
+            JumpState::Inactive => None,
+        }
+    }
+
+    pub fn final_adjust_active(&self) -> bool {
+        match &self.jump {
+            JumpState::Active { session, .. } => session.final_adjust.is_some(),
+            JumpState::Inactive => false,
+        }
+    }
+
+    pub fn help_visible(&self) -> bool {
+        self.help_visible
+    }
+
+    pub fn toggle_help(&mut self) {
+        self.help_visible = !self.help_visible;
+    }
+
+    pub fn hide_help(&mut self) {
+        self.help_visible = false;
     }
 
     pub fn enter_jump_mode(
@@ -322,6 +354,7 @@ impl AppState {
                 confirm_key: final_adjust_config.confirm_key.clone(),
                 cancel_key: final_adjust_config.cancel_key.clone(),
                 back_key: final_adjust_config.back_key.clone(),
+                show_hint: final_adjust_config.show_hint,
             }),
         })
     }
@@ -361,6 +394,11 @@ impl AppState {
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, action: Option<Action>) {
+        if self.help_visible && event.is_down && event.key == VirtualKey::Escape {
+            self.enqueue_command(AppCommand::HideHelp);
+            return;
+        }
+
         if self.is_jump_active() && self.is_toggle_active_key_down_event(&event) {
             self.enqueue_command(AppCommand::ToggleActiveMode);
             return;
@@ -400,6 +438,11 @@ impl AppState {
             }
         } else {
             self.active_keys.remove(&event.key);
+        }
+
+        if event.is_down && matches!(action.as_ref(), Some(Action::ShowHelp)) {
+            self.enqueue_command(AppCommand::ToggleHelp);
+            return;
         }
 
         if event.is_down
@@ -902,6 +945,8 @@ mod tests {
         let indicator = resolve_indicator_state(IndicatorInput {
             app_active: state.active_mode(),
             jump_active: state.is_jump_active(),
+            jump_stage: state.jump_stage_status(),
+            final_adjust_active: state.final_adjust_active(),
             active_actions: &active_actions,
             mouse: MouseIndicatorInput {
                 active: true,
@@ -1428,6 +1473,29 @@ mod tests {
             collect_commands(&mut state),
             vec![AppCommand::JumpInput(event, None)]
         );
+    }
+
+    #[test]
+    fn help_action_toggles_help_visibility() {
+        let mut state = AppState::default();
+
+        state.route_key_event(KeyEvent::new(VirtualKey::H, true), Some(Action::ShowHelp));
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::ToggleHelp]);
+
+        state.toggle_help();
+        assert!(state.help_visible());
+        state.toggle_help();
+        assert!(!state.help_visible());
+    }
+
+    #[test]
+    fn escape_dismisses_visible_help() {
+        let mut state = AppState::default();
+        state.toggle_help();
+
+        state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), None);
+
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::HideHelp]);
     }
 
     #[test]

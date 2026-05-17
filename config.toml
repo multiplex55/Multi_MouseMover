@@ -26,7 +26,8 @@ key_bindings = [
     ["B", "wheel_speed_down"],
     ["C", "mouse_speed_up"],
     ["X", "mouse_speed_down"],
-    ["Z", "mouse_speed_reset"]
+    ["Z", "mouse_speed_reset"],
+    ["Slash", "show_help"]
 ]
 
 [system_bindings]
@@ -127,6 +128,23 @@ modifier_key = "Shift"
 confirm_key = "Enter"
 cancel_key = "Escape"
 back_key = "Backspace"
+show_hint = true
+
+[status_overlay]
+visibility = "visible"
+mode = "minimal"
+positioning = "cursor"
+flash_duration_ms = 700
+
+[status_overlay.fields]
+active = true
+drag = true
+slow = true
+jump = true
+mouse_speed = true
+wheel_speed = true
+flash = true
+final_adjust = true
 
 # Mouse movement parameters
 acceleration      = 2 # Pixels per acceleration step

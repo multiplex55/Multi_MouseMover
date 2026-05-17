@@ -1,4 +1,5 @@
-use crate::indicator::IndicatorState;
+use crate::indicator::{IndicatorFlashReason, IndicatorSnapshot, IndicatorState};
+use serde::Deserialize;
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -34,7 +35,8 @@ lazy_static::lazy_static! {
 #[derive(Clone)]
 pub struct OverlayWindow {
     hwnd: Arc<Mutex<Option<isize>>>, // ✅ Store HWND as `isize`
-    indicator_state: IndicatorState,
+    snapshot: IndicatorSnapshot,
+    config: StatusOverlayConfig,
     visible: bool,
     last_cursor_position: Option<OverlayPosition>,
     last_visual_state: Option<OverlayVisualState>,
@@ -44,6 +46,8 @@ pub struct OverlayWindow {
 
 const OVERLAY_WIDTH: i32 = 25;
 const OVERLAY_HEIGHT: i32 = 25;
+const TEXT_OVERLAY_WIDTH: i32 = 150;
+const TEXT_OVERLAY_HEIGHT: i32 = 25;
 const CURSOR_OFFSET_X: i32 = 5;
 const CURSOR_OFFSET_Y: i32 = 5;
 const INDICATOR_SQUARE_SIZE: i32 = 25;
@@ -63,7 +67,8 @@ struct OverlayPosition {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OverlayVisualState {
-    indicator_state: IndicatorState,
+    snapshot_state: IndicatorState,
+    text: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +76,104 @@ struct IndicatorVisual {
     base_color: COLORREF,
     pip_count: u8,
     draw_outline: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusOverlayVisibility {
+    Visible,
+    Hidden,
+}
+
+impl Default for StatusOverlayVisibility {
+    fn default() -> Self {
+        Self::Visible
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusOverlayMode {
+    Minimal,
+    Compact,
+    Detailed,
+    Hidden,
+}
+
+impl Default for StatusOverlayMode {
+    fn default() -> Self {
+        Self::Minimal
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusOverlayPositioning {
+    Cursor,
+}
+
+impl Default for StatusOverlayPositioning {
+    fn default() -> Self {
+        Self::Cursor
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct StatusOverlayFields {
+    pub active: bool,
+    pub drag: bool,
+    pub slow: bool,
+    pub jump: bool,
+    pub mouse_speed: bool,
+    pub wheel_speed: bool,
+    pub flash: bool,
+    pub final_adjust: bool,
+}
+
+impl Default for StatusOverlayFields {
+    fn default() -> Self {
+        Self {
+            active: true,
+            drag: true,
+            slow: true,
+            jump: true,
+            mouse_speed: true,
+            wheel_speed: true,
+            flash: true,
+            final_adjust: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct StatusOverlayConfig {
+    pub visibility: StatusOverlayVisibility,
+    pub mode: StatusOverlayMode,
+    pub positioning: StatusOverlayPositioning,
+    pub fields: StatusOverlayFields,
+    pub flash_duration_ms: u64,
+}
+
+impl Default for StatusOverlayConfig {
+    fn default() -> Self {
+        Self {
+            visibility: StatusOverlayVisibility::Visible,
+            mode: StatusOverlayMode::Minimal,
+            positioning: StatusOverlayPositioning::Cursor,
+            fields: StatusOverlayFields::default(),
+            flash_duration_ms: 700,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OverlayRenderPlan {
+    visible: bool,
+    width: i32,
+    height: i32,
+    text: Option<&'static str>,
 }
 
 #[cfg(debug_assertions)]
@@ -90,6 +193,114 @@ fn should_repaint(previous: Option<&OverlayVisualState>, current: &OverlayVisual
 
 fn should_display(state: IndicatorState) -> bool {
     state != IndicatorState::Hidden
+}
+
+fn render_plan(snapshot: &IndicatorSnapshot, config: StatusOverlayConfig) -> OverlayRenderPlan {
+    if config.visibility == StatusOverlayVisibility::Hidden
+        || config.mode == StatusOverlayMode::Hidden
+        || !should_display(snapshot.state)
+    {
+        return OverlayRenderPlan {
+            visible: false,
+            width: OVERLAY_WIDTH,
+            height: OVERLAY_HEIGHT,
+            text: None,
+        };
+    }
+
+    let text = match config.mode {
+        StatusOverlayMode::Minimal | StatusOverlayMode::Hidden => None,
+        StatusOverlayMode::Compact => compact_status_text(snapshot, config.fields),
+        StatusOverlayMode::Detailed => detailed_status_text(snapshot, config.fields),
+    };
+
+    OverlayRenderPlan {
+        visible: true,
+        width: if text.is_some() {
+            TEXT_OVERLAY_WIDTH
+        } else {
+            OVERLAY_WIDTH
+        },
+        height: if text.is_some() {
+            TEXT_OVERLAY_HEIGHT
+        } else {
+            OVERLAY_HEIGHT
+        },
+        text,
+    }
+}
+
+fn compact_status_text(
+    snapshot: &IndicatorSnapshot,
+    fields: StatusOverlayFields,
+) -> Option<&'static str> {
+    if fields.final_adjust && snapshot.final_adjust_active {
+        Some("ADJ")
+    } else if fields.jump && snapshot.jump_active {
+        Some("JMP")
+    } else if fields.drag && snapshot.dragging_left {
+        Some("DRG")
+    } else if fields.wheel_speed
+        && matches!(
+            snapshot.state,
+            IndicatorState::WheelScrollingSlow
+                | IndicatorState::WheelScrollingNormal
+                | IndicatorState::WheelScrollingFast
+        )
+    {
+        Some("WHL")
+    } else if fields.mouse_speed
+        && matches!(
+            snapshot.state,
+            IndicatorState::MouseSpeedSlow
+                | IndicatorState::MouseSpeedNormal
+                | IndicatorState::MouseSpeedFast
+        )
+    {
+        Some("MS")
+    } else if fields.slow && snapshot.slow {
+        Some("SLW")
+    } else if fields.active && snapshot.app_active {
+        Some("ON")
+    } else {
+        None
+    }
+}
+
+fn detailed_status_text(
+    snapshot: &IndicatorSnapshot,
+    fields: StatusOverlayFields,
+) -> Option<&'static str> {
+    if fields.flash && snapshot.flash_reason != IndicatorFlashReason::None {
+        match snapshot.flash_reason {
+            IndicatorFlashReason::MouseSpeed => Some("Mouse speed"),
+            IndicatorFlashReason::WheelSpeed => Some("Wheel speed"),
+            IndicatorFlashReason::None => None,
+        }
+    } else {
+        compact_status_text(snapshot, fields)
+    }
+}
+
+fn hidden_snapshot() -> IndicatorSnapshot {
+    snapshot_from_state(IndicatorState::Hidden)
+}
+
+fn snapshot_from_state(state: IndicatorState) -> IndicatorSnapshot {
+    IndicatorSnapshot {
+        state,
+        app_active: state != IndicatorState::Hidden,
+        dragging_left: state == IndicatorState::DraggingLeft,
+        slow: state == IndicatorState::ActiveSlow,
+        jump_active: state == IndicatorState::JumpMode,
+        jump_stage: None,
+        mouse_speed: 0,
+        default_mouse_speed: 0,
+        wheel_speed: 0,
+        default_wheel_speed: 0,
+        flash_reason: IndicatorFlashReason::None,
+        final_adjust_active: false,
+    }
 }
 
 fn overlay_rect() -> RECT {
@@ -213,7 +424,8 @@ impl OverlayWindow {
         println!("✅ Overlay: Initialization Completed!");
         let overlay = Self {
             hwnd: Arc::new(Mutex::new(hwnd_ptr)),
-            indicator_state: IndicatorState::Hidden,
+            snapshot: hidden_snapshot(),
+            config: StatusOverlayConfig::default(),
             visible: false,
             last_cursor_position: None,
             last_visual_state: None,
@@ -238,17 +450,32 @@ impl OverlayWindow {
             }
         }
         self.visible = false;
-        self.indicator_state = IndicatorState::Hidden;
+        self.snapshot = hidden_snapshot();
         self.last_visual_state = Some(OverlayVisualState {
-            indicator_state: IndicatorState::Hidden,
+            snapshot_state: IndicatorState::Hidden,
+            text: None,
         });
     }
 
+    #[allow(dead_code)]
     pub fn update_overlay_status(&mut self, indicator_state: IndicatorState) {
-        if !should_display(indicator_state) {
+        self.update_overlay_snapshot(
+            snapshot_from_state(indicator_state),
+            StatusOverlayConfig::default(),
+        );
+    }
+
+    pub fn update_overlay_snapshot(
+        &mut self,
+        snapshot: IndicatorSnapshot,
+        config: StatusOverlayConfig,
+    ) {
+        let plan = render_plan(&snapshot, config);
+        if !plan.visible {
             self.hide();
             return;
         }
+        self.config = config;
 
         let hwnd = *self.hwnd.lock().unwrap();
         if let Some(h) = hwnd {
@@ -260,7 +487,10 @@ impl OverlayWindow {
                     x: point.x + CURSOR_OFFSET_X,
                     y: point.y + CURSOR_OFFSET_Y,
                 };
-                let current_visual = OverlayVisualState { indicator_state };
+                let current_visual = OverlayVisualState {
+                    snapshot_state: snapshot.state,
+                    text: plan.text,
+                };
                 let was_hidden = !self.visible;
 
                 if should_move(self.last_cursor_position.as_ref(), &current_position) {
@@ -270,8 +500,8 @@ impl OverlayWindow {
                             Some(HWND_TOPMOST),
                             current_position.x,
                             current_position.y,
-                            OVERLAY_WIDTH,
-                            OVERLAY_HEIGHT,
+                            plan.width,
+                            plan.height,
                             SWP_NOZORDER | SWP_NOACTIVATE,
                         );
                     }
@@ -286,7 +516,7 @@ impl OverlayWindow {
                 }
 
                 if should_repaint(self.last_visual_state.as_ref(), &current_visual) {
-                    self.indicator_state = current_visual.indicator_state;
+                    self.snapshot = snapshot;
                     self.request_repaint();
                 }
 
@@ -298,7 +528,8 @@ impl OverlayWindow {
 
     /// Draws the square into the caller-provided paint device context.
     pub fn draw(&self, hdc: HDC) {
-        let visual = indicator_visual(self.indicator_state);
+        let plan = render_plan(&self.snapshot, self.config);
+        let visual = indicator_visual(self.snapshot.state);
 
         unsafe {
             let hbrush = CreateSolidBrush(visual.base_color);
@@ -326,6 +557,15 @@ impl OverlayWindow {
                     }
                     let _ = DeleteObject(pip_brush.into());
                 }
+            }
+
+            if let Some(text) = plan.text {
+                let old_text_color = SetTextColor(hdc, RGB(255, 255, 255));
+                let old_bk_mode = SetBkMode(hdc, TRANSPARENT);
+                let text: Vec<u16> = text.encode_utf16().collect();
+                let _ = TextOutW(hdc, INDICATOR_SQUARE_SIZE + 6, 5, &text);
+                let _ = SetTextColor(hdc, old_text_color);
+                let _ = SetBkMode(hdc, BACKGROUND_MODE(old_bk_mode as u32));
             }
         }
     }
@@ -527,8 +767,9 @@ extern "system" fn window_proc(hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: L
 #[cfg(test)]
 mod tests {
     use super::{
-        indicator_visual, overlay_ex_style, should_display, should_move, should_repaint,
-        IndicatorVisual, OverlayPosition, OverlayVisualState, RGB,
+        indicator_visual, overlay_ex_style, render_plan, should_display, should_move,
+        should_repaint, snapshot_from_state, IndicatorVisual, OverlayPosition, OverlayVisualState,
+        StatusOverlayConfig, StatusOverlayMode, RGB,
     };
     use crate::indicator::IndicatorState;
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -572,7 +813,8 @@ mod tests {
     #[test]
     fn should_repaint_when_there_is_no_previous_visual_state() {
         let current = OverlayVisualState {
-            indicator_state: IndicatorState::ActiveNormal,
+            snapshot_state: IndicatorState::ActiveNormal,
+            text: None,
         };
 
         assert!(should_repaint(None, &current));
@@ -581,13 +823,16 @@ mod tests {
     #[test]
     fn should_repaint_only_when_visual_state_changes() {
         let previous = OverlayVisualState {
-            indicator_state: IndicatorState::ActiveNormal,
+            snapshot_state: IndicatorState::ActiveNormal,
+            text: None,
         };
         let same = OverlayVisualState {
-            indicator_state: IndicatorState::ActiveNormal,
+            snapshot_state: IndicatorState::ActiveNormal,
+            text: None,
         };
         let changed = OverlayVisualState {
-            indicator_state: IndicatorState::ActiveSlow,
+            snapshot_state: IndicatorState::ActiveSlow,
+            text: None,
         };
 
         assert!(!should_repaint(Some(&previous), &same));
@@ -600,6 +845,30 @@ mod tests {
             indicator_visual(IndicatorState::Hidden).base_color,
             RGB(0, 0, 0)
         );
+    }
+
+    #[test]
+    fn minimal_render_plan_matches_legacy_square() {
+        let plan = render_plan(
+            &snapshot_from_state(IndicatorState::ActiveNormal),
+            StatusOverlayConfig::default(),
+        );
+
+        assert!(plan.visible);
+        assert_eq!(plan.width, super::OVERLAY_WIDTH);
+        assert_eq!(plan.height, super::OVERLAY_HEIGHT);
+        assert_eq!(plan.text, None);
+    }
+
+    #[test]
+    fn compact_render_plan_uses_short_value_text() {
+        let mut config = StatusOverlayConfig::default();
+        config.mode = StatusOverlayMode::Compact;
+        let plan = render_plan(&snapshot_from_state(IndicatorState::JumpMode), config);
+
+        assert!(plan.visible);
+        assert_eq!(plan.text, Some("JMP"));
+        assert!(plan.width > super::OVERLAY_WIDTH);
     }
 
     #[test]

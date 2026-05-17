@@ -43,6 +43,7 @@ pub struct FinalAdjustOverlayView {
     pub confirm_key: String,
     pub cancel_key: String,
     pub back_key: String,
+    pub show_hint: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

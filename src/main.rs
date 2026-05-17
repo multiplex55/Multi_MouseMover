@@ -1,6 +1,7 @@
 mod action;
 mod action_handler;
 mod app_state;
+mod help_overlay;
 mod indicator;
 mod jump_grid;
 mod jump_overlay;
@@ -16,8 +17,8 @@ use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, JumpOverlayResolution, KeyEvent};
 use indicator::{
-    resolve_indicator_state, IndicatorInput, IndicatorState, MouseIndicatorInput,
-    WheelIndicatorInput,
+    resolve_indicator_snapshot, resolve_indicator_state, IndicatorInput, IndicatorState,
+    MouseIndicatorInput, WheelIndicatorInput,
 };
 use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
@@ -27,7 +28,7 @@ use jump_view::{JumpLabelMetadata, JumpVisuals};
 use key_chord::{KeyChord, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
-use overlay::OVERLAY;
+use overlay::{StatusOverlayConfig, OVERLAY};
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -178,6 +179,7 @@ struct Config {
     grid_size: GridSize,
     jump: JumpConfig,
     final_adjust: FinalAdjustConfig,
+    status_overlay: StatusOverlayConfig,
     mouse_speed: MouseSpeedConfig,
     wheel: WheelConfig,
     edge_jump: EdgeJumpConfig,
@@ -196,6 +198,7 @@ impl Default for Config {
             grid_size: GridSize::default(),
             jump: JumpConfig::default(),
             final_adjust: FinalAdjustConfig::default(),
+            status_overlay: StatusOverlayConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             wheel: WheelConfig::default(),
             edge_jump: EdgeJumpConfig::default(),
@@ -234,6 +237,7 @@ pub struct FinalAdjustConfig {
     confirm_key: String,
     cancel_key: String,
     back_key: String,
+    show_hint: bool,
 }
 
 impl Default for FinalAdjustConfig {
@@ -246,6 +250,7 @@ impl Default for FinalAdjustConfig {
             confirm_key: "Enter".to_string(),
             cancel_key: "Escape".to_string(),
             back_key: "Backspace".to_string(),
+            show_hint: true,
         }
     }
 }
@@ -1447,6 +1452,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 println!("[command] SetActiveMode active={active}")
             }
             AppCommand::Exit => println!("[command] Exit"),
+            AppCommand::ToggleHelp => println!("[command] ToggleHelp"),
+            AppCommand::HideHelp => println!("[command] HideHelp"),
             AppCommand::EnterJumpMode {
                 activation_key,
                 profile,
@@ -1491,6 +1498,29 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::Exit => {
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
+        }
+        AppCommand::ToggleHelp => {
+            let visible = {
+                let mut app_state = APP_STATE.write().unwrap();
+                app_state.toggle_help();
+                app_state.help_visible()
+            };
+            if visible {
+                let view = help_overlay::help_view_from_bindings(
+                    KEY_ACTIONS
+                        .read()
+                        .unwrap()
+                        .entries()
+                        .map(|(chord, action)| (chord, action.clone())),
+                );
+                help_overlay::show_help_overlay(view);
+            } else {
+                help_overlay::hide_help_overlay();
+            }
+        }
+        AppCommand::HideHelp => {
+            APP_STATE.write().unwrap().hide_help();
+            help_overlay::hide_help_overlay();
         }
         AppCommand::EnterJumpMode {
             activation_key,
@@ -1749,34 +1779,39 @@ fn main() {
             loop_diagnostics.movement_ticks += 1;
         }
 
-        let indicator_state = {
+        let (indicator_snapshot, status_overlay_config) = {
             let action_handler = ACTION_HANDLER.read().unwrap();
             let app_state = APP_STATE.read().unwrap();
             let wheel_direction_active = action_handler
                 .active_keys
                 .iter()
                 .any(|action| action.is_wheel_direction());
-            resolve_indicator_state(IndicatorInput {
-                app_active: app_state.active_mode(),
-                jump_active: app_state.is_jump_active(),
-                active_actions: &action_handler.active_keys,
-                mouse: MouseIndicatorInput {
-                    active: action_handler.mouse_master.mouse_speed_indicator_active(),
-                    current_speed: action_handler.mouse_master.mouse_speed_baseline,
-                    default_speed: action_handler.mouse_master.config.mouse_speed.default_speed,
-                },
-                wheel: WheelIndicatorInput {
-                    active: wheel_direction_active
-                        || action_handler.mouse_master.wheel_speed_indicator_active(),
-                    current_speed: action_handler.mouse_master.current_wheel_speed,
-                    default_speed: action_handler.mouse_master.config.wheel.default_speed,
-                },
-                left_button_held: action_handler.mouse_master.left_button_held(),
-            })
+            (
+                resolve_indicator_snapshot(IndicatorInput {
+                    app_active: app_state.active_mode(),
+                    jump_active: app_state.is_jump_active(),
+                    jump_stage: app_state.jump_stage_status(),
+                    final_adjust_active: app_state.final_adjust_active(),
+                    active_actions: &action_handler.active_keys,
+                    mouse: MouseIndicatorInput {
+                        active: action_handler.mouse_master.mouse_speed_indicator_active(),
+                        current_speed: action_handler.mouse_master.mouse_speed_baseline,
+                        default_speed: action_handler.mouse_master.config.mouse_speed.default_speed,
+                    },
+                    wheel: WheelIndicatorInput {
+                        active: wheel_direction_active
+                            || action_handler.mouse_master.wheel_speed_indicator_active(),
+                        current_speed: action_handler.mouse_master.current_wheel_speed,
+                        default_speed: action_handler.mouse_master.config.wheel.default_speed,
+                    },
+                    left_button_held: action_handler.mouse_master.left_button_held(),
+                }),
+                action_handler.mouse_master.config.status_overlay,
+            )
         };
         if let Ok(mut maybe_ov) = OVERLAY.lock() {
             if let Some(ref mut ov) = *maybe_ov {
-                ov.update_overlay_status(indicator_state);
+                ov.update_overlay_snapshot(indicator_snapshot, status_overlay_config);
             }
         }
 
@@ -2957,6 +2992,8 @@ mod tests {
         let indicator = resolve_indicator_state(IndicatorInput {
             app_active: true,
             jump_active: false,
+            jump_stage: None,
+            final_adjust_active: false,
             active_actions: &action_handler.active_keys,
             mouse: MouseIndicatorInput {
                 active: action_handler.mouse_master.mouse_speed_indicator_active(),
@@ -2998,6 +3035,8 @@ mod tests {
         let indicator = resolve_indicator_state(IndicatorInput {
             app_active: true,
             jump_active: false,
+            jump_stage: None,
+            final_adjust_active: false,
             active_actions: &action_handler.active_keys,
             mouse: MouseIndicatorInput {
                 active: action_handler.mouse_master.mouse_speed_indicator_active(),
