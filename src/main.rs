@@ -57,6 +57,13 @@ const MAX_JUMP_ZOOM_SCALE: f32 = 10.0;
 const MAX_EDGE_JUMP_OFFSET_PX: i32 = 10_000;
 const MAX_JUMP_AIM_OFFSET_PX: i32 = 10_000;
 const MAX_FINAL_ADJUST_STEP_PX: i32 = 10_000;
+const DEFAULT_TOOLTIP_DURATION_MS: u64 = 900;
+const MIN_TOOLTIP_HELP_WIDTH: i32 = 240;
+const MAX_TOOLTIP_HELP_WIDTH: i32 = 800;
+const MIN_TOOLTIP_HELP_BINDINGS: i32 = 0;
+const MAX_TOOLTIP_HELP_BINDINGS: i32 = 200;
+const MIN_TOOLTIP_OFFSET: i32 = -200;
+const MAX_TOOLTIP_OFFSET: i32 = 200;
 const APP_CRATE_ID: &str = env!("CARGO_PKG_NAME");
 const APP_DISPLAY_NAME: &str = "Multi MouseMover";
 
@@ -182,6 +189,7 @@ struct Config {
     jump: JumpConfig,
     final_adjust: FinalAdjustConfig,
     status_overlay: StatusOverlayConfig,
+    tooltip_overlay: TooltipOverlayConfig,
     mouse_speed: MouseSpeedConfig,
     movement_profiles: HashMap<String, MouseSpeedConfig>,
     wheel: WheelConfig,
@@ -203,6 +211,7 @@ impl Default for Config {
             jump: JumpConfig::default(),
             final_adjust: FinalAdjustConfig::default(),
             status_overlay: StatusOverlayConfig::default(),
+            tooltip_overlay: TooltipOverlayConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             movement_profiles: HashMap::new(),
             wheel: WheelConfig::default(),
@@ -212,6 +221,79 @@ impl Default for Config {
             acceleration: 2,
             acceleration_rate: 1,
             top_speed: 6,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TooltipOverlayPositioning {
+    Cursor,
+    Center,
+    TopRight,
+    BottomRight,
+}
+
+impl Default for TooltipOverlayPositioning {
+    fn default() -> Self {
+        Self::Cursor
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct TooltipOverlayEvents {
+    pub mouse: bool,
+    pub wheel: bool,
+    pub profile: bool,
+    pub drag: bool,
+    pub reload: bool,
+    pub panic: bool,
+}
+
+impl Default for TooltipOverlayEvents {
+    fn default() -> Self {
+        Self {
+            mouse: true,
+            wheel: true,
+            profile: true,
+            drag: true,
+            reload: true,
+            panic: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct TooltipOverlayConfig {
+    pub enabled: bool,
+    pub show_temporary_tooltips: bool,
+    pub show_help: bool,
+    pub positioning: TooltipOverlayPositioning,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub duration_ms: u64,
+    pub help_positioning: TooltipOverlayPositioning,
+    pub help_width: i32,
+    pub help_max_bindings: i32,
+    pub events: TooltipOverlayEvents,
+}
+
+impl Default for TooltipOverlayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_temporary_tooltips: true,
+            show_help: true,
+            positioning: TooltipOverlayPositioning::Cursor,
+            offset_x: 18,
+            offset_y: 18,
+            duration_ms: DEFAULT_TOOLTIP_DURATION_MS,
+            help_positioning: TooltipOverlayPositioning::Center,
+            help_width: 420,
+            help_max_bindings: 40,
+            events: TooltipOverlayEvents::default(),
         }
     }
 }
@@ -825,9 +907,41 @@ impl Config {
         self.normalize_wheel_config();
         self.normalize_runtime_profiles();
         self.normalize_edge_jump_config();
+        self.normalize_tooltip_overlay_config();
         self.starting_speed = self.mouse_speed.default_speed;
         self.runtime_system_bindings()?;
         Ok(self)
+    }
+
+    fn normalize_tooltip_overlay_config(&mut self) {
+        if self.tooltip_overlay.duration_ms == 0 {
+            warn_config_normalized("tooltip_overlay.duration_ms is 0; using default");
+            self.tooltip_overlay.duration_ms = DEFAULT_TOOLTIP_DURATION_MS;
+        }
+        self.tooltip_overlay.help_width = normalize_i32_range(
+            "tooltip_overlay.help_width",
+            self.tooltip_overlay.help_width,
+            MIN_TOOLTIP_HELP_WIDTH,
+            MAX_TOOLTIP_HELP_WIDTH,
+        );
+        self.tooltip_overlay.help_max_bindings = normalize_i32_range(
+            "tooltip_overlay.help_max_bindings",
+            self.tooltip_overlay.help_max_bindings,
+            MIN_TOOLTIP_HELP_BINDINGS,
+            MAX_TOOLTIP_HELP_BINDINGS,
+        );
+        self.tooltip_overlay.offset_x = normalize_i32_range(
+            "tooltip_overlay.offset_x",
+            self.tooltip_overlay.offset_x,
+            MIN_TOOLTIP_OFFSET,
+            MAX_TOOLTIP_OFFSET,
+        );
+        self.tooltip_overlay.offset_y = normalize_i32_range(
+            "tooltip_overlay.offset_y",
+            self.tooltip_overlay.offset_y,
+            MIN_TOOLTIP_OFFSET,
+            MAX_TOOLTIP_OFFSET,
+        );
     }
 
     fn normalize_edge_jump_config(&mut self) {
@@ -1244,6 +1358,18 @@ fn take_config_warnings() -> Vec<String> {
         .lock()
         .map(|mut warnings| std::mem::take(&mut *warnings))
         .unwrap_or_default()
+}
+
+fn normalize_i32_range(name: &str, value: i32, min: i32, max: i32) -> i32 {
+    if value < min {
+        warn_config_normalized(&format!("{name} is below {min}; clamping to {min}"));
+        min
+    } else if value > max {
+        warn_config_normalized(&format!("{name} is above {max}; clamping to {max}"));
+        max
+    } else {
+        value
+    }
 }
 
 fn normalize_mouse_speed_settings(name: &str, settings: &mut MouseSpeedConfig) {
@@ -2381,6 +2507,131 @@ mod tests {
         );
         assert_eq!(config.system_bindings.exit, defaults.system_bindings.exit);
         assert!(config.key_bindings.is_empty());
+    }
+
+    #[test]
+    fn tooltip_overlay_defaults_when_section_is_missing() {
+        let config = parse_config("");
+
+        assert_eq!(config.tooltip_overlay, TooltipOverlayConfig::default());
+    }
+
+    #[test]
+    fn tooltip_overlay_defaults_missing_fields() {
+        let config = parse_config(
+            r#"
+            [tooltip_overlay]
+            enabled = false
+            "#,
+        );
+        let defaults = TooltipOverlayConfig::default();
+
+        assert!(!config.tooltip_overlay.enabled);
+        assert_eq!(
+            config.tooltip_overlay.show_temporary_tooltips,
+            defaults.show_temporary_tooltips
+        );
+        assert_eq!(config.tooltip_overlay.show_help, defaults.show_help);
+        assert_eq!(config.tooltip_overlay.positioning, defaults.positioning);
+        assert_eq!(
+            config.tooltip_overlay.help_positioning,
+            defaults.help_positioning
+        );
+        assert_eq!(config.tooltip_overlay.events, defaults.events);
+    }
+
+    #[test]
+    fn tooltip_overlay_explicit_disable_parses() {
+        let config = parse_config(
+            r#"
+            [tooltip_overlay]
+            enabled = false
+            show_temporary_tooltips = false
+            show_help = false
+
+            [tooltip_overlay.events]
+            mouse = false
+            wheel = false
+            profile = false
+            drag = false
+            reload = false
+            panic = false
+            "#,
+        );
+
+        assert!(!config.tooltip_overlay.enabled);
+        assert!(!config.tooltip_overlay.show_temporary_tooltips);
+        assert!(!config.tooltip_overlay.show_help);
+        assert_eq!(
+            config.tooltip_overlay.events,
+            TooltipOverlayEvents {
+                mouse: false,
+                wheel: false,
+                profile: false,
+                drag: false,
+                reload: false,
+                panic: false,
+            }
+        );
+    }
+
+    #[test]
+    fn tooltip_overlay_zero_and_invalid_edge_values_normalize() {
+        let config = parse_config(
+            r#"
+            [tooltip_overlay]
+            duration_ms = 0
+            help_width = 0
+            help_max_bindings = -1
+            "#,
+        );
+
+        assert_eq!(
+            config.tooltip_overlay.duration_ms,
+            DEFAULT_TOOLTIP_DURATION_MS
+        );
+        assert_eq!(config.tooltip_overlay.help_width, MIN_TOOLTIP_HELP_WIDTH);
+        assert_eq!(
+            config.tooltip_overlay.help_max_bindings,
+            MIN_TOOLTIP_HELP_BINDINGS
+        );
+    }
+
+    #[test]
+    fn tooltip_overlay_clamps_width_max_bindings_and_offsets() {
+        let low = parse_config(
+            r#"
+            [tooltip_overlay]
+            help_width = 120
+            help_max_bindings = -5
+            offset_x = -250
+            offset_y = -201
+            "#,
+        );
+        let high = parse_config(
+            r#"
+            [tooltip_overlay]
+            help_width = 900
+            help_max_bindings = 250
+            offset_x = 201
+            offset_y = 250
+            "#,
+        );
+
+        assert_eq!(low.tooltip_overlay.help_width, MIN_TOOLTIP_HELP_WIDTH);
+        assert_eq!(
+            low.tooltip_overlay.help_max_bindings,
+            MIN_TOOLTIP_HELP_BINDINGS
+        );
+        assert_eq!(low.tooltip_overlay.offset_x, MIN_TOOLTIP_OFFSET);
+        assert_eq!(low.tooltip_overlay.offset_y, MIN_TOOLTIP_OFFSET);
+        assert_eq!(high.tooltip_overlay.help_width, MAX_TOOLTIP_HELP_WIDTH);
+        assert_eq!(
+            high.tooltip_overlay.help_max_bindings,
+            MAX_TOOLTIP_HELP_BINDINGS
+        );
+        assert_eq!(high.tooltip_overlay.offset_x, MAX_TOOLTIP_OFFSET);
+        assert_eq!(high.tooltip_overlay.offset_y, MAX_TOOLTIP_OFFSET);
     }
 
     #[test]

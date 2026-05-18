@@ -253,6 +253,7 @@ show_hint = true
 # ---------------------------------------------------------------------------
 # Overlays
 # ---------------------------------------------------------------------------
+# The status overlay is the compact live indicator for current runtime state.
 [status_overlay]
 visibility = "visible"
 mode = "minimal"
@@ -268,6 +269,28 @@ mouse_speed = true
 wheel_speed = true
 flash = true
 final_adjust = true
+
+# The tooltip overlay is separate from the status indicator. It controls short
+# explanatory messages and the larger help view opened from the help binding.
+[tooltip_overlay]
+enabled = true
+show_temporary_tooltips = true
+show_help = true
+positioning = "cursor"
+offset_x = 18
+offset_y = 18
+duration_ms = 900
+help_positioning = "center"
+help_width = 420
+help_max_bindings = 40
+
+[tooltip_overlay.events]
+mouse = true
+wheel = true
+profile = true
+drag = true
+reload = true
+panic = true
 
 # ---------------------------------------------------------------------------
 # Safety
