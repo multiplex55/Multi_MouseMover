@@ -1,5 +1,7 @@
 use crate::action::Action;
+use crate::action_handler::{RuntimeNotification, RuntimeNotificationKind};
 use crate::key_chord::KeyChord;
+use crate::TooltipOverlayConfig;
 use std::cell::RefCell;
 use std::ptr;
 use std::time::{Duration, Instant};
@@ -27,12 +29,37 @@ const OVERLAY_ALPHA: u8 = 232;
 pub struct HelpBinding {
     pub key: String,
     pub action: String,
+    pub category: HelpBindingCategory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HelpBindingCategory {
+    Movement,
+    Click,
+    Wheel,
+    Jump,
+    System,
+    Custom,
+}
+
+impl HelpBindingCategory {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Movement => "Movement",
+            Self::Click => "Click",
+            Self::Wheel => "Wheel",
+            Self::Jump => "Jump",
+            Self::System => "System",
+            Self::Custom => "Custom",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelpOverlayView {
     pub stats: HelpRuntimeStats,
     pub bindings: Vec<HelpBinding>,
+    pub help_max_bindings: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +129,8 @@ pub struct TemporaryMessage {
     pub title: String,
     pub body: String,
 }
+
+pub type TooltipMessage = TemporaryMessage;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelpOverlayContent {
@@ -336,15 +365,7 @@ impl HelpOverlay {
                 HelpOverlayContent::Help { view } => {
                     draw_title(hdc, PADDING_X, PADDING_Y, "Multi MouseMover Help");
                     let mut y = PADDING_Y + LINE_HEIGHT + TITLE_BODY_GAP;
-                    for line in help_stats_lines(&view.stats) {
-                        draw_body_line(hdc, PADDING_X, y, &line);
-                        y += LINE_HEIGHT;
-                    }
-                    if !view.bindings.is_empty() {
-                        y += TITLE_BODY_GAP;
-                    }
-                    for binding in &view.bindings {
-                        let line = format!("{}  -  {}", binding.key, binding.action);
+                    for line in format_help_lines(view, view_format_config(view)) {
                         draw_body_line(hdc, PADDING_X, y, &line);
                         y += LINE_HEIGHT;
                     }
@@ -370,10 +391,9 @@ fn content_size(content: &HelpOverlayContent) -> (i32, i32) {
     let body_lines = match content {
         HelpOverlayContent::Hidden => 0,
         HelpOverlayContent::Temporary { .. } => 1,
-        HelpOverlayContent::Help { view } => {
-            let separator = if view.bindings.is_empty() { 0 } else { 1 };
-            (help_stats_lines(&view.stats).len() + separator + view.bindings.len()).max(1) as i32
-        }
+        HelpOverlayContent::Help { view } => format_help_lines(view, view_format_config(view))
+            .len()
+            .max(1) as i32,
     };
     let height = PADDING_Y * 2 + LINE_HEIGHT + TITLE_BODY_GAP + body_lines * LINE_HEIGHT;
     (OVERLAY_WIDTH, height.min(MAX_OVERLAY_HEIGHT))
@@ -382,14 +402,14 @@ fn content_size(content: &HelpOverlayContent) -> (i32, i32) {
 fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
     vec![
         format!(
-            "mode={} drag={} slow={} jump={}",
+            "Mode: {} | Drag: {} | Slow: {} | Jump: {}",
             stats.app_mode,
             on_off(stats.drag_active),
             on_off(stats.slow_active),
             on_off(stats.jump_active)
         ),
         format!(
-            "movement profile={} speed={} default={} range={}..{} step={}",
+            "Movement profile: {} | Speed: {} (default {}, range {}..{}, step {})",
             stats.movement_profile,
             stats.mouse_speed.current,
             stats.mouse_speed.default,
@@ -398,7 +418,7 @@ fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
             stats.mouse_speed.step
         ),
         format!(
-            "wheel profile={} speed={} default={} range={}..{} step={}",
+            "Wheel profile: {} | Speed: {} (default {}, range {}..{}, step {})",
             stats.wheel_profile,
             stats.wheel_speed.current,
             stats.wheel_speed.default,
@@ -407,7 +427,7 @@ fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
             stats.wheel_speed.step
         ),
         format!(
-            "accel={} rate={} top_speed={} polling={}ms wheel_tick={}ms",
+            "Acceleration: {} every {} tick(s) | Top speed: {} | Polling: {}ms | Wheel tick: {}ms",
             stats.acceleration,
             stats.acceleration_rate,
             stats.top_speed,
@@ -415,7 +435,7 @@ fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
             stats.wheel_tick_interval_ms
         ),
         format!(
-            "wheel multipliers vertical={} horizontal={}",
+            "Wheel multipliers: vertical {} | horizontal {}",
             stats.wheel_vertical_multiplier, stats.wheel_horizontal_multiplier
         ),
     ]
@@ -427,6 +447,113 @@ fn on_off(value: bool) -> &'static str {
     } else {
         "off"
     }
+}
+
+pub fn format_tooltip_message(
+    notification: &RuntimeNotification,
+    stats: &HelpRuntimeStats,
+) -> TooltipMessage {
+    match notification.kind {
+        RuntimeNotificationKind::MouseSpeed => TooltipMessage {
+            title: "Mouse speed".to_string(),
+            body: format!(
+                "Speed {} (default {}, range {}..{})",
+                stats.mouse_speed.current,
+                stats.mouse_speed.default,
+                stats.mouse_speed.min,
+                stats.mouse_speed.max
+            ),
+        },
+        RuntimeNotificationKind::WheelSpeed => TooltipMessage {
+            title: "Wheel speed".to_string(),
+            body: format!(
+                "Speed {} (default {}, range {}..{})",
+                stats.wheel_speed.current,
+                stats.wheel_speed.default,
+                stats.wheel_speed.min,
+                stats.wheel_speed.max
+            ),
+        },
+        RuntimeNotificationKind::MovementProfile => TooltipMessage {
+            title: "Movement profile".to_string(),
+            body: stats.movement_profile.clone(),
+        },
+        RuntimeNotificationKind::WheelProfile => TooltipMessage {
+            title: "Wheel profile".to_string(),
+            body: stats.wheel_profile.clone(),
+        },
+        RuntimeNotificationKind::Drag => TooltipMessage {
+            title: "Drag".to_string(),
+            body: if stats.drag_active {
+                "Left button held".to_string()
+            } else {
+                "Left button released".to_string()
+            },
+        },
+        RuntimeNotificationKind::ConfigReload => TooltipMessage {
+            title: "Config reloaded".to_string(),
+            body: "Runtime settings updated".to_string(),
+        },
+        RuntimeNotificationKind::PanicReset => TooltipMessage {
+            title: "Panic reset".to_string(),
+            body: "Runtime state restored".to_string(),
+        },
+    }
+}
+
+pub fn format_help_lines(view: &HelpOverlayView, config: TooltipOverlayConfig) -> Vec<String> {
+    let mut lines = help_stats_lines(&view.stats);
+    let max_bindings = config.help_max_bindings.max(0) as usize;
+    let visible_bindings = sorted_bindings(&view.bindings, max_bindings);
+
+    if visible_bindings.is_empty() {
+        if view.bindings.len() > max_bindings {
+            lines.push(String::new());
+            lines.push(format!(
+                "  ... {} more binding(s)",
+                view.bindings.len() - max_bindings
+            ));
+        }
+        return lines;
+    }
+
+    lines.push(String::new());
+    let mut current_category = None;
+    for binding in visible_bindings {
+        if current_category != Some(binding.category) {
+            current_category = Some(binding.category);
+            lines.push(format!("{}:", binding.category.title()));
+        }
+        lines.push(format!("  {}  -  {}", binding.key, binding.action));
+    }
+
+    if view.bindings.len() > max_bindings {
+        lines.push(format!(
+            "  ... {} more binding(s)",
+            view.bindings.len() - max_bindings
+        ));
+    }
+
+    lines
+}
+
+fn view_format_config(view: &HelpOverlayView) -> TooltipOverlayConfig {
+    TooltipOverlayConfig {
+        help_max_bindings: view.help_max_bindings,
+        ..TooltipOverlayConfig::default()
+    }
+}
+
+fn sorted_bindings(bindings: &[HelpBinding], max_bindings: usize) -> Vec<&HelpBinding> {
+    let mut bindings: Vec<_> = bindings.iter().collect();
+    bindings.sort_by(|left, right| {
+        left.category
+            .cmp(&right.category)
+            .then(left.action.cmp(&right.action))
+            .then(left.key.cmp(&right.key))
+    });
+    bindings.truncate(max_bindings);
+    bindings
 }
 
 fn overlay_position(size: (i32, i32)) -> (i32, i32) {
@@ -502,17 +629,20 @@ where
         .into_iter()
         .map(|(chord, action)| HelpBinding {
             key: format_key_chord(chord),
-            action: format_action(action),
+            action: format_action(&action),
+            category: action_category(&action),
         })
         .collect();
     bindings.sort_by(|left, right| {
-        left.action
-            .cmp(&right.action)
+        left.category
+            .cmp(&right.category)
+            .then(left.action.cmp(&right.action))
             .then(left.key.cmp(&right.key))
     });
     HelpOverlayView {
         stats: HelpRuntimeStats::default(),
         bindings,
+        help_max_bindings: TooltipOverlayConfig::default().help_max_bindings,
     }
 }
 
@@ -549,22 +679,94 @@ pub fn update_overlay(now: Instant) {
     HELP_OVERLAY.with(|overlay| overlay.borrow_mut().update_overlay(now));
 }
 
-fn format_action(action: Action) -> String {
+fn format_action(action: &Action) -> String {
     match action {
-        Action::JumpModeProfile(profile) => format!("jump_mode_profile:{profile}"),
-        Action::MovementProfileSelect(profile) => format!("movement_profile:{profile}"),
-        Action::WheelProfileSelect(profile) => format!("wheel_profile:{profile}"),
-        other => format!("{other:?}")
-            .chars()
-            .enumerate()
-            .flat_map(|(index, ch)| {
-                if index > 0 && ch.is_ascii_uppercase() {
-                    vec!['_', ch.to_ascii_lowercase()]
-                } else {
-                    vec![ch.to_ascii_lowercase()]
-                }
-            })
-            .collect(),
+        Action::MoveUp => "Move up".to_string(),
+        Action::MoveDown => "Move down".to_string(),
+        Action::MoveLeft => "Move left".to_string(),
+        Action::MoveRight => "Move right".to_string(),
+        Action::MoveUpRight => "Move up-right".to_string(),
+        Action::MoveUpLeft => "Move up-left".to_string(),
+        Action::MoveDownRight => "Move down-right".to_string(),
+        Action::MoveDownLeft => "Move down-left".to_string(),
+        Action::MoveToTopEdge => "Jump to top edge".to_string(),
+        Action::MoveToBottomEdge => "Jump to bottom edge".to_string(),
+        Action::MoveToLeftEdge => "Jump to left edge".to_string(),
+        Action::MoveToRightEdge => "Jump to right edge".to_string(),
+        Action::CenterCurrentMonitor => "Center current monitor".to_string(),
+        Action::LeftClick => "Left click".to_string(),
+        Action::RightClick => "Right click".to_string(),
+        Action::MiddleClick => "Middle click".to_string(),
+        Action::ClickThenDisable => "Click then disable".to_string(),
+        Action::ToggleDragMode => "Toggle drag mode".to_string(),
+        Action::WheelUp => "Wheel up".to_string(),
+        Action::WheelDown => "Wheel down".to_string(),
+        Action::WheelLeft => "Wheel left".to_string(),
+        Action::WheelRight => "Wheel right".to_string(),
+        Action::WheelSpeedUp => "Wheel speed up".to_string(),
+        Action::WheelSpeedDown => "Wheel speed down".to_string(),
+        Action::WheelSpeedReset => "Reset wheel speed".to_string(),
+        Action::WheelProfileNext => "Next wheel profile".to_string(),
+        Action::WheelProfilePrevious => "Previous wheel profile".to_string(),
+        Action::WheelProfileSelect(profile) => format!("Wheel profile: {profile}"),
+        Action::MouseSpeedUp => "Mouse speed up".to_string(),
+        Action::MouseSpeedDown => "Mouse speed down".to_string(),
+        Action::MouseSpeedReset => "Reset mouse speed".to_string(),
+        Action::MovementProfileNext => "Next movement profile".to_string(),
+        Action::MovementProfilePrevious => "Previous movement profile".to_string(),
+        Action::MovementProfileSelect(profile) => format!("Movement profile: {profile}"),
+        Action::Exit => "Exit".to_string(),
+        Action::ReloadConfig => "Reload config".to_string(),
+        Action::PanicReset => "Panic reset".to_string(),
+        Action::SlowMouse => "Slow mouse".to_string(),
+        Action::JumpMode => "Jump mode".to_string(),
+        Action::JumpModeProfile(profile) => format!("Jump mode profile: {profile}"),
+        Action::ShowHelp => "Show help".to_string(),
+    }
+}
+
+fn action_category(action: &Action) -> HelpBindingCategory {
+    match action {
+        Action::MoveUp
+        | Action::MoveDown
+        | Action::MoveLeft
+        | Action::MoveRight
+        | Action::MoveUpRight
+        | Action::MoveUpLeft
+        | Action::MoveDownRight
+        | Action::MoveDownLeft
+        | Action::MouseSpeedUp
+        | Action::MouseSpeedDown
+        | Action::MouseSpeedReset
+        | Action::MovementProfileNext
+        | Action::MovementProfilePrevious
+        | Action::MovementProfileSelect(_)
+        | Action::SlowMouse => HelpBindingCategory::Movement,
+        Action::LeftClick
+        | Action::RightClick
+        | Action::MiddleClick
+        | Action::ClickThenDisable
+        | Action::ToggleDragMode => HelpBindingCategory::Click,
+        Action::WheelUp
+        | Action::WheelDown
+        | Action::WheelLeft
+        | Action::WheelRight
+        | Action::WheelSpeedUp
+        | Action::WheelSpeedDown
+        | Action::WheelSpeedReset
+        | Action::WheelProfileNext
+        | Action::WheelProfilePrevious
+        | Action::WheelProfileSelect(_) => HelpBindingCategory::Wheel,
+        Action::MoveToTopEdge
+        | Action::MoveToBottomEdge
+        | Action::MoveToLeftEdge
+        | Action::MoveToRightEdge
+        | Action::CenterCurrentMonitor
+        | Action::JumpMode
+        | Action::JumpModeProfile(_) => HelpBindingCategory::Jump,
+        Action::Exit | Action::ReloadConfig | Action::PanicReset | Action::ShowHelp => {
+            HelpBindingCategory::System
+        }
     }
 }
 
@@ -598,8 +800,10 @@ mod tests {
             stats: HelpRuntimeStats::default(),
             bindings: vec![HelpBinding {
                 key: "H".to_string(),
-                action: "show_help".to_string(),
+                action: "Show help".to_string(),
+                category: HelpBindingCategory::System,
             }],
+            help_max_bindings: TooltipOverlayConfig::default().help_max_bindings,
         }
     }
 
@@ -613,11 +817,11 @@ mod tests {
         assert!(view
             .bindings
             .iter()
-            .any(|binding| { binding.key == "F" && binding.action == "jump_mode" }));
+            .any(|binding| { binding.key == "F" && binding.action == "Jump mode" }));
         assert!(view
             .bindings
             .iter()
-            .any(|binding| { binding.key == "H" && binding.action == "show_help" }));
+            .any(|binding| { binding.key == "H" && binding.action == "Show help" }));
         assert_eq!(view.stats, HelpRuntimeStats::default());
     }
 
@@ -628,6 +832,222 @@ mod tests {
         });
 
         assert!(size.1 > PADDING_Y * 2 + LINE_HEIGHT + TITLE_BODY_GAP + LINE_HEIGHT);
+    }
+
+    #[test]
+    fn format_help_lines_include_runtime_flags_and_speed_settings() {
+        let mut view = sample_view();
+        view.stats = HelpRuntimeStats {
+            app_mode: "active".to_string(),
+            drag_active: true,
+            slow_active: true,
+            jump_active: true,
+            movement_profile: "fast".to_string(),
+            wheel_profile: "precise".to_string(),
+            mouse_speed: HelpSpeedTier {
+                current: 7,
+                default: 5,
+                min: 2,
+                max: 12,
+                step: 2,
+            },
+            wheel_speed: HelpSpeedTier {
+                current: 4,
+                default: 3,
+                min: 1,
+                max: 9,
+                step: 1,
+            },
+            acceleration: 3,
+            acceleration_rate: 2,
+            top_speed: 15,
+            polling_rate_ms: 8,
+            wheel_tick_interval_ms: 12,
+            wheel_vertical_multiplier: 2,
+            wheel_horizontal_multiplier: 4,
+        };
+
+        let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
+
+        assert!(lines.contains("Mode: active | Drag: on | Slow: on | Jump: on"));
+        assert!(
+            lines.contains("Movement profile: fast | Speed: 7 (default 5, range 2..12, step 2)")
+        );
+        assert!(lines.contains("Wheel profile: precise | Speed: 4 (default 3, range 1..9, step 1)"));
+        assert!(lines.contains(
+            "Acceleration: 3 every 2 tick(s) | Top speed: 15 | Polling: 8ms | Wheel tick: 12ms"
+        ));
+        assert!(lines.contains("Wheel multipliers: vertical 2 | horizontal 4"));
+    }
+
+    #[test]
+    fn format_help_lines_group_bindings_and_custom_actions() {
+        let view = HelpOverlayView {
+            stats: HelpRuntimeStats::default(),
+            bindings: vec![
+                HelpBinding {
+                    key: "C".to_string(),
+                    action: "My custom action".to_string(),
+                    category: HelpBindingCategory::Custom,
+                },
+                HelpBinding {
+                    key: "W".to_string(),
+                    action: "Move up".to_string(),
+                    category: HelpBindingCategory::Movement,
+                },
+                HelpBinding {
+                    key: "L".to_string(),
+                    action: "Left click".to_string(),
+                    category: HelpBindingCategory::Click,
+                },
+                HelpBinding {
+                    key: "J".to_string(),
+                    action: "Jump mode".to_string(),
+                    category: HelpBindingCategory::Jump,
+                },
+                HelpBinding {
+                    key: "U".to_string(),
+                    action: "Wheel up".to_string(),
+                    category: HelpBindingCategory::Wheel,
+                },
+                HelpBinding {
+                    key: "H".to_string(),
+                    action: "Show help".to_string(),
+                    category: HelpBindingCategory::System,
+                },
+            ],
+            help_max_bindings: 40,
+        };
+
+        let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
+
+        for heading in [
+            "Movement:",
+            "Click:",
+            "Wheel:",
+            "Jump:",
+            "System:",
+            "Custom:",
+        ] {
+            assert!(lines.contains(heading), "{heading}");
+        }
+        assert!(lines.contains("C  -  My custom action"));
+    }
+
+    #[test]
+    fn format_help_lines_truncates_bindings_deterministically() {
+        let mut config = TooltipOverlayConfig::default();
+        config.help_max_bindings = 2;
+        let view = help_view_from_bindings([
+            (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
+            (KeyChord::from_key(VirtualKey::W), Action::MoveUp),
+            (KeyChord::from_key(VirtualKey::A), Action::MoveLeft),
+            (KeyChord::from_key(VirtualKey::D), Action::MoveRight),
+        ]);
+
+        let lines = format_help_lines(&view, config).join("\n");
+
+        assert!(lines.contains("A  -  Move left"));
+        assert!(lines.contains("D  -  Move right"));
+        assert!(!lines.contains("W  -  Move up"));
+        assert!(lines.contains("... 2 more binding(s)"));
+    }
+
+    #[test]
+    fn tooltip_formatting_uses_kind_specific_title_and_body() {
+        let stats = HelpRuntimeStats {
+            drag_active: true,
+            movement_profile: "fast".to_string(),
+            wheel_profile: "precise".to_string(),
+            mouse_speed: HelpSpeedTier {
+                current: 6,
+                default: 3,
+                min: 1,
+                max: 9,
+                step: 1,
+            },
+            wheel_speed: HelpSpeedTier {
+                current: 5,
+                default: 4,
+                min: 2,
+                max: 8,
+                step: 1,
+            },
+            ..HelpRuntimeStats::default()
+        };
+        let cases = [
+            (
+                RuntimeNotificationKind::MouseSpeed,
+                "Mouse speed",
+                "Speed 6",
+            ),
+            (
+                RuntimeNotificationKind::WheelSpeed,
+                "Wheel speed",
+                "Speed 5",
+            ),
+            (
+                RuntimeNotificationKind::MovementProfile,
+                "Movement profile",
+                "fast",
+            ),
+            (
+                RuntimeNotificationKind::WheelProfile,
+                "Wheel profile",
+                "precise",
+            ),
+            (RuntimeNotificationKind::Drag, "Drag", "held"),
+            (
+                RuntimeNotificationKind::ConfigReload,
+                "Config reloaded",
+                "updated",
+            ),
+            (
+                RuntimeNotificationKind::PanicReset,
+                "Panic reset",
+                "restored",
+            ),
+        ];
+
+        for (kind, title, body) in cases {
+            let notification = RuntimeNotification {
+                kind,
+                title: "raw title".to_string(),
+                body: "raw body".to_string(),
+                duration_ms: 1,
+            };
+            let message = format_tooltip_message(&notification, &stats);
+
+            assert!(message.title.contains(title));
+            assert!(message.body.contains(body));
+        }
+    }
+
+    #[test]
+    fn tooltip_drag_body_changes_for_on_and_off() {
+        let notification = RuntimeNotification {
+            kind: RuntimeNotificationKind::Drag,
+            title: String::new(),
+            body: String::new(),
+            duration_ms: 1,
+        };
+        let on = format_tooltip_message(
+            &notification,
+            &HelpRuntimeStats {
+                drag_active: true,
+                ..HelpRuntimeStats::default()
+            },
+        );
+        let off = format_tooltip_message(
+            &notification,
+            &HelpRuntimeStats {
+                drag_active: false,
+                ..HelpRuntimeStats::default()
+            },
+        );
+
+        assert!(on.body.contains("held"));
+        assert!(off.body.contains("released"));
     }
 
     #[test]

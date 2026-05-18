@@ -1730,9 +1730,15 @@ fn drain_runtime_notifications<B: MouseBackend>(action_handler: &mut ActionHandl
     };
 
     if runtime_notification_enabled(&notification, config) {
+        let stats = help_stats_from_snapshot(
+            action_handler.mouse_master.runtime_snapshot(),
+            action_handler.active_keys.contains(&Action::SlowMouse),
+            APP_STATE.read().unwrap().is_jump_active(),
+        );
+        let message = help_overlay::format_tooltip_message(&notification, &stats);
         help_overlay::show_temporary_tooltip(
-            notification.title,
-            notification.body,
+            message.title,
+            message.body,
             Duration::from_millis(notification.duration_ms),
         );
     }
@@ -1864,11 +1870,12 @@ fn panic_reset() -> JumpOverlayResolution {
 }
 
 fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
-    let (snapshot, slow_active) = {
+    let (snapshot, slow_active, help_config) = {
         let action_handler = ACTION_HANDLER.read().unwrap();
         (
             action_handler.mouse_master.runtime_snapshot(),
             action_handler.active_keys.contains(&Action::SlowMouse),
+            action_handler.mouse_master.config.tooltip_overlay,
         )
     };
     let jump_active = APP_STATE.read().unwrap().is_jump_active();
@@ -1879,7 +1886,17 @@ fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
             .entries()
             .map(|(chord, action)| (chord, action.clone())),
     );
-    view.stats = help_overlay::HelpRuntimeStats {
+    view.stats = help_stats_from_snapshot(snapshot, slow_active, jump_active);
+    view.help_max_bindings = help_config.help_max_bindings;
+    view
+}
+
+fn help_stats_from_snapshot(
+    snapshot: MouseRuntimeSnapshot,
+    slow_active: bool,
+    jump_active: bool,
+) -> help_overlay::HelpRuntimeStats {
+    help_overlay::HelpRuntimeStats {
         app_mode: snapshot.mode,
         drag_active: snapshot.drag_active,
         slow_active,
@@ -1911,8 +1928,7 @@ fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
         wheel_tick_interval_ms: snapshot.wheel_tick_interval_ms,
         wheel_vertical_multiplier: snapshot.wheel_vertical_multiplier,
         wheel_horizontal_multiplier: snapshot.wheel_horizontal_multiplier,
-    };
-    view
+    }
 }
 
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
