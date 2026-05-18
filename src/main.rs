@@ -1577,6 +1577,75 @@ fn sync_jump_overlay(resolution: JumpOverlayResolution) {
     }
 }
 
+fn show_action_temporary_tooltip<B: MouseBackend>(
+    action_handler: &ActionHandler<B>,
+    action: &Action,
+) {
+    match action {
+        Action::MouseSpeedUp | Action::MouseSpeedDown | Action::MouseSpeedReset => {
+            help_overlay::show_temporary_tooltip(
+                "Mouse speed",
+                format!("Speed {}", action_handler.mouse_master.mouse_speed_baseline),
+                Duration::from_millis(
+                    action_handler
+                        .mouse_master
+                        .effective_mouse_speed
+                        .flash_indicator_ms,
+                ),
+            );
+        }
+        Action::WheelSpeedUp | Action::WheelSpeedDown | Action::WheelSpeedReset => {
+            help_overlay::show_temporary_tooltip(
+                "Wheel speed",
+                format!("Speed {}", action_handler.mouse_master.current_wheel_speed),
+                Duration::from_millis(
+                    action_handler
+                        .mouse_master
+                        .effective_wheel
+                        .speed_indicator_ms,
+                ),
+            );
+        }
+        Action::MovementProfileNext
+        | Action::MovementProfilePrevious
+        | Action::MovementProfileSelect(_) => {
+            let profile = action_handler
+                .mouse_master
+                .active_movement_profile
+                .as_deref()
+                .unwrap_or("default");
+            help_overlay::show_temporary_tooltip(
+                "Movement profile",
+                profile,
+                Duration::from_millis(
+                    action_handler
+                        .mouse_master
+                        .effective_mouse_speed
+                        .flash_indicator_ms,
+                ),
+            );
+        }
+        Action::WheelProfileNext | Action::WheelProfilePrevious | Action::WheelProfileSelect(_) => {
+            let profile = action_handler
+                .mouse_master
+                .active_wheel_profile
+                .as_deref()
+                .unwrap_or("default");
+            help_overlay::show_temporary_tooltip(
+                "Wheel profile",
+                profile,
+                Duration::from_millis(
+                    action_handler
+                        .mouse_master
+                        .effective_wheel
+                        .speed_indicator_ms,
+                ),
+            );
+        }
+        _ => {}
+    }
+}
+
 fn apply_cursor_between_stages<B: MouseBackend>(
     action_handler: &mut ActionHandler<B>,
     mode: CursorBetweenStagesMode,
@@ -1609,6 +1678,7 @@ fn apply_active_mode_transition<B: MouseBackend>(
         action_handler.mouse_master.release_left_button_if_held();
         action_handler.clear_active_keys();
         app_state.clear_active_action_keys_and_exit_jump_mode();
+        app_state.hide_help();
     }
 
     action_handler.mouse_master.set_active_mode(active);
@@ -1638,6 +1708,8 @@ fn execute_key_action_command<B: MouseBackend>(
             app_state.clear_active_action_keys_and_exit_jump_mode();
             action_handler.mouse_master.set_active_mode(false);
             app_state.set_active_mode(false);
+            app_state.hide_help();
+            help_overlay::hide_help_overlay();
             return Some(app_state.resolve_jump_overlay());
         }
         return None;
@@ -1648,6 +1720,7 @@ fn execute_key_action_command<B: MouseBackend>(
             return None;
         }
         action_handler.execute_action(&action);
+        show_action_temporary_tooltip(action_handler, &action);
     }
     None
 }
@@ -1747,6 +1820,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::SetActiveMode { active } => {
             set_active_mode(active);
+            if !active {
+                help_overlay::hide_help_overlay();
+            }
         }
         AppCommand::Exit => {
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
@@ -1788,6 +1864,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             activation_key,
             profile,
         } => {
+            APP_STATE.write().unwrap().hide_help();
+            help_overlay::hide_help_overlay();
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
             let jump_config = match config.resolved_jump_config(profile.as_deref()) {
                 Ok(jump_config) => jump_config,
@@ -2129,6 +2207,7 @@ fn main() {
                 ov.update_overlay_snapshot(indicator_snapshot, status_overlay_config);
             }
         }
+        help_overlay::update_overlay(Instant::now());
 
         if debug_diagnostics {
             let now = Instant::now();
