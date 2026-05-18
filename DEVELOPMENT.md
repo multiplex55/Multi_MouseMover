@@ -1,5 +1,17 @@
 # Development Notes
 
+## Overlay Responsibilities
+
+The app has three overlay responsibilities with separate lifecycles:
+
+- Status overlay: the persistent minimal indicator for current runtime state. It reads snapshots such as active/idle, drag, slow movement, jump/final-adjust state, and speed flashes without owning the behavior that produced them.
+- Tooltip/help overlay: temporary explanatory text plus the Slash help panel. Temporary notices are event-driven and expire; the Slash panel is an explicit help view with runtime stats and keybinds that stays visible until toggled or dismissed.
+- Jump overlay: the jump UI. It owns the staged grid, labels, selected/preview regions, and final crosshair visuals while jump mode is active.
+
+Input event precedence should remain explicit: emergency/system handling and dismissals run before regular action routing, exclusive modes such as jump consume their own input, and normal action bindings run only after those higher-priority paths have had a chance to handle the event.
+
+State mutation and UI rendering are deliberately decoupled. Input handlers update runtime state and emit commands or notifications; overlay renderers consume snapshots of that state on their own update path. This keeps key routing deterministic, prevents painting code from deciding behavior, and lets overlays be hidden, throttled, or disabled without changing the command semantics.
+
 ## Jump Config Migration
 
 The current jump schema is rooted at `[jump]` and uses:
