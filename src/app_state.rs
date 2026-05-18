@@ -145,6 +145,7 @@ impl AppState {
         self.active_mode = active_mode;
         if !active_mode {
             self.clear_active_action_keys();
+            self.hide_help();
         }
     }
 
@@ -492,6 +493,9 @@ impl AppState {
         let mut commands = Vec::new();
 
         if let Some(action) = event_action {
+            if !event.is_down && !action.is_continuous() {
+                return commands;
+            }
             commands.push(AppCommand::KeyAction {
                 action,
                 is_down: event.is_down,
@@ -1502,6 +1506,30 @@ mod tests {
     }
 
     #[test]
+    fn slash_while_active_toggles_help() {
+        let mut state = state_with_bound_key(VirtualKey::Oem2);
+
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Oem2, true),
+            Some(Action::ShowHelp),
+        );
+
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::ToggleHelp]);
+    }
+
+    #[test]
+    fn slash_key_up_does_not_retrigger_help() {
+        let mut state = state_with_bound_key(VirtualKey::Oem2);
+
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Oem2, false),
+            Some(Action::ShowHelp),
+        );
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
     fn escape_dismisses_visible_help() {
         let mut state = AppState::default();
         state.toggle_help();
@@ -1509,6 +1537,34 @@ mod tests {
         state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), None);
 
         assert_eq!(collect_commands(&mut state), vec![AppCommand::HideHelp]);
+    }
+
+    #[test]
+    fn escape_hides_help_before_exit() {
+        let mut state = AppState::default();
+        state.toggle_help();
+
+        state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), Some(Action::Exit));
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::HideHelp]);
+
+        state.hide_help();
+        state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), Some(Action::Exit));
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::Exit]);
+    }
+
+    #[test]
+    fn disabling_active_mode_hides_help_and_ignores_slash_help() {
+        let mut state = state_with_bound_key(VirtualKey::Oem2);
+        state.toggle_help();
+
+        state.set_active_mode(false);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Oem2, true),
+            Some(Action::ShowHelp),
+        );
+
+        assert!(!state.help_visible());
+        assert_eq!(collect_commands(&mut state), Vec::new());
     }
 
     #[test]

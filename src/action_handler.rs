@@ -17,6 +17,31 @@ pub struct MovementTick {
     pub moving: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MouseRuntimeSnapshot {
+    pub mode: String,
+    pub drag_active: bool,
+    pub movement_profile: Option<String>,
+    pub wheel_profile: Option<String>,
+    pub mouse_speed_current: i32,
+    pub mouse_speed_default: i32,
+    pub mouse_speed_min: i32,
+    pub mouse_speed_max: i32,
+    pub mouse_speed_step: i32,
+    pub wheel_speed_current: i32,
+    pub wheel_speed_default: i32,
+    pub wheel_speed_min: i32,
+    pub wheel_speed_max: i32,
+    pub wheel_speed_step: i32,
+    pub acceleration: i32,
+    pub acceleration_rate: u32,
+    pub top_speed: i32,
+    pub polling_rate_ms: u64,
+    pub wheel_tick_interval_ms: u64,
+    pub wheel_vertical_multiplier: i32,
+    pub wheel_horizontal_multiplier: i32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FinalAdjustControl {
     Nudge { dx: i32, dy: i32 },
@@ -148,6 +173,34 @@ impl<B: MouseBackend> MouseMaster<B> {
             last_wheel_tick: None,
             mouse_speed_flash_until: None,
             wheel_speed_flash_until: None,
+        }
+    }
+
+    pub fn runtime_snapshot(&self) -> MouseRuntimeSnapshot {
+        MouseRuntimeSnapshot {
+            mode: format!("{:?}", self.current_mode).to_lowercase(),
+            drag_active: self.left_button_held,
+            movement_profile: self.active_movement_profile.clone(),
+            wheel_profile: self.active_wheel_profile.clone(),
+            mouse_speed_current: self.mouse_speed_baseline,
+            mouse_speed_default: self.effective_mouse_speed.default_speed,
+            mouse_speed_min: self.effective_mouse_speed.min_speed,
+            mouse_speed_max: self.effective_mouse_speed.max_speed,
+            mouse_speed_step: self.effective_mouse_speed.speed_step,
+            wheel_speed_current: self.current_wheel_speed,
+            wheel_speed_default: self.effective_wheel.default_speed,
+            wheel_speed_min: self.effective_wheel.min_speed,
+            wheel_speed_max: self.effective_wheel.max_speed,
+            wheel_speed_step: self.effective_wheel.speed_step,
+            acceleration: self.config.acceleration,
+            acceleration_rate: self.config.acceleration_rate,
+            top_speed: self
+                .top_speed_behavior
+                .top_speed_for_baseline(self.mouse_speed_baseline),
+            polling_rate_ms: self.config.polling_rate,
+            wheel_tick_interval_ms: self.effective_wheel.tick_interval,
+            wheel_vertical_multiplier: self.effective_wheel.vertical_multiplier,
+            wheel_horizontal_multiplier: self.effective_wheel.horizontal_multiplier,
         }
     }
 

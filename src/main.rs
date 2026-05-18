@@ -1860,6 +1860,7 @@ fn apply_loaded_config<B: MouseBackend>(
     action_handler.mouse_master.release_left_button_if_held();
     action_handler.clear_active_keys();
     app_state.clear_active_action_keys_and_exit_jump_mode();
+    app_state.hide_help();
     action_handler
         .mouse_master
         .apply_config_preserving_mode(config.clone());
@@ -1891,6 +1892,58 @@ fn panic_reset() -> JumpOverlayResolution {
     app_state.clear_active_action_keys_and_exit_jump_mode();
     app_state.hide_help();
     app_state.resolve_jump_overlay()
+}
+
+fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
+    let (snapshot, slow_active) = {
+        let action_handler = ACTION_HANDLER.read().unwrap();
+        (
+            action_handler.mouse_master.runtime_snapshot(),
+            action_handler.active_keys.contains(&Action::SlowMouse),
+        )
+    };
+    let jump_active = APP_STATE.read().unwrap().is_jump_active();
+    let mut view = help_overlay::help_view_from_bindings(
+        KEY_ACTIONS
+            .read()
+            .unwrap()
+            .entries()
+            .map(|(chord, action)| (chord, action.clone())),
+    );
+    view.stats = help_overlay::HelpRuntimeStats {
+        app_mode: snapshot.mode,
+        drag_active: snapshot.drag_active,
+        slow_active,
+        jump_active,
+        movement_profile: snapshot
+            .movement_profile
+            .unwrap_or_else(|| "default".to_string()),
+        wheel_profile: snapshot
+            .wheel_profile
+            .unwrap_or_else(|| "default".to_string()),
+        mouse_speed: help_overlay::HelpSpeedTier {
+            current: snapshot.mouse_speed_current,
+            default: snapshot.mouse_speed_default,
+            min: snapshot.mouse_speed_min,
+            max: snapshot.mouse_speed_max,
+            step: snapshot.mouse_speed_step,
+        },
+        wheel_speed: help_overlay::HelpSpeedTier {
+            current: snapshot.wheel_speed_current,
+            default: snapshot.wheel_speed_default,
+            min: snapshot.wheel_speed_min,
+            max: snapshot.wheel_speed_max,
+            step: snapshot.wheel_speed_step,
+        },
+        acceleration: snapshot.acceleration,
+        acceleration_rate: snapshot.acceleration_rate,
+        top_speed: snapshot.top_speed,
+        polling_rate_ms: snapshot.polling_rate_ms,
+        wheel_tick_interval_ms: snapshot.wheel_tick_interval_ms,
+        wheel_vertical_multiplier: snapshot.wheel_vertical_multiplier,
+        wheel_horizontal_multiplier: snapshot.wheel_horizontal_multiplier,
+    };
+    view
 }
 
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
@@ -1956,6 +2009,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         AppCommand::ReloadConfig => {
             if let Err(err) = reload_config() {
                 eprintln!("[reload] keeping existing config: {err}");
+            } else {
+                APP_STATE.write().unwrap().hide_help();
+                help_overlay::hide_help_overlay();
             }
         }
         AppCommand::PanicReset => {
@@ -1970,13 +2026,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 app_state.help_visible()
             };
             if visible {
-                let view = help_overlay::help_view_from_bindings(
-                    KEY_ACTIONS
-                        .read()
-                        .unwrap()
-                        .entries()
-                        .map(|(chord, action)| (chord, action.clone())),
-                );
+                let view = build_help_overlay_view();
                 help_overlay::show_help_overlay(view);
             } else {
                 help_overlay::hide_help_overlay();

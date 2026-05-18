@@ -31,7 +31,70 @@ pub struct HelpBinding {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelpOverlayView {
+    pub stats: HelpRuntimeStats,
     pub bindings: Vec<HelpBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelpRuntimeStats {
+    pub app_mode: String,
+    pub drag_active: bool,
+    pub slow_active: bool,
+    pub jump_active: bool,
+    pub movement_profile: String,
+    pub wheel_profile: String,
+    pub mouse_speed: HelpSpeedTier,
+    pub wheel_speed: HelpSpeedTier,
+    pub acceleration: i32,
+    pub acceleration_rate: u32,
+    pub top_speed: i32,
+    pub polling_rate_ms: u64,
+    pub wheel_tick_interval_ms: u64,
+    pub wheel_vertical_multiplier: i32,
+    pub wheel_horizontal_multiplier: i32,
+}
+
+impl Default for HelpRuntimeStats {
+    fn default() -> Self {
+        Self {
+            app_mode: "unknown".to_string(),
+            drag_active: false,
+            slow_active: false,
+            jump_active: false,
+            movement_profile: "default".to_string(),
+            wheel_profile: "default".to_string(),
+            mouse_speed: HelpSpeedTier::default(),
+            wheel_speed: HelpSpeedTier::default(),
+            acceleration: 0,
+            acceleration_rate: 0,
+            top_speed: 0,
+            polling_rate_ms: 0,
+            wheel_tick_interval_ms: 0,
+            wheel_vertical_multiplier: 1,
+            wheel_horizontal_multiplier: 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelpSpeedTier {
+    pub current: i32,
+    pub default: i32,
+    pub min: i32,
+    pub max: i32,
+    pub step: i32,
+}
+
+impl Default for HelpSpeedTier {
+    fn default() -> Self {
+        Self {
+            current: 0,
+            default: 0,
+            min: 0,
+            max: 0,
+            step: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +336,13 @@ impl HelpOverlay {
                 HelpOverlayContent::Help { view } => {
                     draw_title(hdc, PADDING_X, PADDING_Y, "Multi MouseMover Help");
                     let mut y = PADDING_Y + LINE_HEIGHT + TITLE_BODY_GAP;
+                    for line in help_stats_lines(&view.stats) {
+                        draw_body_line(hdc, PADDING_X, y, &line);
+                        y += LINE_HEIGHT;
+                    }
+                    if !view.bindings.is_empty() {
+                        y += TITLE_BODY_GAP;
+                    }
                     for binding in &view.bindings {
                         let line = format!("{}  -  {}", binding.key, binding.action);
                         draw_body_line(hdc, PADDING_X, y, &line);
@@ -300,10 +370,63 @@ fn content_size(content: &HelpOverlayContent) -> (i32, i32) {
     let body_lines = match content {
         HelpOverlayContent::Hidden => 0,
         HelpOverlayContent::Temporary { .. } => 1,
-        HelpOverlayContent::Help { view } => view.bindings.len().max(1) as i32,
+        HelpOverlayContent::Help { view } => {
+            let separator = if view.bindings.is_empty() { 0 } else { 1 };
+            (help_stats_lines(&view.stats).len() + separator + view.bindings.len()).max(1) as i32
+        }
     };
     let height = PADDING_Y * 2 + LINE_HEIGHT + TITLE_BODY_GAP + body_lines * LINE_HEIGHT;
     (OVERLAY_WIDTH, height.min(MAX_OVERLAY_HEIGHT))
+}
+
+fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
+    vec![
+        format!(
+            "mode={} drag={} slow={} jump={}",
+            stats.app_mode,
+            on_off(stats.drag_active),
+            on_off(stats.slow_active),
+            on_off(stats.jump_active)
+        ),
+        format!(
+            "movement profile={} speed={} default={} range={}..{} step={}",
+            stats.movement_profile,
+            stats.mouse_speed.current,
+            stats.mouse_speed.default,
+            stats.mouse_speed.min,
+            stats.mouse_speed.max,
+            stats.mouse_speed.step
+        ),
+        format!(
+            "wheel profile={} speed={} default={} range={}..{} step={}",
+            stats.wheel_profile,
+            stats.wheel_speed.current,
+            stats.wheel_speed.default,
+            stats.wheel_speed.min,
+            stats.wheel_speed.max,
+            stats.wheel_speed.step
+        ),
+        format!(
+            "accel={} rate={} top_speed={} polling={}ms wheel_tick={}ms",
+            stats.acceleration,
+            stats.acceleration_rate,
+            stats.top_speed,
+            stats.polling_rate_ms,
+            stats.wheel_tick_interval_ms
+        ),
+        format!(
+            "wheel multipliers vertical={} horizontal={}",
+            stats.wheel_vertical_multiplier, stats.wheel_horizontal_multiplier
+        ),
+    ]
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "on"
+    } else {
+        "off"
+    }
 }
 
 fn overlay_position(size: (i32, i32)) -> (i32, i32) {
@@ -387,7 +510,10 @@ where
             .cmp(&right.action)
             .then(left.key.cmp(&right.key))
     });
-    HelpOverlayView { bindings }
+    HelpOverlayView {
+        stats: HelpRuntimeStats::default(),
+        bindings,
+    }
 }
 
 pub fn show_temporary_tooltip(
@@ -469,6 +595,7 @@ mod tests {
 
     fn sample_view() -> HelpOverlayView {
         HelpOverlayView {
+            stats: HelpRuntimeStats::default(),
             bindings: vec![HelpBinding {
                 key: "H".to_string(),
                 action: "show_help".to_string(),
@@ -491,6 +618,16 @@ mod tests {
             .bindings
             .iter()
             .any(|binding| { binding.key == "H" && binding.action == "show_help" }));
+        assert_eq!(view.stats, HelpRuntimeStats::default());
+    }
+
+    #[test]
+    fn help_content_size_includes_runtime_stats() {
+        let size = content_size(&HelpOverlayContent::Help {
+            view: sample_view(),
+        });
+
+        assert!(size.1 > PADDING_Y * 2 + LINE_HEIGHT + TITLE_BODY_GAP + LINE_HEIGHT);
     }
 
     #[test]
