@@ -1703,72 +1703,38 @@ fn sync_jump_overlay(resolution: JumpOverlayResolution) {
     }
 }
 
-fn show_action_temporary_tooltip<B: MouseBackend>(
-    action_handler: &ActionHandler<B>,
-    action: &Action,
-) {
-    match action {
-        Action::MouseSpeedUp | Action::MouseSpeedDown | Action::MouseSpeedReset => {
-            help_overlay::show_temporary_tooltip(
-                "Mouse speed",
-                format!("Speed {}", action_handler.mouse_master.mouse_speed_baseline),
-                Duration::from_millis(
-                    action_handler
-                        .mouse_master
-                        .effective_mouse_speed
-                        .flash_indicator_ms,
-                ),
-            );
+fn runtime_notification_enabled(
+    notification: &RuntimeNotification,
+    config: TooltipOverlayConfig,
+) -> bool {
+    if !config.enabled || !config.show_temporary_tooltips {
+        return false;
+    }
+
+    match notification.kind {
+        RuntimeNotificationKind::MouseSpeed => config.events.mouse,
+        RuntimeNotificationKind::WheelSpeed => config.events.wheel,
+        RuntimeNotificationKind::MovementProfile | RuntimeNotificationKind::WheelProfile => {
+            config.events.profile
         }
-        Action::WheelSpeedUp | Action::WheelSpeedDown | Action::WheelSpeedReset => {
-            help_overlay::show_temporary_tooltip(
-                "Wheel speed",
-                format!("Speed {}", action_handler.mouse_master.current_wheel_speed),
-                Duration::from_millis(
-                    action_handler
-                        .mouse_master
-                        .effective_wheel
-                        .speed_indicator_ms,
-                ),
-            );
-        }
-        Action::MovementProfileNext
-        | Action::MovementProfilePrevious
-        | Action::MovementProfileSelect(_) => {
-            let profile = action_handler
-                .mouse_master
-                .active_movement_profile
-                .as_deref()
-                .unwrap_or("default");
-            help_overlay::show_temporary_tooltip(
-                "Movement profile",
-                profile,
-                Duration::from_millis(
-                    action_handler
-                        .mouse_master
-                        .effective_mouse_speed
-                        .flash_indicator_ms,
-                ),
-            );
-        }
-        Action::WheelProfileNext | Action::WheelProfilePrevious | Action::WheelProfileSelect(_) => {
-            let profile = action_handler
-                .mouse_master
-                .active_wheel_profile
-                .as_deref()
-                .unwrap_or("default");
-            help_overlay::show_temporary_tooltip(
-                "Wheel profile",
-                profile,
-                Duration::from_millis(
-                    action_handler
-                        .mouse_master
-                        .effective_wheel
-                        .speed_indicator_ms,
-                ),
-            );
-        }
-        _ => {}
+        RuntimeNotificationKind::Drag => config.events.drag,
+        RuntimeNotificationKind::ConfigReload => config.events.reload,
+        RuntimeNotificationKind::PanicReset => config.events.panic,
+    }
+}
+
+fn drain_runtime_notifications<B: MouseBackend>(action_handler: &mut ActionHandler<B>) {
+    let config = action_handler.mouse_master.config.tooltip_overlay;
+    let Some(notification) = action_handler.mouse_master.take_notifications().pop() else {
+        return;
+    };
+
+    if runtime_notification_enabled(&notification, config) {
+        help_overlay::show_temporary_tooltip(
+            notification.title,
+            notification.body,
+            Duration::from_millis(notification.duration_ms),
+        );
     }
 }
 
@@ -1846,7 +1812,6 @@ fn execute_key_action_command<B: MouseBackend>(
             return None;
         }
         action_handler.execute_action(&action);
-        show_action_temporary_tooltip(action_handler, &action);
     }
     None
 }
@@ -1865,6 +1830,9 @@ fn apply_loaded_config<B: MouseBackend>(
         .mouse_master
         .apply_config_preserving_mode(config.clone());
     action_handler.mouse_master.set_active_mode(active);
+    action_handler
+        .mouse_master
+        .push_config_reload_notification();
     app_state.set_active_mode(active);
     Ok(app_state.resolve_jump_overlay())
 }
@@ -1888,6 +1856,7 @@ fn panic_reset() -> JumpOverlayResolution {
     let mut action_handler = ACTION_HANDLER.write().unwrap();
     let mut app_state = APP_STATE.write().unwrap();
     action_handler.mouse_master.hard_reset_runtime();
+    action_handler.mouse_master.push_panic_reset_notification();
     action_handler.clear_active_keys();
     app_state.clear_active_action_keys_and_exit_jump_mode();
     app_state.hide_help();
@@ -2342,6 +2311,10 @@ fn main() {
         };
 
         loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
+        {
+            let mut action_handler = ACTION_HANDLER.write().unwrap();
+            drain_runtime_notifications(&mut action_handler);
+        }
 
         let movement_tick = ACTION_HANDLER.write().unwrap().tick_movement();
         if movement_tick.moving {

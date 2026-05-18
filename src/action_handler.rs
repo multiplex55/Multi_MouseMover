@@ -2,7 +2,7 @@ use crate::monitor::{current_monitor_rect_for_cursor, MonitorEdge, MonitorRect};
 use crate::{action, app_state::KeyEvent, keyboard::VirtualKey, Config, FinalAdjustConfig};
 use action::Action;
 use enigo::*;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::env;
 use std::time::{Duration, Instant};
 
@@ -40,6 +40,25 @@ pub struct MouseRuntimeSnapshot {
     pub wheel_tick_interval_ms: u64,
     pub wheel_vertical_multiplier: i32,
     pub wheel_horizontal_multiplier: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeNotificationKind {
+    MouseSpeed,
+    WheelSpeed,
+    MovementProfile,
+    WheelProfile,
+    Drag,
+    ConfigReload,
+    PanicReset,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeNotification {
+    pub kind: RuntimeNotificationKind,
+    pub title: String,
+    pub body: String,
+    pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +141,7 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     last_wheel_tick: Option<Instant>,
     mouse_speed_flash_until: Option<Instant>,
     wheel_speed_flash_until: Option<Instant>,
+    pending_notifications: VecDeque<RuntimeNotification>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,6 +193,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             last_wheel_tick: None,
             mouse_speed_flash_until: None,
             wheel_speed_flash_until: None,
+            pending_notifications: VecDeque::new(),
         }
     }
 
@@ -202,6 +223,14 @@ impl<B: MouseBackend> MouseMaster<B> {
             wheel_vertical_multiplier: self.effective_wheel.vertical_multiplier,
             wheel_horizontal_multiplier: self.effective_wheel.horizontal_multiplier,
         }
+    }
+
+    pub fn push_notification(&mut self, notification: RuntimeNotification) {
+        self.pending_notifications.push_back(notification);
+    }
+
+    pub fn take_notifications(&mut self) -> Vec<RuntimeNotification> {
+        self.pending_notifications.drain(..).collect()
     }
 
     /// Handles an action and executes the corresponding behavior
@@ -267,11 +296,12 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
-            Action::ReloadConfig
-            | Action::PanicReset
-            | Action::JumpMode
-            | Action::JumpModeProfile(_)
-            | Action::ShowHelp => {}
+            Action::ReloadConfig => self.push_config_reload_notification(),
+            Action::JumpMode | Action::JumpModeProfile(_) | Action::ShowHelp => {}
+            Action::PanicReset => {
+                self.hard_reset_runtime();
+                self.push_panic_reset_notification();
+            }
         }
     }
     /// Toggles between `Idle` and `Active` mode
@@ -310,10 +340,14 @@ impl<B: MouseBackend> MouseMaster<B> {
     }
 
     pub fn toggle_drag_mode(&mut self) {
+        let was_held = self.left_button_held;
         if self.left_button_held {
             self.release_left_button_if_held();
         } else {
             self.press_left_button_for_drag();
+        }
+        if self.left_button_held != was_held {
+            self.push_drag_notification();
         }
     }
 
@@ -393,17 +427,20 @@ impl<B: MouseBackend> MouseMaster<B> {
         self.current_wheel_speed = (self.current_wheel_speed + self.effective_wheel.speed_step)
             .min(self.effective_wheel.max_speed);
         self.flash_wheel_speed_indicator();
+        self.push_wheel_speed_notification();
     }
 
     pub fn decrease_wheel_speed(&mut self) {
         self.current_wheel_speed = (self.current_wheel_speed - self.effective_wheel.speed_step)
             .max(self.effective_wheel.min_speed);
         self.flash_wheel_speed_indicator();
+        self.push_wheel_speed_notification();
     }
 
     pub fn reset_wheel_speed_tier(&mut self) {
         self.current_wheel_speed = self.effective_wheel.default_speed;
         self.flash_wheel_speed_indicator();
+        self.push_wheel_speed_notification();
     }
 
     pub fn increase_mouse_speed(&mut self) {
@@ -412,6 +449,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             .min(self.effective_mouse_speed.max_speed);
         self.reset_acceleration_to_baseline();
         self.flash_mouse_speed_indicator();
+        self.push_mouse_speed_notification();
     }
 
     pub fn decrease_mouse_speed(&mut self) {
@@ -420,12 +458,14 @@ impl<B: MouseBackend> MouseMaster<B> {
             .max(self.effective_mouse_speed.min_speed);
         self.reset_acceleration_to_baseline();
         self.flash_mouse_speed_indicator();
+        self.push_mouse_speed_notification();
     }
 
     pub fn reset_mouse_speed_tier(&mut self) {
         self.mouse_speed_baseline = self.effective_mouse_speed.default_speed;
         self.reset_acceleration_to_baseline();
         self.flash_mouse_speed_indicator();
+        self.push_mouse_speed_notification();
     }
 
     pub fn flash_mouse_speed_indicator(&mut self) {
@@ -603,35 +643,132 @@ impl<B: MouseBackend> MouseMaster<B> {
     }
 
     pub fn select_movement_profile(&mut self, name: &str) -> bool {
-        self.apply_movement_profile(Some(name))
+        let selected = self.apply_movement_profile(Some(name));
+        if selected {
+            self.push_movement_profile_notification();
+        }
+        selected
     }
 
     pub fn select_next_movement_profile(&mut self) -> bool {
         let profiles = self.profile_names(self.config.movement_profiles.keys());
         let next = next_profile_name(&profiles, self.active_movement_profile.as_deref(), 1);
-        self.apply_movement_profile(next.as_deref())
+        let selected = self.apply_movement_profile(next.as_deref());
+        if selected {
+            self.push_movement_profile_notification();
+        }
+        selected
     }
 
     pub fn select_previous_movement_profile(&mut self) -> bool {
         let profiles = self.profile_names(self.config.movement_profiles.keys());
         let next = next_profile_name(&profiles, self.active_movement_profile.as_deref(), -1);
-        self.apply_movement_profile(next.as_deref())
+        let selected = self.apply_movement_profile(next.as_deref());
+        if selected {
+            self.push_movement_profile_notification();
+        }
+        selected
     }
 
     pub fn select_wheel_profile(&mut self, name: &str) -> bool {
-        self.apply_wheel_profile(Some(name))
+        let selected = self.apply_wheel_profile(Some(name));
+        if selected {
+            self.push_wheel_profile_notification();
+        }
+        selected
     }
 
     pub fn select_next_wheel_profile(&mut self) -> bool {
         let profiles = self.profile_names(self.config.wheel_profiles.keys());
         let next = next_profile_name(&profiles, self.active_wheel_profile.as_deref(), 1);
-        self.apply_wheel_profile(next.as_deref())
+        let selected = self.apply_wheel_profile(next.as_deref());
+        if selected {
+            self.push_wheel_profile_notification();
+        }
+        selected
     }
 
     pub fn select_previous_wheel_profile(&mut self) -> bool {
         let profiles = self.profile_names(self.config.wheel_profiles.keys());
         let next = next_profile_name(&profiles, self.active_wheel_profile.as_deref(), -1);
-        self.apply_wheel_profile(next.as_deref())
+        let selected = self.apply_wheel_profile(next.as_deref());
+        if selected {
+            self.push_wheel_profile_notification();
+        }
+        selected
+    }
+
+    pub fn push_config_reload_notification(&mut self) {
+        self.push_notification(RuntimeNotification {
+            kind: RuntimeNotificationKind::ConfigReload,
+            title: "Config reloaded".to_string(),
+            body: "Runtime settings updated".to_string(),
+            duration_ms: self.config.tooltip_overlay.duration_ms,
+        });
+    }
+
+    pub fn push_panic_reset_notification(&mut self) {
+        self.push_notification(RuntimeNotification {
+            kind: RuntimeNotificationKind::PanicReset,
+            title: "Panic reset".to_string(),
+            body: "Runtime state restored".to_string(),
+            duration_ms: self.config.tooltip_overlay.duration_ms,
+        });
+    }
+
+    fn push_mouse_speed_notification(&mut self) {
+        self.push_notification(RuntimeNotification {
+            kind: RuntimeNotificationKind::MouseSpeed,
+            title: "Mouse speed".to_string(),
+            body: format!("Speed {}", self.mouse_speed_baseline),
+            duration_ms: self.effective_mouse_speed.flash_indicator_ms,
+        });
+    }
+
+    fn push_wheel_speed_notification(&mut self) {
+        self.push_notification(RuntimeNotification {
+            kind: RuntimeNotificationKind::WheelSpeed,
+            title: "Wheel speed".to_string(),
+            body: format!("Speed {}", self.current_wheel_speed),
+            duration_ms: self.effective_wheel.speed_indicator_ms,
+        });
+    }
+
+    fn push_movement_profile_notification(&mut self) {
+        self.push_notification(RuntimeNotification {
+            kind: RuntimeNotificationKind::MovementProfile,
+            title: "Movement profile".to_string(),
+            body: self
+                .active_movement_profile
+                .clone()
+                .unwrap_or_else(|| "default".to_string()),
+            duration_ms: self.effective_mouse_speed.flash_indicator_ms,
+        });
+    }
+
+    fn push_wheel_profile_notification(&mut self) {
+        self.push_notification(RuntimeNotification {
+            kind: RuntimeNotificationKind::WheelProfile,
+            title: "Wheel profile".to_string(),
+            body: self
+                .active_wheel_profile
+                .clone()
+                .unwrap_or_else(|| "default".to_string()),
+            duration_ms: self.effective_wheel.speed_indicator_ms,
+        });
+    }
+
+    fn push_drag_notification(&mut self) {
+        self.push_notification(RuntimeNotification {
+            kind: RuntimeNotificationKind::Drag,
+            title: "Drag".to_string(),
+            body: if self.left_button_held {
+                "Enabled".to_string()
+            } else {
+                "Disabled".to_string()
+            },
+            duration_ms: self.config.tooltip_overlay.duration_ms,
+        });
     }
 
     fn apply_movement_profile(&mut self, profile: Option<&str>) -> bool {
@@ -988,6 +1125,137 @@ mod tests {
 
     fn actions(actions: &[Action]) -> HashSet<Action> {
         actions.iter().cloned().collect()
+    }
+
+    fn movement_profile(name: &str) -> (String, crate::MouseSpeedConfig) {
+        (
+            name.to_string(),
+            crate::MouseSpeedConfig {
+                default_speed: 5,
+                min_speed: 1,
+                max_speed: 12,
+                speed_step: 1,
+                flash_indicator_ms: 700,
+            },
+        )
+    }
+
+    fn wheel_profile(name: &str) -> (String, crate::WheelProfileConfig) {
+        (
+            name.to_string(),
+            crate::WheelProfileConfig {
+                default_speed: Some(4),
+                min_speed: Some(1),
+                max_speed: Some(12),
+                speed_step: Some(1),
+                tick_interval: Some(8),
+                speed_indicator_ms: Some(700),
+                vertical_multiplier: Some(1),
+                horizontal_multiplier: Some(1),
+            },
+        )
+    }
+
+    fn notification_kinds(mouse: &mut MouseMaster<FakeBackend>) -> Vec<RuntimeNotificationKind> {
+        mouse
+            .take_notifications()
+            .into_iter()
+            .map(|notification| notification.kind)
+            .collect()
+    }
+
+    #[test]
+    fn speed_actions_enqueue_runtime_notifications() {
+        for (action, expected_kind) in [
+            (Action::MouseSpeedUp, RuntimeNotificationKind::MouseSpeed),
+            (Action::MouseSpeedDown, RuntimeNotificationKind::MouseSpeed),
+            (Action::MouseSpeedReset, RuntimeNotificationKind::MouseSpeed),
+            (Action::WheelSpeedUp, RuntimeNotificationKind::WheelSpeed),
+            (Action::WheelSpeedDown, RuntimeNotificationKind::WheelSpeed),
+            (Action::WheelSpeedReset, RuntimeNotificationKind::WheelSpeed),
+        ] {
+            let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+            mouse.handle_action(action);
+
+            assert_eq!(notification_kinds(&mut mouse), vec![expected_kind]);
+        }
+    }
+
+    #[test]
+    fn profile_actions_enqueue_runtime_notifications() {
+        let mut config = test_config();
+        config
+            .movement_profiles
+            .extend([movement_profile("fast"), movement_profile("slow")]);
+        config
+            .wheel_profiles
+            .extend([wheel_profile("coarse"), wheel_profile("fine")]);
+
+        for (action, expected_kind) in [
+            (
+                Action::MovementProfileSelect("fast".to_string()),
+                RuntimeNotificationKind::MovementProfile,
+            ),
+            (
+                Action::MovementProfileNext,
+                RuntimeNotificationKind::MovementProfile,
+            ),
+            (
+                Action::MovementProfilePrevious,
+                RuntimeNotificationKind::MovementProfile,
+            ),
+            (
+                Action::WheelProfileSelect("coarse".to_string()),
+                RuntimeNotificationKind::WheelProfile,
+            ),
+            (
+                Action::WheelProfileNext,
+                RuntimeNotificationKind::WheelProfile,
+            ),
+            (
+                Action::WheelProfilePrevious,
+                RuntimeNotificationKind::WheelProfile,
+            ),
+        ] {
+            let mut mouse = MouseMaster::new_with_backend(config.clone(), FakeBackend::default());
+
+            mouse.handle_action(action);
+
+            assert_eq!(notification_kinds(&mut mouse), vec![expected_kind]);
+        }
+    }
+
+    #[test]
+    fn drag_reload_and_panic_actions_enqueue_runtime_notifications() {
+        for (action, expected_kind) in [
+            (Action::ToggleDragMode, RuntimeNotificationKind::Drag),
+            (Action::ReloadConfig, RuntimeNotificationKind::ConfigReload),
+            (Action::PanicReset, RuntimeNotificationKind::PanicReset),
+        ] {
+            let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+            mouse.handle_action(action);
+
+            assert_eq!(notification_kinds(&mut mouse), vec![expected_kind]);
+        }
+    }
+
+    #[test]
+    fn take_notifications_drains_queue_in_order() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.handle_action(Action::MouseSpeedUp);
+        mouse.handle_action(Action::WheelSpeedUp);
+
+        assert_eq!(
+            notification_kinds(&mut mouse),
+            vec![
+                RuntimeNotificationKind::MouseSpeed,
+                RuntimeNotificationKind::WheelSpeed,
+            ]
+        );
+        assert!(mouse.take_notifications().is_empty());
     }
 
     fn final_adjust_config() -> FinalAdjustConfig {
