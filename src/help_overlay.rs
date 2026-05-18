@@ -1120,4 +1120,25 @@ mod tests {
 
         assert_eq!(state.content, HelpOverlayContent::Help { view });
     }
+
+    #[test]
+    fn hide_clears_visible_temporary_tooltip() {
+        let now = Instant::now();
+        let mut state = HelpOverlayState::new();
+
+        state.show_temporary_tooltip("Speed", "Mouse speed 2", Duration::from_millis(700), now);
+        state.hide();
+
+        assert_eq!(state.content, HelpOverlayContent::Hidden);
+    }
+
+    #[test]
+    fn hide_clears_visible_help_overlay() {
+        let mut state = HelpOverlayState::new();
+
+        state.show_help_overlay(sample_view());
+        state.hide();
+
+        assert_eq!(state.content, HelpOverlayContent::Hidden);
+    }
 }

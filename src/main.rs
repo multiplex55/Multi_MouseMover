@@ -1706,7 +1706,12 @@ fn sync_jump_overlay(resolution: JumpOverlayResolution) {
 fn runtime_notification_enabled(
     notification: &RuntimeNotification,
     config: TooltipOverlayConfig,
+    help_visible: bool,
 ) -> bool {
+    if help_visible {
+        return false;
+    }
+
     if !config.enabled || !config.show_temporary_tooltips {
         return false;
     }
@@ -1729,7 +1734,8 @@ fn drain_runtime_notifications<B: MouseBackend>(action_handler: &mut ActionHandl
         return;
     };
 
-    if runtime_notification_enabled(&notification, config) {
+    let help_visible = APP_STATE.read().unwrap().help_visible();
+    if runtime_notification_enabled(&notification, config, help_visible) {
         let stats = help_stats_from_snapshot(
             action_handler.mouse_master.runtime_snapshot(),
             action_handler.active_keys.contains(&Action::SlowMouse),
@@ -1784,6 +1790,11 @@ fn apply_active_mode_transition<B: MouseBackend>(
     app_state.resolve_jump_overlay()
 }
 
+fn clear_help_for_exclusive_mode(app_state: &mut AppState) {
+    app_state.hide_help();
+    help_overlay::hide_help_overlay();
+}
+
 fn execute_key_action_command<B: MouseBackend>(
     action_handler: &mut ActionHandler<B>,
     app_state: &mut AppState,
@@ -1806,8 +1817,7 @@ fn execute_key_action_command<B: MouseBackend>(
             app_state.clear_active_action_keys_and_exit_jump_mode();
             action_handler.mouse_master.set_active_mode(false);
             app_state.set_active_mode(false);
-            app_state.hide_help();
-            help_overlay::hide_help_overlay();
+            clear_help_for_exclusive_mode(app_state);
             return Some(app_state.resolve_jump_overlay());
         }
         return None;
@@ -1985,7 +1995,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         AppCommand::SetActiveMode { active } => {
             set_active_mode(active);
             if !active {
-                help_overlay::hide_help_overlay();
+                clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
             }
         }
         AppCommand::Exit => {
@@ -2002,7 +2012,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         AppCommand::PanicReset => {
             let resolution = panic_reset();
             sync_jump_overlay(resolution);
-            help_overlay::hide_help_overlay();
+            clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
         }
         AppCommand::ToggleHelp => {
             let visible = {
@@ -2025,8 +2035,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             activation_key,
             profile,
         } => {
-            APP_STATE.write().unwrap().hide_help();
-            help_overlay::hide_help_overlay();
+            clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
             let jump_config = match config.resolved_jump_config(profile.as_deref()) {
                 Ok(jump_config) => jump_config,
@@ -3792,6 +3801,20 @@ mod tests {
     }
 
     #[test]
+    fn help_visible_suppresses_temporary_runtime_notifications() {
+        let config = TooltipOverlayConfig::default();
+        let notification = RuntimeNotification {
+            kind: RuntimeNotificationKind::MouseSpeed,
+            title: "Mouse speed".to_string(),
+            body: "Speed 6".to_string(),
+            duration_ms: 700,
+        };
+
+        assert!(runtime_notification_enabled(&notification, config, false));
+        assert!(!runtime_notification_enabled(&notification, config, true));
+    }
+
+    #[test]
     fn click_then_disable_key_down_clears_active_transition_state() {
         for start_in_jump_mode in [false, true] {
             let mut app_state = AppState::default();
@@ -3929,6 +3952,7 @@ mod tests {
     fn disable_while_drag_active_releases_button_and_clears_state() {
         let mut app_state = AppState::default();
         app_state.set_bound_keys([VirtualKey::Left]);
+        app_state.toggle_help();
         app_state.route_key_event(
             KeyEvent::new(VirtualKey::Left, true),
             Some(Action::MoveLeft),
@@ -3954,8 +3978,20 @@ mod tests {
         assert_eq!(action_handler.mouse_master.current_mode, ModeState::Idle);
         assert!(action_handler.active_keys.is_empty());
         assert!(!app_state.active_mode());
+        assert!(!app_state.help_visible());
         assert!(!app_state.has_active_action_keys());
         assert_eq!(resolution, JumpOverlayResolution::Hidden);
+    }
+
+    #[test]
+    fn exclusive_mode_transition_clears_visible_help_state() {
+        let mut app_state = AppState::default();
+        app_state.toggle_help();
+        assert!(app_state.help_visible());
+
+        clear_help_for_exclusive_mode(&mut app_state);
+
+        assert!(!app_state.help_visible());
     }
 
     #[test]
