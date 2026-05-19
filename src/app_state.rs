@@ -1,5 +1,6 @@
 use crate::action::Action;
 use crate::action_handler::{final_adjust_control_for_event, FinalAdjustControl};
+use crate::jump_grid::generate_default_labels;
 use crate::jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
 use crate::jump_view::{FinalAdjustOverlayView, JumpOverlayView, JumpStageMetadata};
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
@@ -578,6 +579,8 @@ fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
             .preview_edge_behavior
             .unwrap_or(config.preview_edge_behavior),
         labels: config.coarse.labels.into(),
+        cell_labels: generate_default_labels((config.coarse.width, config.coarse.height))
+            .unwrap_or_default(),
     }];
 
     if config.fine.enabled {
@@ -596,6 +599,8 @@ fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
                 .preview_edge_behavior
                 .unwrap_or(config.preview_edge_behavior),
             labels: config.fine.labels.into(),
+            cell_labels: generate_default_labels((config.fine.width, config.fine.height))
+                .unwrap_or_default(),
         });
     }
 
@@ -615,6 +620,8 @@ fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
                 .preview_edge_behavior
                 .unwrap_or(config.preview_edge_behavior),
             labels: config.precise.labels.into(),
+            cell_labels: generate_default_labels((config.precise.width, config.precise.height))
+                .unwrap_or_default(),
         });
     }
 
@@ -1055,10 +1062,6 @@ mod tests {
         );
         assert_eq!(
             state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None),
-            Some(JumpSessionUpdate::Consumed)
-        );
-        assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None),
             Some(JumpSessionUpdate::Completed {
                 x: 91,
                 y: 1,
@@ -1373,11 +1376,7 @@ mod tests {
             VirtualKey::J
         ));
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
-            Some(JumpSessionUpdate::Consumed)
-        );
-        assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::G, true), None),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -1411,8 +1410,8 @@ mod tests {
         config.jump.coarse.width = 5;
         config.jump.coarse.height = 5;
         config.jump.fine.enabled = true;
-        config.jump.fine.width = 5;
-        config.jump.fine.height = 5;
+        config.jump.fine.width = 10;
+        config.jump.fine.height = 10;
         let config = config.normalize().unwrap();
 
         let mut state = AppState::default();
@@ -1423,11 +1422,7 @@ mod tests {
             VirtualKey::J
         ));
         assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
-            Some(JumpSessionUpdate::Consumed)
-        );
-        assert_eq!(
-            state.handle_jump_input(KeyEvent::new(VirtualKey::B, true), None),
+            state.handle_jump_input(KeyEvent::new(VirtualKey::G, true), None),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {

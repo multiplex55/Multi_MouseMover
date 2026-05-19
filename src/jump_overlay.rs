@@ -7,7 +7,6 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::{
-    jump_grid::{index_to_code, letters_needed},
     jump_session::{expand_region_within, JumpRegion},
     jump_view::{JumpLabelMetadata, JumpOverlayView, JumpStageMetadata},
     overlay::RGB,
@@ -785,13 +784,15 @@ impl JumpOverlay {
                 }
 
                 if label_plan.labels {
-                    let row_len = letters_needed(grid_size.1);
-                    let col_len = letters_needed(grid_size.0);
+                    let cell_labels = active_stage_metadata(view)
+                        .map(|stage| stage.cell_labels.as_slice())
+                        .unwrap_or(&[]);
                     for row in 0..grid_size.1 {
-                        let row_code = index_to_code(row as usize, row_len);
                         for col in 0..grid_size.0 {
-                            let col_code = index_to_code(col as usize, col_len);
-                            let code = format!("{}{}", row_code, col_code);
+                            let index = row as usize * grid_size.0 as usize + col as usize;
+                            let Some(code) = cell_labels.get(index) else {
+                                continue;
+                            };
                             let text: Vec<u16> = code.encode_utf16().collect();
                             let offset = (8.0 * labels.font_scale).round() as i32;
                             let x = grid_rect.left + col as i32 * cell_w + cell_w / 2 - offset;
@@ -1180,6 +1181,7 @@ mod tests {
                 target_region_mode: JumpTargetRegionMode::RegionWithContext,
                 preview_edge_behavior: PreviewEdgeBehavior::Clamp,
                 labels: JumpLabelConfig::default().into(),
+                cell_labels: crate::jump_grid::generate_default_labels((10, 10)).unwrap(),
             },
         ];
 
@@ -1216,6 +1218,7 @@ mod tests {
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
                 preview_edge_behavior: PreviewEdgeBehavior::Clamp,
                 labels: JumpLabelConfig::default().into(),
+                cell_labels: crate::jump_grid::generate_default_labels((10, 10)).unwrap(),
             },
         ];
 
@@ -1259,6 +1262,7 @@ mod tests {
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
                 preview_edge_behavior: PreviewEdgeBehavior::Clamp,
                 labels: JumpLabelConfig::default().into(),
+                cell_labels: crate::jump_grid::generate_default_labels((10, 10)).unwrap(),
             },
         ];
         let mut high_zoom = low_zoom.clone();
@@ -1410,6 +1414,7 @@ mod tests {
             target_region_mode,
             preview_edge_behavior: PreviewEdgeBehavior::Clamp,
             labels: JumpLabelConfig::default().into(),
+            cell_labels: crate::jump_grid::generate_default_labels((10, 10)).unwrap(),
         }
     }
 

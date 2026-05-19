@@ -22,6 +22,7 @@ pub struct JumpStageMetadata {
     pub target_region_mode: JumpTargetRegionMode,
     pub preview_edge_behavior: PreviewEdgeBehavior,
     pub labels: JumpLabelMetadata,
+    pub cell_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

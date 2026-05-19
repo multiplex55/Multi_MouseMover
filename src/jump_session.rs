@@ -1,5 +1,5 @@
 use crate::{
-    jump_grid::{code_to_index, expected_len, letters_needed},
+    jump_grid::{generate_default_labels, letters_needed_for_base, DEFAULT_SELECTION_KEYS},
     keyboard::VirtualKey,
     JumpAimPoint, JumpTargetRegionMode,
 };
@@ -25,7 +25,7 @@ impl JumpRegion {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JumpStage {
     pub width: u32,
     pub height: u32,
@@ -35,12 +35,13 @@ pub struct JumpStage {
     pub target_margin_percent: u8,
     pub visual_context_margin_percent: u8,
     pub target_region_mode: JumpTargetRegionMode,
+    pub labels: Vec<String>,
 }
 
 impl JumpStage {
     #[cfg(test)]
     pub fn new(width: u32, height: u32) -> Self {
-        Self {
+        let mut stage = Self {
             width,
             height,
             aim_point: JumpAimPoint::Center,
@@ -49,12 +50,15 @@ impl JumpStage {
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
-        }
+            labels: Vec::new(),
+        };
+        stage.refresh_labels();
+        stage
     }
 
     #[cfg(test)]
     pub fn with_target_margin(width: u32, height: u32, target_margin_percent: u8) -> Self {
-        Self {
+        let mut stage = Self {
             width,
             height,
             aim_point: JumpAimPoint::Center,
@@ -63,7 +67,10 @@ impl JumpStage {
             target_margin_percent,
             visual_context_margin_percent: 0,
             target_region_mode: JumpTargetRegionMode::ExpandedTarget,
-        }
+            labels: Vec::new(),
+        };
+        stage.refresh_labels();
+        stage
     }
 
     pub fn with_target_region_mode(
@@ -76,7 +83,7 @@ impl JumpStage {
         visual_context_margin_percent: u8,
         target_region_mode: JumpTargetRegionMode,
     ) -> Self {
-        Self {
+        let mut stage = Self {
             width,
             height,
             aim_point,
@@ -85,15 +92,25 @@ impl JumpStage {
             target_margin_percent,
             visual_context_margin_percent,
             target_region_mode,
-        }
+            labels: Vec::new(),
+        };
+        stage.refresh_labels();
+        stage
     }
 
-    pub fn grid(self) -> (u32, u32) {
+    pub fn grid(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    pub fn expected_len(self) -> usize {
-        expected_len(self.grid())
+    pub fn expected_len(&self) -> usize {
+        letters_needed_for_base(
+            self.width as usize * self.height as usize,
+            DEFAULT_SELECTION_KEYS.len(),
+        )
+    }
+
+    fn refresh_labels(&mut self) {
+        self.labels = generate_default_labels(self.grid()).unwrap_or_default();
     }
 }
 
@@ -209,7 +226,7 @@ impl JumpSession {
         if !region.is_valid() || stages.is_empty() || stages.iter().any(|stage| !stage.is_valid()) {
             return None;
         }
-        let current_region = target_region_for_stage(region, stages[0], region)?;
+        let current_region = target_region_for_stage(region, stages[0].clone(), region)?;
 
         Some(Self {
             stages,
@@ -224,7 +241,7 @@ impl JumpSession {
     }
 
     pub fn current_stage(&self) -> JumpStage {
-        self.stages[self.stage_index]
+        self.stages[self.stage_index].clone()
     }
 
     pub fn current_grid(&self) -> (u32, u32) {
@@ -286,19 +303,31 @@ impl JumpSession {
     }
 
     fn evaluate_input(&mut self) -> JumpSessionUpdate {
-        let stage = self.current_stage();
-        let row_len = letters_needed(stage.height);
-        let col_len = letters_needed(stage.width);
-        let row_code: String = self.input.chars().take(row_len).collect();
-        let col_code: String = self.input.chars().skip(row_len).take(col_len).collect();
-        self.input.clear();
+        let labels = &self.stages[self.stage_index].labels;
+        let exact_matches: Vec<usize> = labels
+            .iter()
+            .enumerate()
+            .filter_map(|(index, label)| (label == &self.input).then_some(index))
+            .collect();
 
-        let Some(row) = code_to_index(&row_code) else {
-            return JumpSessionUpdate::Invalid;
-        };
-        let Some(col) = code_to_index(&col_code) else {
-            return JumpSessionUpdate::Invalid;
-        };
+        if exact_matches.len() == 1 {
+            let stage = self.current_stage();
+            let index = exact_matches[0];
+            let row = index / stage.width as usize;
+            let col = index % stage.width as usize;
+            self.input.clear();
+            return self.select_cell(stage, row, col);
+        }
+
+        if labels.iter().any(|label| label.starts_with(&self.input)) {
+            return JumpSessionUpdate::Consumed;
+        }
+
+        self.input.clear();
+        JumpSessionUpdate::Invalid
+    }
+
+    fn select_cell(&mut self, stage: JumpStage, row: usize, col: usize) -> JumpSessionUpdate {
         let Some(region) = subdivide_region(self.current_region, stage.grid(), row, col) else {
             return JumpSessionUpdate::Invalid;
         };
@@ -428,8 +457,10 @@ fn target_region_for_stage(
 }
 
 impl JumpStage {
-    fn is_valid(self) -> bool {
-        self.width > 0 && self.height > 0
+    fn is_valid(&self) -> bool {
+        self.width > 0
+            && self.height > 0
+            && self.labels.len() == self.width as usize * self.height as usize
     }
 }
 
@@ -490,6 +521,45 @@ mod tests {
             update = press(session, key);
         }
         update
+    }
+
+    fn key_for_char(ch: char) -> VirtualKey {
+        match ch {
+            'A' => VirtualKey::A,
+            'B' => VirtualKey::B,
+            'C' => VirtualKey::C,
+            'D' => VirtualKey::D,
+            'E' => VirtualKey::E,
+            'F' => VirtualKey::F,
+            'G' => VirtualKey::G,
+            'H' => VirtualKey::H,
+            'I' => VirtualKey::I,
+            'J' => VirtualKey::J,
+            'K' => VirtualKey::K,
+            'L' => VirtualKey::L,
+            'M' => VirtualKey::M,
+            'N' => VirtualKey::N,
+            'O' => VirtualKey::O,
+            'P' => VirtualKey::P,
+            'Q' => VirtualKey::Q,
+            'R' => VirtualKey::R,
+            'S' => VirtualKey::S,
+            'T' => VirtualKey::T,
+            'U' => VirtualKey::U,
+            'V' => VirtualKey::V,
+            'W' => VirtualKey::W,
+            'X' => VirtualKey::X,
+            'Y' => VirtualKey::Y,
+            'Z' => VirtualKey::Z,
+            _ => panic!("unsupported label character {ch}"),
+        }
+    }
+
+    fn enter_cell(session: &mut JumpSession, row: usize, col: usize) -> Option<JumpSessionUpdate> {
+        let stage = session.current_stage();
+        let label = stage.labels[row * stage.width as usize + col].clone();
+        let keys: Vec<_> = label.chars().map(key_for_char).collect();
+        enter_code(session, &keys)
     }
 
     #[test]
@@ -825,7 +895,7 @@ mod tests {
     fn invalid_code_clears_input_without_advancing() {
         let mut session = staged_session();
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]),
+            enter_cell(&mut session, 1, 2),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -838,11 +908,7 @@ mod tests {
         );
 
         assert_eq!(
-            session.handle_key(VirtualKey::F, true),
-            Some(JumpSessionUpdate::Consumed)
-        );
-        assert_eq!(
-            session.handle_key(VirtualKey::A, true),
+            session.handle_key(VirtualKey::Z, true),
             Some(JumpSessionUpdate::Invalid)
         );
         assert_eq!(session.input, "");
@@ -884,7 +950,7 @@ mod tests {
         let mut session = staged_session();
 
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]),
+            enter_cell(&mut session, 1, 2),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -898,7 +964,7 @@ mod tests {
         assert_eq!(session.current_grid(), (5, 5));
 
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::D, VirtualKey::E]),
+            enter_cell(&mut session, 3, 4),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 2,
                 region: JumpRegion {
@@ -912,7 +978,7 @@ mod tests {
         assert_eq!(session.current_grid(), (2, 2));
 
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::B, VirtualKey::B]),
+            enter_cell(&mut session, 1, 1),
             Some(JumpSessionUpdate::Completed {
                 x: 295,
                 y: 175,
@@ -944,7 +1010,7 @@ mod tests {
             height: 100,
         };
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]),
+            enter_cell(&mut session, 1, 2),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: stage_one_cell,
@@ -964,7 +1030,7 @@ mod tests {
         let mut session = JumpSession::new(base_region(), stages).unwrap();
 
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::B, VirtualKey::B]),
+            enter_cell(&mut session, 1, 1),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -978,7 +1044,7 @@ mod tests {
         assert_eq!(session.current_region, session.region_history[1]);
 
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::A, VirtualKey::A]),
+            enter_cell(&mut session, 0, 0),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 2,
                 region: JumpRegion {
@@ -1010,7 +1076,7 @@ mod tests {
         let mut session = JumpSession::new(base_region(), stages).unwrap();
 
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::B, VirtualKey::B]),
+            enter_cell(&mut session, 1, 1),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -1024,7 +1090,7 @@ mod tests {
         assert_eq!(session.current_region, session.region_history[1]);
 
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::A, VirtualKey::A]),
+            enter_cell(&mut session, 0, 0),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 2,
                 region: JumpRegion {
@@ -1039,23 +1105,15 @@ mod tests {
 
     #[test]
     fn cancel_key_cancels_at_every_stage() {
-        let stage_entries = [
-            Vec::new(),
-            vec![VirtualKey::B, VirtualKey::C],
-            vec![VirtualKey::B, VirtualKey::C, VirtualKey::D, VirtualKey::E],
-        ];
+        let stage_entries = [Vec::new(), vec![(1, 2)], vec![(1, 2), (3, 4)]];
 
-        for (expected_stage, entry_keys) in stage_entries.into_iter().enumerate() {
+        for (expected_stage, entries) in stage_entries.into_iter().enumerate() {
             let mut session = staged_session();
-            for chunk in entry_keys.chunks(2) {
-                enter_code(&mut session, chunk);
+            for (row, col) in entries {
+                enter_cell(&mut session, row, col);
             }
 
             assert_eq!(session.stage_index, expected_stage);
-            assert_eq!(
-                press(&mut session, VirtualKey::A),
-                Some(JumpSessionUpdate::Consumed)
-            );
             assert_eq!(
                 press(&mut session, VirtualKey::Escape),
                 Some(JumpSessionUpdate::Cancelled)
@@ -1082,7 +1140,7 @@ mod tests {
         assert_eq!(session.current_region, base_region());
 
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::C, VirtualKey::D]),
+            enter_cell(&mut session, 2, 3),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -1099,7 +1157,7 @@ mod tests {
     fn empty_input_backspace_stays_on_the_current_stage() {
         let mut session = staged_session();
         assert_eq!(
-            enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]),
+            enter_cell(&mut session, 1, 2),
             Some(JumpSessionUpdate::StageAdvanced {
                 stage_index: 1,
                 region: JumpRegion {
@@ -1146,10 +1204,14 @@ mod tests {
         );
         assert_eq!(stage_zero_empty.stage_index, 0);
 
-        let mut later_stage_with_input = staged_session();
-        enter_code(&mut later_stage_with_input, &[VirtualKey::B, VirtualKey::C]);
+        let mut later_stage_with_input = JumpSession::new(
+            base_region(),
+            vec![JumpStage::new(10, 10), JumpStage::new(10, 10)],
+        )
+        .unwrap();
+        enter_cell(&mut later_stage_with_input, 1, 2);
         assert_eq!(
-            press(&mut later_stage_with_input, VirtualKey::D),
+            press(&mut later_stage_with_input, VirtualKey::A),
             Some(JumpSessionUpdate::Consumed)
         );
         assert_eq!(
@@ -1160,7 +1222,7 @@ mod tests {
         assert_eq!(later_stage_with_input.stage_index, 1);
 
         let mut later_stage_empty = staged_session();
-        enter_code(&mut later_stage_empty, &[VirtualKey::B, VirtualKey::C]);
+        enter_cell(&mut later_stage_empty, 1, 2);
         assert_eq!(
             press(&mut later_stage_empty, VirtualKey::Backspace),
             Some(JumpSessionUpdate::StageBacktracked {
@@ -1174,9 +1236,9 @@ mod tests {
     #[test]
     fn backspace_restores_region_history_and_path_after_backtrack() {
         let mut session = staged_session();
-        enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]);
+        enter_cell(&mut session, 1, 2);
         let stage_one_region = session.current_region;
-        enter_code(&mut session, &[VirtualKey::D, VirtualKey::E]);
+        enter_cell(&mut session, 3, 4);
 
         assert_eq!(session.stage_index, 2);
         assert_eq!(session.path, vec![(1, 2), (3, 4)]);
