@@ -54,6 +54,10 @@ const MAX_JUMP_STAGE_SIZE: u32 = 26;
 const MAX_JUMP_REGION_MARGIN_PERCENT: u8 = 50;
 const MIN_JUMP_ZOOM_SCALE: f32 = 1.0;
 const MAX_JUMP_ZOOM_SCALE: f32 = 10.0;
+const MIN_GRID_MODE_REGION_PERCENT: f32 = 0.05;
+const MAX_GRID_MODE_REGION_PERCENT: f32 = 1.0;
+const MIN_GRID_MODE_SIZE_PX: i32 = 1;
+const MAX_GRID_MODE_SIZE_PX: i32 = 500;
 const MAX_EDGE_JUMP_OFFSET_PX: i32 = 10_000;
 const MAX_JUMP_AIM_OFFSET_PX: i32 = 10_000;
 const MAX_FINAL_ADJUST_STEP_PX: i32 = 10_000;
@@ -186,6 +190,7 @@ struct Config {
     system_bindings: SystemBindings,
     polling_rate: u64,
     grid_size: GridSize,
+    grid_mode: GridModeConfig,
     jump: JumpConfig,
     final_adjust: FinalAdjustConfig,
     status_overlay: StatusOverlayConfig,
@@ -204,10 +209,11 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            key_bindings: Vec::new(),
+            key_bindings: default_key_bindings(),
             system_bindings: SystemBindings::default(),
             polling_rate: DEFAULT_POLLING_RATE_MS,
             grid_size: GridSize::default(),
+            grid_mode: GridModeConfig::default(),
             jump: JumpConfig::default(),
             final_adjust: FinalAdjustConfig::default(),
             status_overlay: StatusOverlayConfig::default(),
@@ -223,6 +229,50 @@ impl Default for Config {
             top_speed: 6,
         }
     }
+}
+
+fn default_key_bindings() -> Vec<(String, String)> {
+    [
+        ("W", "move_up"),
+        ("A", "move_left"),
+        ("S", "move_down"),
+        ("D", "move_right"),
+        ("LeftShift", "slow_mouse"),
+        ("SPACE", "left_click"),
+        ("L", "right_click"),
+        ("RightShift", "middle_click"),
+        ("N", "toggle_drag_mode"),
+        (".", "click_then_disable"),
+        (",", "wheel_up"),
+        ("M", "wheel_down"),
+        ("I", "wheel_left"),
+        ("O", "wheel_right"),
+        ("X", "mouse_speed_down"),
+        ("Z", "mouse_speed_reset"),
+        ("V", "wheel_speed_up"),
+        ("B", "wheel_speed_down"),
+        ("RightAlt+C", "movement_profile_next"),
+        ("RightAlt+X", "movement_profile_previous"),
+        ("RightAlt+V", "wheel_profile_next"),
+        ("RightAlt+B", "wheel_profile_previous"),
+        ("F", "jump_mode"),
+        ("G", "grid_mode"),
+        ("C", "screen_select"),
+        ("H", "navigate_back"),
+        ("Y", "navigate_forward"),
+        ("Q", "disable"),
+        ("P", "disable"),
+        ("RightAlt+W", "move_to_top_edge"),
+        ("RightAlt+A", "move_to_left_edge"),
+        ("RightAlt+S", "move_to_bottom_edge"),
+        ("RightAlt+D", "move_to_right_edge"),
+        ("RightAlt+R", "reload_config"),
+        ("RightAlt+Escape", "panic_reset"),
+        ("/", "show_help"),
+    ]
+    .into_iter()
+    .map(|(key, action)| (key.to_string(), action.to_string()))
+    .collect()
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -465,6 +515,38 @@ impl Default for GridSize {
         Self {
             width: 10,
             height: 10,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(default)]
+struct GridModeConfig {
+    enabled: bool,
+    start_region: JumpStartRegion,
+    width_percent: f32,
+    height_percent: f32,
+    center_on_cursor: bool,
+    min_width_px: i32,
+    min_height_px: i32,
+    move_cursor_each_step: bool,
+    line_visible: bool,
+    show_direction_labels: bool,
+}
+
+impl Default for GridModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            start_region: JumpStartRegion::CurrentMonitor,
+            width_percent: 0.5,
+            height_percent: 0.5,
+            center_on_cursor: true,
+            min_width_px: 80,
+            min_height_px: 80,
+            move_cursor_each_step: true,
+            line_visible: true,
+            show_direction_labels: true,
         }
     }
 }
@@ -901,6 +983,7 @@ impl Config {
         if self.polling_rate == 0 {
             self.polling_rate = DEFAULT_POLLING_RATE_MS;
         }
+        self.normalize_grid_mode_config();
         self.normalize_jump_config();
         self.normalize_final_adjust_config();
         self.normalize_mouse_speed_config();
@@ -911,6 +994,33 @@ impl Config {
         self.starting_speed = self.mouse_speed.default_speed;
         self.runtime_system_bindings()?;
         Ok(self)
+    }
+
+    fn normalize_grid_mode_config(&mut self) {
+        self.grid_mode.width_percent = normalize_f32_range(
+            "grid_mode.width_percent",
+            self.grid_mode.width_percent,
+            MIN_GRID_MODE_REGION_PERCENT,
+            MAX_GRID_MODE_REGION_PERCENT,
+        );
+        self.grid_mode.height_percent = normalize_f32_range(
+            "grid_mode.height_percent",
+            self.grid_mode.height_percent,
+            MIN_GRID_MODE_REGION_PERCENT,
+            MAX_GRID_MODE_REGION_PERCENT,
+        );
+        self.grid_mode.min_width_px = normalize_i32_range(
+            "grid_mode.min_width_px",
+            self.grid_mode.min_width_px,
+            MIN_GRID_MODE_SIZE_PX,
+            MAX_GRID_MODE_SIZE_PX,
+        );
+        self.grid_mode.min_height_px = normalize_i32_range(
+            "grid_mode.min_height_px",
+            self.grid_mode.min_height_px,
+            MIN_GRID_MODE_SIZE_PX,
+            MAX_GRID_MODE_SIZE_PX,
+        );
     }
 
     fn normalize_tooltip_overlay_config(&mut self) {
@@ -1362,6 +1472,21 @@ fn take_config_warnings() -> Vec<String> {
 
 fn normalize_i32_range(name: &str, value: i32, min: i32, max: i32) -> i32 {
     if value < min {
+        warn_config_normalized(&format!("{name} is below {min}; clamping to {min}"));
+        min
+    } else if value > max {
+        warn_config_normalized(&format!("{name} is above {max}; clamping to {max}"));
+        max
+    } else {
+        value
+    }
+}
+
+fn normalize_f32_range(name: &str, value: f32, min: f32, max: f32) -> f32 {
+    if !value.is_finite() {
+        warn_config_normalized(&format!("{name} is not finite; using {min}"));
+        min
+    } else if value < min {
         warn_config_normalized(&format!("{name} is below {min}; clamping to {min}"));
         min
     } else if value > max {
@@ -2534,6 +2659,7 @@ mod tests {
         assert_eq!(config.polling_rate, defaults.polling_rate);
         assert_eq!(config.grid_size.width, defaults.grid_size.width);
         assert_eq!(config.grid_size.height, defaults.grid_size.height);
+        assert_eq!(config.grid_mode, defaults.grid_mode);
         assert_eq!(config.jump.mode, defaults.jump.mode);
         assert_eq!(
             config.jump.cursor_between_stages,
@@ -2554,7 +2680,7 @@ mod tests {
             defaults.system_bindings.toggle_active
         );
         assert_eq!(config.system_bindings.exit, defaults.system_bindings.exit);
-        assert!(config.key_bindings.is_empty());
+        assert_eq!(config.key_bindings, defaults.key_bindings);
     }
 
     #[test]
@@ -2708,16 +2834,78 @@ mod tests {
     }
 
     #[test]
+    fn default_config_bindings_and_grid_mode_match_recommended_values() {
+        let config = parse_config("");
+        let expected_bindings = default_key_bindings();
+
+        assert_eq!(config.key_bindings, expected_bindings);
+        assert_eq!(
+            config
+                .key_bindings
+                .iter()
+                .filter(|(_, action)| action == "slow_mouse")
+                .count(),
+            1
+        );
+        assert!(config
+            .key_bindings
+            .iter()
+            .any(|(key, action)| key == "LeftShift" && action == "slow_mouse"));
+        assert!(config
+            .key_bindings
+            .iter()
+            .any(|(key, action)| key == "RightShift" && action == "middle_click"));
+        for (key, action) in &config.key_bindings {
+            assert!(KeyChord::parse(key).is_ok(), "{key}");
+            assert!(Action::from_string(action).is_some(), "{key} -> {action}");
+        }
+
+        assert_eq!(config.grid_mode, GridModeConfig::default());
+    }
+
+    #[test]
+    fn grid_mode_out_of_range_values_clamp() {
+        let low = parse_config(
+            r#"
+            [grid_mode]
+            width_percent = 0.01
+            height_percent = 0.0
+            min_width_px = 0
+            min_height_px = -5
+            "#,
+        );
+        let high = parse_config(
+            r#"
+            [grid_mode]
+            width_percent = 1.5
+            height_percent = 2.0
+            min_width_px = 501
+            min_height_px = 900
+            "#,
+        );
+
+        assert_eq!(low.grid_mode.width_percent, MIN_GRID_MODE_REGION_PERCENT);
+        assert_eq!(low.grid_mode.height_percent, MIN_GRID_MODE_REGION_PERCENT);
+        assert_eq!(low.grid_mode.min_width_px, MIN_GRID_MODE_SIZE_PX);
+        assert_eq!(low.grid_mode.min_height_px, MIN_GRID_MODE_SIZE_PX);
+        assert_eq!(high.grid_mode.width_percent, MAX_GRID_MODE_REGION_PERCENT);
+        assert_eq!(high.grid_mode.height_percent, MAX_GRID_MODE_REGION_PERCENT);
+        assert_eq!(high.grid_mode.min_width_px, MAX_GRID_MODE_SIZE_PX);
+        assert_eq!(high.grid_mode.min_height_px, MAX_GRID_MODE_SIZE_PX);
+    }
+
+    #[test]
     fn checked_in_config_parses_and_all_default_bindings_are_known() {
         let config = checked_in_config();
 
         assert_eq!(config.system_bindings.toggle_active, "Ctrl+E");
         assert_eq!(config.system_bindings.exit, "Escape");
-        assert_eq!(config.key_bindings.len(), 34);
+        assert_eq!(config.key_bindings, default_key_bindings());
         for (key, action) in &config.key_bindings {
             assert!(KeyChord::parse(key).is_ok(), "{key}");
             assert!(Action::from_string(action).is_some(), "{key} -> {action}");
         }
+        assert_eq!(config.grid_mode, GridModeConfig::default());
     }
 
     #[test]

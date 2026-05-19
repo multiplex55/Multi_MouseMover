@@ -13,11 +13,10 @@ key_bindings = [
     ["S", "move_down"],
     ["D", "move_right"],
     ["LeftShift", "slow_mouse"],
-    ["RightShift", "slow_mouse"],
 
     ["SPACE", "left_click"],
     ["L", "right_click"],
-    [";", "middle_click"],
+    ["RightShift", "middle_click"],
     ["N", "toggle_drag_mode"],
     [".", "click_then_disable"],
 
@@ -26,19 +25,22 @@ key_bindings = [
     ["I", "wheel_left"],
     ["O", "wheel_right"],
 
-    ["C", "mouse_speed_up"],
     ["X", "mouse_speed_down"],
     ["Z", "mouse_speed_reset"],
     ["V", "wheel_speed_up"],
     ["B", "wheel_speed_down"],
-    ["G", "wheel_speed_reset"],
     ["RightAlt+C", "movement_profile_next"],
     ["RightAlt+X", "movement_profile_previous"],
     ["RightAlt+V", "wheel_profile_next"],
     ["RightAlt+B", "wheel_profile_previous"],
 
     ["F", "jump_mode"],
-    ["H", "center_current_monitor"],
+    ["G", "grid_mode"],
+    ["C", "screen_select"],
+    ["H", "navigate_back"],
+    ["Y", "navigate_forward"],
+    ["Q", "disable"],
+    ["P", "disable"],
     ["RightAlt+W", "move_to_top_edge"],
     ["RightAlt+A", "move_to_left_edge"],
     ["RightAlt+S", "move_to_bottom_edge"],
@@ -46,7 +48,7 @@ key_bindings = [
 
     ["RightAlt+R", "reload_config"],
     ["RightAlt+Escape", "panic_reset"],
-    ["Slash", "show_help"]
+    ["/", "show_help"]
 ]
 
 # ---------------------------------------------------------------------------
@@ -64,6 +66,18 @@ polling_rate = 8
 
 # Legacy coarse-grid fallback. Prefer [jump.coarse] for new configs.
 grid_size = { width = 10, height = 10 }
+
+[grid_mode]
+enabled = true
+start_region = "current_monitor"
+width_percent = 0.5
+height_percent = 0.5
+center_on_cursor = true
+min_width_px = 80
+min_height_px = 80
+move_cursor_each_step = true
+line_visible = true
+show_direction_labels = true
 
 # Held movement starts at [mouse_speed].default_speed, then ramps with these
 # legacy acceleration settings.
@@ -108,7 +122,7 @@ flash_indicator_ms = 700
 # Click actions are bound above:
 # - SPACE: left_click
 # - L: right_click
-# - ;: middle_click
+# - RightShift: middle_click
 # - N: toggle_drag_mode
 # - .: click_then_disable
 

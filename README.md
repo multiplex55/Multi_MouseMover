@@ -38,24 +38,28 @@ Action bindings run only while active mode is enabled:
 | `A` | Move left |
 | `S` | Move down |
 | `D` | Move right |
-| `LeftShift` / `RightShift` | Slow held movement |
+| `LeftShift` | Slow held movement |
 | `SPACE` | Left click |
 | `L` | Right click |
-| `;` | Middle click |
+| `RightShift` | Middle click |
 | `N` | Toggle left-button drag mode |
 | `.` | Click, then switch to idle |
 | `,` / `M` | Wheel up / down |
 | `I` / `O` | Wheel left / right |
-| `C` / `X` / `Z` | Mouse speed up / down / reset |
-| `V` / `B` / `G` | Wheel speed up / down / reset |
+| `X` / `Z` | Mouse speed down / reset |
+| `V` / `B` | Wheel speed up / down |
 | `RightAlt+C` / `RightAlt+X` | Next / previous movement profile |
 | `RightAlt+V` / `RightAlt+B` | Next / previous wheel profile |
 | `F` | Jump mode |
-| `H` | Center cursor on current monitor |
+| `G` | Grid mode |
+| `C` | Screen select |
+| `H` | Navigate back |
+| `Y` | Navigate forward |
+| `Q` / `P` | Switch to idle |
 | `RightAlt+W` / `RightAlt+A` / `RightAlt+S` / `RightAlt+D` | Move cursor to screen edge |
 | `RightAlt+R` | Reload `config.toml` |
 | `RightAlt+Escape` | Panic reset |
-| `Slash` | Toggle help tooltip/panel with runtime stats + keybinds |
+| `/` | Toggle help tooltip/panel with runtime stats + keybinds |
 
 ## Active And Idle
 
@@ -73,7 +77,7 @@ Press `N` to toggle left-button drag mode. When drag is on, Multi MouseMover hol
 
 Hold `,`, `M`, `I`, or `O` for repeated vertical or horizontal wheel ticks. Wheel repeat timing comes from `[wheel].tick_interval`; wheel strength comes from the current wheel speed and axis multipliers.
 
-Mouse movement has two layers. `[mouse_speed]` controls the baseline tier changed by `C`, `X`, and `Z`; `acceleration`, `acceleration_rate`, and `top_speed` then shape how held movement ramps while a direction key is down. `LeftShift` or `RightShift` slows movement while held.
+Mouse movement has two layers. `[mouse_speed]` controls the baseline tier changed by `X` and `Z`; `acceleration`, `acceleration_rate`, and `top_speed` then shape how held movement ramps while a direction key is down. `LeftShift` slows movement while held.
 
 Profiles let you swap groups of speed settings at runtime:
 
@@ -181,9 +185,9 @@ hide_threshold_px = 0
 
 `[status_overlay]` controls the compact persistent status indicator. It can show active/idle, drag, slow movement, jump state, speed flashes, wheel state, and final-adjust state.
 
-`[tooltip_overlay]` controls temporary explanatory messages and the larger help panel toggled by `Slash`. Temporary tooltips are short-lived notices for runtime changes such as mouse speed, wheel speed, profile changes, drag, reload, and panic reset. The Slash help panel does not auto-expire; it shows current runtime stats plus configured keybinds until Slash toggles it again, Escape dismisses it, or the app enters an exclusive mode such as jump.
+`[tooltip_overlay]` controls temporary explanatory messages and the larger help panel toggled by `/`. Temporary tooltips are short-lived notices for runtime changes such as mouse speed, wheel speed, profile changes, drag, reload, and panic reset. The help panel does not auto-expire; it shows current runtime stats plus configured keybinds until `/` toggles it again, Escape dismisses it, or the app enters an exclusive mode such as jump.
 
-Use `enabled = false` to disable all tooltip/help overlay rendering, `show_temporary_tooltips = false` to keep Slash help while hiding short runtime notices, and `show_help = false` to keep runtime notices while disabling the Slash help panel. Individual temporary trigger classes can be controlled under `[tooltip_overlay.events]`:
+Use `enabled = false` to disable all tooltip/help overlay rendering, `show_temporary_tooltips = false` to keep `/` help while hiding short runtime notices, and `show_help = false` to keep runtime notices while disabling the help panel. Individual temporary trigger classes can be controlled under `[tooltip_overlay.events]`:
 
 ```toml
 [tooltip_overlay]
