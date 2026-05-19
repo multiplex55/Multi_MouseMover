@@ -1,6 +1,7 @@
-use windows::Win32::Foundation::{POINT, RECT};
+use windows::Win32::Foundation::{BOOL, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, HDC, HMONITOR,
+    MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowRect};
 
@@ -54,6 +55,58 @@ impl From<RECT> for MonitorRect {
     }
 }
 
+pub fn all_monitor_rects(use_work_area: bool) -> Vec<MonitorRect> {
+    let mut monitors = Vec::new();
+    let context = MonitorEnumContext {
+        monitors: &mut monitors,
+        use_work_area,
+    };
+    let mut context = context;
+
+    unsafe {
+        let _ = EnumDisplayMonitors(
+            None,
+            None,
+            Some(enum_monitor_rects),
+            LPARAM(&mut context as *mut MonitorEnumContext<'_> as isize),
+        );
+    }
+
+    sort_monitors_by_position(monitors)
+}
+
+pub fn sort_monitors_by_position(mut monitors: Vec<MonitorRect>) -> Vec<MonitorRect> {
+    monitors.sort_by_key(|monitor| (monitor.left, monitor.top));
+    monitors
+}
+
+pub fn point_in_monitor(point: (i32, i32), monitor: MonitorRect) -> bool {
+    let (x, y) = point;
+    x >= monitor.left && x < monitor.right && y >= monitor.top && y < monitor.bottom
+}
+
+pub fn monitor_containing_point(
+    monitors: &[MonitorRect],
+    point: (i32, i32),
+) -> Option<MonitorRect> {
+    monitors
+        .iter()
+        .copied()
+        .find(|monitor| point_in_monitor(point, *monitor))
+}
+
+pub fn next_monitor_with_wrap(
+    monitors: &[MonitorRect],
+    current_monitor: MonitorRect,
+) -> Option<MonitorRect> {
+    let monitors = sort_monitors_by_position(monitors.to_vec());
+    let current_index = monitors
+        .iter()
+        .position(|monitor| *monitor == current_monitor)?;
+    let next_index = (current_index + 1) % monitors.len();
+    monitors.get(next_index).copied()
+}
+
 pub fn current_monitor_rect_for_cursor(use_work_area: bool) -> Option<MonitorRect> {
     let mut point = POINT::default();
 
@@ -99,6 +152,24 @@ pub fn resolve_jump_start_region_from_parts(
             .or(cursor_monitor)
             .or(Some(virtual_screen)),
     }
+}
+
+struct MonitorEnumContext<'a> {
+    monitors: &'a mut Vec<MonitorRect>,
+    use_work_area: bool,
+}
+
+unsafe extern "system" fn enum_monitor_rects(
+    monitor: HMONITOR,
+    _dc: HDC,
+    _rect: *mut RECT,
+    data: LPARAM,
+) -> BOOL {
+    let context = &mut *(data.0 as *mut MonitorEnumContext<'_>);
+    if let Some(rect) = monitor_rect_from_handle(monitor, context.use_work_area) {
+        context.monitors.push(rect);
+    }
+    true.into()
 }
 
 fn active_window_bounds() -> Option<JumpRegion> {
@@ -188,6 +259,117 @@ mod tests {
         assert_eq!(rect.edge_midpoint(MonitorEdge::Bottom, 8), (300, 791));
         assert_eq!(rect.edge_midpoint(MonitorEdge::Left, 8), (108, 500));
         assert_eq!(rect.edge_midpoint(MonitorEdge::Right, 8), (491, 500));
+    }
+
+    #[test]
+    fn sort_monitors_orders_by_left_then_top() {
+        let monitors = vec![
+            MonitorRect {
+                left: 1920,
+                top: 0,
+                right: 3840,
+                bottom: 1080,
+            },
+            MonitorRect {
+                left: -1280,
+                top: 200,
+                right: 0,
+                bottom: 920,
+            },
+            MonitorRect {
+                left: -1280,
+                top: -520,
+                right: 0,
+                bottom: 200,
+            },
+            MonitorRect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            },
+        ];
+
+        let sorted = sort_monitors_by_position(monitors);
+
+        assert_eq!(
+            sorted
+                .iter()
+                .map(|monitor| (monitor.left, monitor.top))
+                .collect::<Vec<_>>(),
+            vec![(-1280, -520), (-1280, 200), (0, 0), (1920, 0)]
+        );
+    }
+
+    #[test]
+    fn point_in_monitor_includes_top_left_and_excludes_bottom_right_edges() {
+        let monitor = MonitorRect {
+            left: -100,
+            top: -50,
+            right: 100,
+            bottom: 150,
+        };
+
+        assert!(point_in_monitor((-100, -50), monitor));
+        assert!(point_in_monitor((99, 149), monitor));
+        assert!(!point_in_monitor((100, 149), monitor));
+        assert!(!point_in_monitor((99, 150), monitor));
+        assert!(!point_in_monitor((-101, -50), monitor));
+    }
+
+    #[test]
+    fn next_monitor_wraps_after_last_sorted_monitor() {
+        let left = MonitorRect {
+            left: -1280,
+            top: 0,
+            right: 0,
+            bottom: 720,
+        };
+        let primary = MonitorRect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
+        let right = MonitorRect {
+            left: 1920,
+            top: -200,
+            right: 3520,
+            bottom: 700,
+        };
+        let monitors = vec![right, primary, left];
+
+        assert_eq!(next_monitor_with_wrap(&monitors, left), Some(primary));
+        assert_eq!(next_monitor_with_wrap(&monitors, primary), Some(right));
+        assert_eq!(next_monitor_with_wrap(&monitors, right), Some(left));
+    }
+
+    #[test]
+    fn monitor_containment_handles_negative_coordinate_layouts() {
+        let monitors = vec![
+            MonitorRect {
+                left: -1600,
+                top: -900,
+                right: 0,
+                bottom: 0,
+            },
+            MonitorRect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            },
+        ];
+
+        assert_eq!(
+            monitor_containing_point(&monitors, (-800, -450)),
+            Some(monitors[0])
+        );
+        assert_eq!(
+            monitor_containing_point(&monitors, (1200, 900)),
+            Some(monitors[1])
+        );
+        assert_eq!(monitor_containing_point(&monitors, (-1, 0)), None);
     }
 
     fn region(left: i32, top: i32, width: i32, height: i32) -> JumpRegion {

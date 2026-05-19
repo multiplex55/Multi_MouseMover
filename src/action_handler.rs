@@ -1,4 +1,7 @@
-use crate::monitor::{current_monitor_rect_for_cursor, MonitorEdge, MonitorRect};
+use crate::monitor::{
+    all_monitor_rects, current_monitor_rect_for_cursor, monitor_containing_point,
+    next_monitor_with_wrap, MonitorEdge, MonitorRect,
+};
 use crate::{action, app_state::KeyEvent, keyboard::VirtualKey, Config, FinalAdjustConfig};
 use action::Action;
 use enigo::*;
@@ -142,6 +145,7 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     mouse_speed_flash_until: Option<Instant>,
     wheel_speed_flash_until: Option<Instant>,
     pending_notifications: VecDeque<RuntimeNotification>,
+    monitor_rects_provider: fn(bool) -> Vec<MonitorRect>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,7 +198,13 @@ impl<B: MouseBackend> MouseMaster<B> {
             mouse_speed_flash_until: None,
             wheel_speed_flash_until: None,
             pending_notifications: VecDeque::new(),
+            monitor_rects_provider: all_monitor_rects,
         }
+    }
+
+    #[cfg(test)]
+    fn set_monitor_rects_provider(&mut self, provider: fn(bool) -> Vec<MonitorRect>) {
+        self.monitor_rects_provider = provider;
     }
 
     pub fn runtime_snapshot(&self) -> MouseRuntimeSnapshot {
@@ -258,6 +268,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::MoveToLeftEdge => self.move_to_monitor_edge(MonitorEdge::Left),
             Action::MoveToRightEdge => self.move_to_monitor_edge(MonitorEdge::Right),
             Action::CenterCurrentMonitor => self.center_current_monitor(),
+            Action::ScreenSelect => self.select_next_screen(),
             Action::ClickThenDisable => {
                 self.release_left_button_if_held();
                 self.left_click();
@@ -300,7 +311,6 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::JumpMode
             | Action::JumpModeProfile(_)
             | Action::GridMode
-            | Action::ScreenSelect
             | Action::NavigateBack
             | Action::NavigateForward
             | Action::ShowHelp => {}
@@ -611,6 +621,23 @@ impl<B: MouseBackend> MouseMaster<B> {
             let (x, y) = edge_target(rect, edge, self.config.edge_jump.offset_px);
             self.move_mouse_to(x, y);
         }
+    }
+
+    pub fn select_next_screen(&mut self) {
+        let Ok(cursor) = self.backend.location() else {
+            return;
+        };
+
+        let monitors = (self.monitor_rects_provider)(self.config.edge_jump.use_work_area);
+        let Some(current_monitor) = monitor_containing_point(&monitors, cursor) else {
+            return;
+        };
+        let Some(target_monitor) = next_monitor_with_wrap(&monitors, current_monitor) else {
+            return;
+        };
+
+        let (x, y) = target_monitor.center();
+        self.move_mouse_to(x, y);
     }
 
     /// Resets the speed and acceleration counter when motion stops
@@ -1128,6 +1155,38 @@ mod tests {
             self.scrolls.push((length, axis));
             Ok(())
         }
+    }
+
+    fn single_monitor_provider(_use_work_area: bool) -> Vec<MonitorRect> {
+        vec![MonitorRect {
+            left: -100,
+            top: -50,
+            right: 300,
+            bottom: 350,
+        }]
+    }
+
+    fn negative_layout_monitor_provider(_use_work_area: bool) -> Vec<MonitorRect> {
+        vec![
+            MonitorRect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            },
+            MonitorRect {
+                left: -1600,
+                top: -900,
+                right: 0,
+                bottom: 0,
+            },
+            MonitorRect {
+                left: 1920,
+                top: 0,
+                right: 3520,
+                bottom: 900,
+            },
+        ]
     }
 
     fn actions(actions: &[Action]) -> HashSet<Action> {
@@ -1883,6 +1942,30 @@ mod tests {
         mouse.handle_action(Action::MoveDownRight);
 
         assert_eq!(mouse.backend.moves, vec![(110, 210)]);
+    }
+
+    #[test]
+    fn screen_select_single_monitor_centers_current_monitor() {
+        let mut backend = FakeBackend::default();
+        backend.location = (0, 0);
+        let mut mouse = MouseMaster::new_with_backend(test_config(), backend);
+        mouse.set_monitor_rects_provider(single_monitor_provider);
+
+        mouse.handle_action(Action::ScreenSelect);
+
+        assert_eq!(mouse.backend.moves, vec![(100, 150)]);
+    }
+
+    #[test]
+    fn screen_select_moves_to_next_monitor_center_with_wrap() {
+        let mut backend = FakeBackend::default();
+        backend.location = (2000, 100);
+        let mut mouse = MouseMaster::new_with_backend(test_config(), backend);
+        mouse.set_monitor_rects_provider(negative_layout_monitor_provider);
+
+        mouse.handle_action(Action::ScreenSelect);
+
+        assert_eq!(mouse.backend.moves, vec![(-800, -450)]);
     }
 
     #[test]
