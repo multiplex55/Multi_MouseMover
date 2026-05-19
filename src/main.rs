@@ -16,7 +16,7 @@ mod screen_capture;
 
 use action::*;
 use action_handler::*;
-use app_state::{AppCommand, AppState, JumpOverlayResolution, KeyEvent};
+use app_state::{AppCommand, AppState, GridInputUpdate, JumpOverlayResolution, KeyEvent};
 #[cfg(test)]
 use indicator::IndicatorState;
 use indicator::{
@@ -1890,6 +1890,46 @@ fn apply_cursor_between_stages<B: MouseBackend>(
     }
 }
 
+fn initial_grid_region(
+    monitor_region: jump_session::JumpRegion,
+    cursor: (i32, i32),
+    width_percent: f32,
+    height_percent: f32,
+    center_on_cursor: bool,
+) -> Option<jump_session::JumpRegion> {
+    if !monitor_region.is_valid() {
+        return None;
+    }
+
+    let width = ((monitor_region.width as f32 * width_percent).round() as i32)
+        .clamp(1, monitor_region.width);
+    let height = ((monitor_region.height as f32 * height_percent).round() as i32)
+        .clamp(1, monitor_region.height);
+
+    let (center_x, center_y) = if center_on_cursor {
+        cursor
+    } else {
+        monitor_region.center()
+    };
+    let max_left = monitor_region.left + monitor_region.width - width;
+    let max_top = monitor_region.top + monitor_region.height - height;
+
+    Some(jump_session::JumpRegion {
+        left: (center_x - width / 2).clamp(monitor_region.left, max_left),
+        top: (center_y - height / 2).clamp(monitor_region.top, max_top),
+        width,
+        height,
+    })
+}
+
+fn current_cursor_position() -> Option<(i32, i32)> {
+    unsafe {
+        let mut point = POINT::default();
+        GetCursorPos(&mut point).ok()?;
+        Some((point.x, point.y))
+    }
+}
+
 fn set_active_mode(active: bool) {
     let resolution = {
         let mut action_handler = ACTION_HANDLER.write().unwrap();
@@ -1907,7 +1947,7 @@ fn apply_active_mode_transition<B: MouseBackend>(
     if !active {
         action_handler.mouse_master.release_left_button_if_held();
         action_handler.clear_active_keys();
-        app_state.clear_active_action_keys_and_exit_jump_mode();
+        app_state.clear_active_action_keys_and_exit_exclusive_modes();
         app_state.hide_help();
     }
 
@@ -1940,7 +1980,7 @@ fn execute_key_action_command<B: MouseBackend>(
         if is_down {
             action_handler.execute_action(&Action::ClickThenDisable);
             action_handler.clear_active_keys();
-            app_state.clear_active_action_keys_and_exit_jump_mode();
+            app_state.clear_active_action_keys_and_exit_exclusive_modes();
             action_handler.mouse_master.set_active_mode(false);
             app_state.set_active_mode(false);
             clear_help_for_exclusive_mode(app_state);
@@ -1966,7 +2006,7 @@ fn apply_loaded_config<B: MouseBackend>(
     let active = action_handler.mouse_master.current_mode == ModeState::Active;
     action_handler.mouse_master.release_left_button_if_held();
     action_handler.clear_active_keys();
-    app_state.clear_active_action_keys_and_exit_jump_mode();
+    app_state.clear_active_action_keys_and_exit_exclusive_modes();
     app_state.hide_help();
     action_handler
         .mouse_master
@@ -2000,7 +2040,7 @@ fn panic_reset() -> JumpOverlayResolution {
     action_handler.mouse_master.hard_reset_runtime();
     action_handler.mouse_master.push_panic_reset_notification();
     action_handler.clear_active_keys();
-    app_state.clear_active_action_keys_and_exit_jump_mode();
+    app_state.clear_active_action_keys_and_exit_exclusive_modes();
     app_state.hide_help();
     app_state.resolve_jump_overlay()
 }
@@ -2087,6 +2127,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     "[command] EnterJumpMode activation_key={activation_key:?} profile={profile:?}"
                 )
             }
+            AppCommand::EnterGridMode { activation_key } => {
+                println!("[command] EnterGridMode activation_key={activation_key:?}")
+            }
             AppCommand::KeyAction { action, is_down } => {
                 println!(
                     "[command] KeyAction action={action:?} state={}",
@@ -2099,6 +2142,13 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     event.key,
                     if event.is_down { "down" } else { "up" },
                     action
+                )
+            }
+            AppCommand::GridInput(event) => {
+                println!(
+                    "[command] GridInput key={:?} state={}",
+                    event.key,
+                    if event.is_down { "down" } else { "up" }
                 )
             }
         }
@@ -2191,6 +2241,49 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 show_jump_overlay(view);
             }
         }
+        AppCommand::EnterGridMode { activation_key } => {
+            clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+            if !config.grid_mode.enabled {
+                return;
+            }
+
+            let fallback_region = virtual_screen_region();
+            let monitor_region =
+                monitor::resolve_jump_start_region(config.grid_mode.start_region, fallback_region)
+                    .unwrap_or(fallback_region);
+            let cursor = current_cursor_position().unwrap_or_else(|| monitor_region.center());
+            let Some(initial_region) = initial_grid_region(
+                monitor_region,
+                cursor,
+                config.grid_mode.width_percent,
+                config.grid_mode.height_percent,
+                config.grid_mode.center_on_cursor,
+            ) else {
+                return;
+            };
+
+            let view = {
+                let mut app_state = APP_STATE.write().unwrap();
+                app_state
+                    .enter_grid_mode(
+                        monitor_region,
+                        initial_region,
+                        config.grid_mode.min_width_px,
+                        config.grid_mode.min_height_px,
+                        config.grid_mode.move_cursor_each_step,
+                        config.grid_mode.line_visible,
+                        config.grid_mode.show_direction_labels,
+                        activation_key,
+                    )
+                    .then(|| app_state.grid_view())
+                    .flatten()
+            };
+
+            if let Some(view) = view {
+                show_jump_overlay(view);
+            }
+        }
         AppCommand::KeyAction { action, is_down } => {
             let resolution = {
                 let mut action_handler = ACTION_HANDLER.write().unwrap();
@@ -2266,6 +2359,67 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     };
                     sync_jump_overlay(resolution);
                 }
+            }
+        }
+        AppCommand::GridInput(event) => {
+            let (grid_result, view) = {
+                let mut app_state = APP_STATE.write().unwrap();
+                let grid_result = app_state.handle_grid_input(event);
+                let view = match grid_result {
+                    Some(GridInputUpdate::Consumed) | Some(GridInputUpdate::Updated { .. }) => {
+                        app_state.grid_view()
+                    }
+                    Some(GridInputUpdate::Cancelled | GridInputUpdate::Completed { .. }) | None => {
+                        None
+                    }
+                };
+                (grid_result, view)
+            };
+
+            match grid_result {
+                Some(GridInputUpdate::Updated {
+                    region,
+                    move_cursor,
+                }) => {
+                    if move_cursor {
+                        let (x, y) = region.center();
+                        ACTION_HANDLER
+                            .write()
+                            .unwrap()
+                            .mouse_master
+                            .move_mouse_to(x, y);
+                    }
+                    if let Some(view) = view {
+                        update_jump_overlay(view);
+                    }
+                }
+                Some(GridInputUpdate::Consumed) => {
+                    if let Some(view) = view {
+                        update_jump_overlay(view);
+                    }
+                }
+                Some(GridInputUpdate::Cancelled) => {
+                    let resolution = {
+                        let mut action_handler = ACTION_HANDLER.write().unwrap();
+                        let mut app_state = APP_STATE.write().unwrap();
+                        action_handler.clear_active_keys();
+                        app_state.cancel_grid_mode();
+                        app_state.resolve_jump_overlay()
+                    };
+                    sync_jump_overlay(resolution);
+                }
+                Some(GridInputUpdate::Completed { x, y, .. }) => {
+                    let resolution = {
+                        let mut action_handler = ACTION_HANDLER.write().unwrap();
+                        let mut app_state = APP_STATE.write().unwrap();
+                        action_handler.mouse_master.move_mouse_to(x, y);
+                        action_handler.clear_active_keys();
+                        app_state.complete_grid_mode();
+                        app_state.resolve_jump_overlay()
+                    };
+                    sync_jump_overlay(resolution);
+                }
+                None => {}
             }
         }
     }
@@ -2396,7 +2550,7 @@ fn main() {
             action_handler.clear_active_keys();
         }
         if let Ok(mut app_state) = APP_STATE.write() {
-            app_state.clear_active_action_keys_and_exit_jump_mode();
+            app_state.clear_active_action_keys_and_exit_exclusive_modes();
             app_state.hide_help();
         }
         // Drop the hook guard so the keyboard is unhooked
@@ -2636,6 +2790,55 @@ mod tests {
             width: 100,
             height: 100,
         }
+    }
+
+    #[test]
+    fn initial_grid_region_centers_on_cursor_and_clamps_inside_monitor() {
+        let monitor = crate::jump_session::JumpRegion {
+            left: 100,
+            top: 200,
+            width: 400,
+            height: 300,
+        };
+
+        assert_eq!(
+            initial_grid_region(monitor, (120, 220), 0.5, 0.5, true),
+            Some(crate::jump_session::JumpRegion {
+                left: 100,
+                top: 200,
+                width: 200,
+                height: 150,
+            })
+        );
+        assert_eq!(
+            initial_grid_region(monitor, (490, 490), 0.5, 0.5, true),
+            Some(crate::jump_session::JumpRegion {
+                left: 300,
+                top: 350,
+                width: 200,
+                height: 150,
+            })
+        );
+    }
+
+    #[test]
+    fn initial_grid_region_can_center_on_monitor() {
+        let monitor = crate::jump_session::JumpRegion {
+            left: 100,
+            top: 200,
+            width: 400,
+            height: 300,
+        };
+
+        assert_eq!(
+            initial_grid_region(monitor, (120, 220), 0.5, 0.5, false),
+            Some(crate::jump_session::JumpRegion {
+                left: 200,
+                top: 275,
+                width: 200,
+                height: 150,
+            })
+        );
     }
 
     #[test]

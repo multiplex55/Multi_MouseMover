@@ -47,6 +47,12 @@ pub struct FinalAdjustOverlayView {
     pub show_hint: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridOverlayMetadata {
+    pub line_visible: bool,
+    pub show_direction_labels: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct JumpOverlayView {
     pub stage_index: usize,
@@ -60,4 +66,5 @@ pub struct JumpOverlayView {
     pub input: String,
     pub visuals: JumpVisuals,
     pub final_adjust: Option<FinalAdjustOverlayView>,
+    pub grid: Option<GridOverlayMetadata>,
 }

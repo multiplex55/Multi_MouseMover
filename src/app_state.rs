@@ -1,8 +1,11 @@
 use crate::action::Action;
 use crate::action_handler::{final_adjust_control_for_event, FinalAdjustControl};
+use crate::grid_session::GridSession;
 use crate::jump_grid::generate_default_labels;
 use crate::jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
-use crate::jump_view::{FinalAdjustOverlayView, JumpOverlayView, JumpStageMetadata};
+use crate::jump_view::{
+    FinalAdjustOverlayView, GridOverlayMetadata, JumpOverlayView, JumpStageMetadata, JumpVisuals,
+};
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
 use crate::keyboard::VirtualKey;
 #[cfg(test)]
@@ -51,11 +54,15 @@ pub enum AppCommand {
         activation_key: VirtualKey,
         profile: Option<String>,
     },
+    EnterGridMode {
+        activation_key: VirtualKey,
+    },
     KeyAction {
         action: Action,
         is_down: bool,
     },
     JumpInput(KeyEvent, Option<Action>),
+    GridInput(KeyEvent),
 }
 
 #[derive(Debug)]
@@ -66,6 +73,7 @@ pub struct AppState {
     active_keys: HashSet<VirtualKey>,
     active_trigger_chords: HashSet<KeyChord>,
     jump: JumpState,
+    grid: GridState,
     active_mode: bool,
     preserve_global_shortcuts: bool,
     system_bindings: RuntimeSystemBindings,
@@ -85,6 +93,33 @@ pub enum JumpState {
     },
 }
 
+#[derive(Debug)]
+pub enum GridState {
+    Inactive,
+    Active {
+        session: GridSession,
+        activation_key: VirtualKey,
+        activation_key_released: bool,
+        line_visible: bool,
+        show_direction_labels: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridInputUpdate {
+    Consumed,
+    Updated {
+        region: JumpRegion,
+        move_cursor: bool,
+    },
+    Cancelled,
+    Completed {
+        x: i32,
+        y: i32,
+        region: JumpRegion,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum JumpOverlayResolution {
     Hidden,
@@ -100,6 +135,7 @@ impl Default for AppState {
             active_keys: HashSet::new(),
             active_trigger_chords: HashSet::new(),
             jump: JumpState::Inactive,
+            grid: GridState::Inactive,
             active_mode: true,
             preserve_global_shortcuts: true,
             system_bindings: RuntimeSystemBindings::default(),
@@ -162,9 +198,10 @@ impl AppState {
         self.active_trigger_chords.clear();
     }
 
-    pub fn clear_active_action_keys_and_exit_jump_mode(&mut self) {
+    pub fn clear_active_action_keys_and_exit_exclusive_modes(&mut self) {
         self.clear_active_action_keys();
         self.exit_jump_mode();
+        self.exit_grid_mode();
     }
 
     pub fn set_system_bindings(&mut self, system_bindings: RuntimeSystemBindings) {
@@ -197,6 +234,10 @@ impl AppState {
 
     pub fn is_jump_active(&self) -> bool {
         matches!(self.jump, JumpState::Active { .. })
+    }
+
+    pub fn is_grid_active(&self) -> bool {
+        matches!(self.grid, GridState::Active { .. })
     }
 
     pub fn jump_stage_status(&self) -> Option<(usize, usize)> {
@@ -256,6 +297,7 @@ impl AppState {
             return false;
         };
 
+        self.exit_grid_mode();
         self.jump = JumpState::Active {
             session,
             activation_key,
@@ -263,6 +305,44 @@ impl AppState {
             stage_metadata,
             visuals: config.visuals,
             final_adjust_config,
+        };
+        true
+    }
+
+    pub fn enter_grid_mode(
+        &mut self,
+        monitor_bounds: JumpRegion,
+        initial_region: JumpRegion,
+        min_width: i32,
+        min_height: i32,
+        move_cursor_each_step: bool,
+        line_visible: bool,
+        show_direction_labels: bool,
+        activation_key: VirtualKey,
+    ) -> bool {
+        let Some(mut session) = GridSession::start(
+            monitor_bounds,
+            min_width,
+            min_height,
+            Some(move_cursor_each_step),
+        ) else {
+            self.exit_grid_mode();
+            return false;
+        };
+
+        if !initial_region.is_valid() {
+            self.exit_grid_mode();
+            return false;
+        }
+        session.current_region = initial_region;
+
+        self.exit_jump_mode();
+        self.grid = GridState::Active {
+            session,
+            activation_key,
+            activation_key_released: false,
+            line_visible,
+            show_direction_labels,
         };
         true
     }
@@ -352,11 +432,106 @@ impl AppState {
                 back_key: final_adjust_config.back_key.clone(),
                 show_hint: final_adjust_config.show_hint,
             }),
+            grid: None,
+        })
+    }
+
+    pub fn handle_grid_input(&mut self, event: KeyEvent) -> Option<GridInputUpdate> {
+        if self.is_grid_activation_key_event(&event) {
+            return Some(GridInputUpdate::Consumed);
+        }
+
+        let GridState::Active { session, .. } = &mut self.grid else {
+            return None;
+        };
+
+        if !event.is_down {
+            return Some(GridInputUpdate::Consumed);
+        }
+
+        let move_cursor = session.move_cursor_each_step.unwrap_or(false);
+        let update = match event.key {
+            VirtualKey::W => session.shrink_up().map(|region| GridInputUpdate::Updated {
+                region,
+                move_cursor,
+            }),
+            VirtualKey::A => session
+                .shrink_left()
+                .map(|region| GridInputUpdate::Updated {
+                    region,
+                    move_cursor,
+                }),
+            VirtualKey::S => session
+                .shrink_down()
+                .map(|region| GridInputUpdate::Updated {
+                    region,
+                    move_cursor,
+                }),
+            VirtualKey::D => session
+                .shrink_right()
+                .map(|region| GridInputUpdate::Updated {
+                    region,
+                    move_cursor,
+                }),
+            VirtualKey::Backspace => session
+                .undo()
+                .map(|region| GridInputUpdate::Updated {
+                    region,
+                    move_cursor,
+                })
+                .or(Some(GridInputUpdate::Consumed)),
+            VirtualKey::Escape => Some(GridInputUpdate::Cancelled),
+            _ => Some(GridInputUpdate::Consumed),
+        }?;
+
+        if matches!(update, GridInputUpdate::Updated { .. }) && session.is_resolved() {
+            let (x, y) = session.center();
+            let region = session.current_region;
+            return Some(GridInputUpdate::Completed { x, y, region });
+        }
+
+        Some(update)
+    }
+
+    pub fn grid_view(&self) -> Option<JumpOverlayView> {
+        let GridState::Active {
+            session,
+            line_visible,
+            show_direction_labels,
+            ..
+        } = &self.grid
+        else {
+            return None;
+        };
+
+        Some(JumpOverlayView {
+            stage_index: 0,
+            stage_count: 1,
+            stages: Vec::new(),
+            session_region: session.monitor_bounds,
+            target_region: session.current_region,
+            preview_source_region: session.current_region,
+            client_draw_region: session.current_region,
+            grid_size: (2, 2),
+            input: String::new(),
+            visuals: JumpVisuals {
+                selected_region_outline: true,
+                preview_outline: false,
+                active_grid_outline: true,
+                cell_centers: false,
+                final_crosshair: false,
+            },
+            final_adjust: None,
+            grid: Some(GridOverlayMetadata {
+                line_visible: *line_visible,
+                show_direction_labels: *show_direction_labels,
+            }),
         })
     }
 
     pub fn resolve_jump_overlay(&self) -> JumpOverlayResolution {
         self.jump_view()
+            .or_else(|| self.grid_view())
             .map(JumpOverlayResolution::Visible)
             .unwrap_or(JumpOverlayResolution::Hidden)
     }
@@ -365,8 +540,22 @@ impl AppState {
         self.jump = JumpState::Inactive;
     }
 
+    pub fn exit_grid_mode(&mut self) {
+        self.grid = GridState::Inactive;
+    }
+
+    pub fn cancel_grid_mode(&mut self) {
+        self.clear_active_action_keys();
+        self.exit_grid_mode();
+    }
+
+    pub fn complete_grid_mode(&mut self) {
+        self.clear_active_action_keys();
+        self.exit_grid_mode();
+    }
+
     pub fn should_swallow_key(&self, event: &KeyEvent) -> bool {
-        if self.is_jump_active() {
+        if self.is_jump_active() || self.is_grid_active() {
             return true;
         }
 
@@ -395,7 +584,9 @@ impl AppState {
             return;
         }
 
-        if self.is_jump_active() && self.is_toggle_active_key_down_event(&event) {
+        if (self.is_jump_active() || self.is_grid_active())
+            && self.is_toggle_active_key_down_event(&event)
+        {
             self.enqueue_command(AppCommand::ToggleActiveMode);
             return;
         }
@@ -406,6 +597,15 @@ impl AppState {
             }
 
             self.enqueue_command(AppCommand::JumpInput(event, action));
+            return;
+        }
+
+        if self.is_grid_active() {
+            if self.is_grid_activation_key_event(&event) {
+                return;
+            }
+
+            self.enqueue_command(AppCommand::GridInput(event));
             return;
         }
 
@@ -468,6 +668,13 @@ impl AppState {
             return;
         }
 
+        if event.is_down && matches!(action.as_ref(), Some(Action::GridMode)) {
+            self.enqueue_command(AppCommand::EnterGridMode {
+                activation_key: event.key,
+            });
+            return;
+        }
+
         for command in self.commands_for_active_keys(event, action) {
             self.enqueue_command(command);
         }
@@ -504,6 +711,32 @@ impl AppState {
             activation_key_released,
             ..
         } = &mut self.jump
+        else {
+            return false;
+        };
+
+        if event.key != *activation_key {
+            return false;
+        }
+
+        if event.is_down && !*activation_key_released {
+            return true;
+        }
+
+        if !event.is_down {
+            *activation_key_released = true;
+            return true;
+        }
+
+        false
+    }
+
+    fn is_grid_activation_key_event(&mut self, event: &KeyEvent) -> bool {
+        let GridState::Active {
+            activation_key,
+            activation_key_released,
+            ..
+        } = &mut self.grid
         else {
             return false;
         };
@@ -656,6 +889,19 @@ mod tests {
         ));
     }
 
+    fn enter_grid_mode(state: &mut AppState, activation_key: VirtualKey) {
+        assert!(state.enter_grid_mode(
+            jump_region(),
+            jump_region(),
+            25,
+            25,
+            true,
+            true,
+            true,
+            activation_key,
+        ));
+    }
+
     fn final_adjust_config(enabled: bool) -> Config {
         let mut config = Config::default();
         config.jump.mode = crate::JumpMode::Single;
@@ -718,6 +964,14 @@ mod tests {
         enter_jump_mode(&mut state, VirtualKey::J);
 
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::A, true)));
+    }
+
+    #[test]
+    fn grid_input_swallowed() {
+        let mut state = AppState::default();
+        enter_grid_mode(&mut state, VirtualKey::G);
+
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::W, true)));
     }
 
     #[test]
@@ -804,6 +1058,21 @@ mod tests {
             Some(AppCommand::EnterJumpMode {
                 activation_key: VirtualKey::J,
                 profile: None
+            })
+        );
+    }
+
+    #[test]
+    fn grid_binding_routes_to_enter_command() {
+        let mut state = state_with_bound_key(VirtualKey::G);
+        let event = KeyEvent::new(VirtualKey::G, true);
+
+        state.route_key_event(event, Some(Action::GridMode));
+
+        assert_eq!(
+            state.pop_command(),
+            Some(AppCommand::EnterGridMode {
+                activation_key: VirtualKey::G,
             })
         );
     }
@@ -1575,6 +1844,140 @@ mod tests {
             collect_commands(&mut state),
             vec![AppCommand::JumpInput(event, Some(Action::MoveLeft))]
         );
+    }
+
+    #[test]
+    fn movement_keys_route_to_grid_input_while_grid_is_active() {
+        let mut state = AppState::default();
+        enter_grid_mode(&mut state, VirtualKey::G);
+        let event = KeyEvent::new(VirtualKey::W, true);
+
+        state.route_key_event(event, Some(Action::MoveUp));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::GridInput(event)]
+        );
+    }
+
+    #[test]
+    fn entering_grid_exits_jump_and_entering_jump_exits_grid() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::J);
+        assert!(state.is_jump_active());
+
+        enter_grid_mode(&mut state, VirtualKey::G);
+        assert!(!state.is_jump_active());
+        assert!(state.is_grid_active());
+
+        enter_jump_mode(&mut state, VirtualKey::J);
+        assert!(state.is_jump_active());
+        assert!(!state.is_grid_active());
+    }
+
+    #[test]
+    fn grid_mode_owns_wasd_escape_and_backspace() {
+        let mut state = AppState::default();
+        enter_grid_mode(&mut state, VirtualKey::G);
+
+        for key in [
+            VirtualKey::W,
+            VirtualKey::A,
+            VirtualKey::S,
+            VirtualKey::D,
+            VirtualKey::Backspace,
+            VirtualKey::Escape,
+        ] {
+            let event = KeyEvent::new(key, true);
+            state.route_key_event(event, Some(Action::MoveLeft));
+            assert_eq!(
+                state.pop_command(),
+                Some(AppCommand::GridInput(event)),
+                "{key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn grid_activation_key_does_not_immediately_re_exit() {
+        let mut state = AppState::default();
+        enter_grid_mode(&mut state, VirtualKey::G);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::G, true), Some(Action::GridMode));
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(state.is_grid_active());
+    }
+
+    #[test]
+    fn grid_escape_cancels_and_backspace_undoes() {
+        let mut state = AppState::default();
+        enter_grid_mode(&mut state, VirtualKey::G);
+
+        assert_eq!(
+            state.handle_grid_input(KeyEvent::new(VirtualKey::D, true)),
+            Some(GridInputUpdate::Updated {
+                region: JumpRegion {
+                    left: 50,
+                    top: 0,
+                    width: 50,
+                    height: 100,
+                },
+                move_cursor: true,
+            })
+        );
+        assert_eq!(
+            state.handle_grid_input(KeyEvent::new(VirtualKey::Backspace, true)),
+            Some(GridInputUpdate::Updated {
+                region: jump_region(),
+                move_cursor: true,
+            })
+        );
+        assert_eq!(
+            state.handle_grid_input(KeyEvent::new(VirtualKey::Escape, true)),
+            Some(GridInputUpdate::Cancelled)
+        );
+    }
+
+    #[test]
+    fn grid_completion_clears_active_keys_when_exiting() {
+        let mut state = AppState::default();
+        assert!(state.enter_grid_mode(
+            jump_region(),
+            JumpRegion {
+                left: 0,
+                top: 0,
+                width: 50,
+                height: 100,
+            },
+            25,
+            25,
+            true,
+            true,
+            true,
+            VirtualKey::G,
+        ));
+        state.active_keys.insert(VirtualKey::W);
+        state
+            .active_trigger_chords
+            .insert(KeyChord::from_key(VirtualKey::W));
+
+        assert_eq!(
+            state.handle_grid_input(KeyEvent::new(VirtualKey::A, true)),
+            Some(GridInputUpdate::Completed {
+                x: 13,
+                y: 50,
+                region: JumpRegion {
+                    left: 0,
+                    top: 0,
+                    width: 25,
+                    height: 100,
+                },
+            })
+        );
+        state.complete_grid_mode();
+
+        assert!(!state.has_active_action_keys());
+        assert_eq!(state.resolve_jump_overlay(), JumpOverlayResolution::Hidden);
     }
 
     #[test]

@@ -142,6 +142,10 @@ fn draw_mode_for_view(view: &JumpOverlayView) -> DrawMode {
 }
 
 fn format_jump_indicator(view: &JumpOverlayView) -> String {
+    if view.grid.is_some() {
+        return "Grid".to_string();
+    }
+
     if let Some(adjust) = &view.final_adjust {
         if !adjust.show_hint {
             return "Adjust".to_string();
@@ -334,6 +338,16 @@ fn label_render_plan(labels: JumpLabelMetadata, cell_w: i32, cell_h: i32) -> Lab
 }
 
 fn render_branches_for_view(view: &JumpOverlayView) -> JumpRenderBranches {
+    if view.grid.is_some() {
+        return JumpRenderBranches {
+            target_outline: true,
+            preview_outline: false,
+            active_grid_outline: true,
+            cell_centers: false,
+            final_crosshair: false,
+        };
+    }
+
     JumpRenderBranches {
         target_outline: view.visuals.selected_region_outline,
         preview_outline: view.visuals.preview_outline,
@@ -656,6 +670,54 @@ impl JumpOverlay {
         self.draw_rect_outline(hdc, grid_rect, active_grid_outline_color(), 2);
     }
 
+    fn draw_grid_midlines(&self, hdc: HDC, grid_rect: RECT) {
+        unsafe {
+            let pen = CreatePen(PS_SOLID, 1, grid_color());
+            let old_pen = SelectObject(hdc, pen.into());
+            let mid_x = grid_rect.left + (grid_rect.right - grid_rect.left) / 2;
+            let mid_y = grid_rect.top + (grid_rect.bottom - grid_rect.top) / 2;
+            let _ = MoveToEx(hdc, mid_x, grid_rect.top, None);
+            let _ = LineTo(hdc, mid_x, grid_rect.bottom);
+            let _ = MoveToEx(hdc, grid_rect.left, mid_y, None);
+            let _ = LineTo(hdc, grid_rect.right, mid_y);
+            let _ = SelectObject(hdc, old_pen);
+            let _ = DeleteObject(pen.into());
+        }
+    }
+
+    fn draw_grid_direction_labels(&self, hdc: HDC, grid_rect: RECT) {
+        unsafe {
+            let old_text_color = SetTextColor(hdc, label_color());
+            let labels = [
+                (
+                    "W",
+                    grid_rect.left + (grid_rect.right - grid_rect.left) / 2 - 4,
+                    grid_rect.top + 12,
+                ),
+                (
+                    "A",
+                    grid_rect.left + 12,
+                    grid_rect.top + (grid_rect.bottom - grid_rect.top) / 2 - 8,
+                ),
+                (
+                    "S",
+                    grid_rect.left + (grid_rect.right - grid_rect.left) / 2 - 4,
+                    grid_rect.bottom - 24,
+                ),
+                (
+                    "D",
+                    grid_rect.right - 20,
+                    grid_rect.top + (grid_rect.bottom - grid_rect.top) / 2 - 8,
+                ),
+            ];
+            for (label, x, y) in labels {
+                let text: Vec<u16> = label.encode_utf16().collect();
+                let _ = TextOutW(hdc, x, y, &text);
+            }
+            let _ = SetTextColor(hdc, old_text_color);
+        }
+    }
+
     fn draw_cell_centers(
         &self,
         hdc: HDC,
@@ -779,11 +841,19 @@ impl JumpOverlay {
                 if branches.active_grid_outline {
                     self.draw_active_grid_outline(hdc, grid_rect);
                 }
+                if let Some(grid) = view.grid {
+                    if grid.line_visible {
+                        self.draw_grid_midlines(hdc, grid_rect);
+                    }
+                    if grid.show_direction_labels {
+                        self.draw_grid_direction_labels(hdc, grid_rect);
+                    }
+                }
                 if branches.cell_centers || label_plan.center_markers {
                     self.draw_cell_centers(hdc, grid_rect, grid_size, cell_w, cell_h);
                 }
 
-                if label_plan.labels {
+                if view.grid.is_none() && label_plan.labels {
                     let cell_labels = active_stage_metadata(view)
                         .map(|stage| stage.cell_labels.as_slice())
                         .unwrap_or(&[]);
@@ -897,7 +967,8 @@ mod tests {
     };
     use crate::jump_session::JumpRegion;
     use crate::jump_view::{
-        FinalAdjustOverlayView, JumpLabelMetadata, JumpOverlayView, JumpStageMetadata, JumpVisuals,
+        FinalAdjustOverlayView, GridOverlayMetadata, JumpLabelMetadata, JumpOverlayView,
+        JumpStageMetadata, JumpVisuals,
     };
     use crate::screen_capture::ScreenSnapshot;
     use crate::{JumpAimPoint, JumpLabelConfig, JumpTargetRegionMode, PreviewEdgeBehavior};
@@ -934,6 +1005,29 @@ mod tests {
         });
 
         assert_eq!(format_jump_indicator(&view), "Adjust");
+    }
+
+    #[test]
+    fn grid_indicator_and_branches_use_grid_overlay_mode() {
+        let mut view = view(0, 1, "");
+        view.grid = Some(GridOverlayMetadata {
+            line_visible: true,
+            show_direction_labels: true,
+        });
+        view.visuals.selected_region_outline = false;
+        view.visuals.active_grid_outline = false;
+
+        assert_eq!(format_jump_indicator(&view), "Grid");
+        assert_eq!(
+            render_branches_for_view(&view),
+            JumpRenderBranches {
+                target_outline: true,
+                preview_outline: false,
+                active_grid_outline: true,
+                cell_centers: false,
+                final_crosshair: false,
+            }
+        );
     }
 
     #[test]
@@ -1457,6 +1551,7 @@ mod tests {
                 final_crosshair: true,
             },
             final_adjust: None,
+            grid: None,
         }
     }
 }
