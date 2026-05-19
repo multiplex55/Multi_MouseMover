@@ -930,6 +930,31 @@ mod tests {
     }
 
     #[test]
+    fn two_stage_session_uses_selected_stage_one_cell_as_stage_two_region() {
+        let mut session = JumpSession::new(
+            base_region(),
+            vec![JumpStage::new(10, 10), JumpStage::new(5, 5)],
+        )
+        .unwrap();
+
+        let stage_one_cell = JumpRegion {
+            left: 200,
+            top: 100,
+            width: 100,
+            height: 100,
+        };
+        assert_eq!(
+            enter_code(&mut session, &[VirtualKey::B, VirtualKey::C]),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: stage_one_cell,
+            })
+        );
+        assert_eq!(session.current_region, stage_one_cell);
+        assert_eq!(session.region_history, vec![base_region(), stage_one_cell]);
+    }
+
+    #[test]
     fn subdivision_uses_target_region_state_independent_of_preview_context() {
         let stages = vec![
             JumpStage::new(5, 5),

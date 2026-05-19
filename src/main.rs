@@ -560,7 +560,7 @@ enum JumpMode {
 
 impl Default for JumpMode {
     fn default() -> Self {
-        Self::Single
+        Self::Precision
     }
 }
 
@@ -605,7 +605,7 @@ pub enum JumpStartRegion {
 
 impl Default for JumpStartRegion {
     fn default() -> Self {
-        Self::VirtualScreen
+        Self::CurrentMonitor
     }
 }
 
@@ -649,22 +649,22 @@ struct JumpConfig {
 impl Default for JumpConfig {
     fn default() -> Self {
         Self {
-            mode: JumpMode::Single,
+            mode: JumpMode::Precision,
             cursor_between_stages: CursorBetweenStagesMode::None,
-            start_region: JumpStartRegion::VirtualScreen,
+            start_region: JumpStartRegion::CurrentMonitor,
             preview_edge_behavior: PreviewEdgeBehavior::Clamp,
             visuals: JumpVisualsConfig::default(),
             coarse: JumpStageConfig::missing_coarse(),
             fine: JumpStageConfig {
-                enabled: false,
+                enabled: true,
                 width: 5,
                 height: 5,
                 aim_point: JumpAimPoint::Center,
                 aim_offset_x_px: 0,
                 aim_offset_y_px: 0,
                 target_margin_percent: 0,
-                visual_context_margin_percent: 10,
-                zoom_scale: 1.5,
+                visual_context_margin_percent: 0,
+                zoom_scale: 1.0,
                 target_region_mode: JumpTargetRegionMode::ExactRegion,
                 preview_edge_behavior: None,
                 labels: JumpLabelConfig::default(),
@@ -2684,6 +2684,28 @@ mod tests {
     }
 
     #[test]
+    fn default_jump_config_uses_current_monitor_two_stage_grid_without_zoom() {
+        let config = parse_config("");
+
+        assert_eq!(config.jump.mode, JumpMode::Precision);
+        assert_eq!(config.jump.start_region, JumpStartRegion::CurrentMonitor);
+        assert!(config.jump.coarse.enabled);
+        assert!(config.jump.fine.enabled);
+        assert!(!config.jump.precise.enabled);
+        assert_eq!(
+            config.jump.coarse.target_region_mode,
+            JumpTargetRegionMode::ExactRegion
+        );
+        assert_eq!(
+            config.jump.fine.target_region_mode,
+            JumpTargetRegionMode::ExactRegion
+        );
+        assert_eq!(config.jump.coarse.zoom_scale, 1.0);
+        assert_eq!(config.jump.fine.zoom_scale, 1.0);
+        assert_eq!(config.jump.fine.visual_context_margin_percent, 0);
+    }
+
+    #[test]
     fn tooltip_overlay_defaults_when_section_is_missing() {
         let config = parse_config("");
 
@@ -3209,7 +3231,7 @@ mod tests {
     }
 
     #[test]
-    fn jump_stage_zoom_defaults_are_per_stage() {
+    fn jump_stage_zoom_defaults_keep_enabled_stages_unzoomed() {
         let config = Config::default().normalize().unwrap();
 
         assert_eq!(
@@ -3221,7 +3243,7 @@ mod tests {
             config.jump.fine.target_region_mode,
             JumpTargetRegionMode::ExactRegion
         );
-        assert_eq!(config.jump.fine.zoom_scale, 1.5);
+        assert_eq!(config.jump.fine.zoom_scale, 1.0);
         assert_eq!(
             config.jump.precise.target_region_mode,
             JumpTargetRegionMode::ExactRegion

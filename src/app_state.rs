@@ -1,8 +1,6 @@
 use crate::action::Action;
 use crate::action_handler::{final_adjust_control_for_event, FinalAdjustControl};
-use crate::jump_session::{
-    expand_region_within, JumpRegion, JumpSession, JumpSessionUpdate, JumpStage,
-};
+use crate::jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
 use crate::jump_view::{FinalAdjustOverlayView, JumpOverlayView, JumpStageMetadata};
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
 use crate::keyboard::VirtualKey;
@@ -287,16 +285,24 @@ impl AppState {
         };
 
         if session.final_adjust.is_some() {
-            return match final_adjust_control_for_event(&event, action, final_adjust_config) {
+            let update = match final_adjust_control_for_event(&event, action, final_adjust_config) {
                 Some(FinalAdjustControl::Nudge { dx, dy }) => session.nudge_final_adjust(dx, dy),
                 Some(FinalAdjustControl::Confirm) => session.confirm_final_adjust(),
                 Some(FinalAdjustControl::Cancel) => session.cancel_final_adjust(),
                 Some(FinalAdjustControl::Back) => session.back_from_final_adjust(),
                 None => Some(JumpSessionUpdate::Consumed),
             };
+            if matches!(update, Some(JumpSessionUpdate::Cancelled)) {
+                self.exit_jump_mode();
+            }
+            return update;
         }
 
         let update = session.handle_key(event.key, event.is_down);
+        if matches!(update, Some(JumpSessionUpdate::Cancelled)) {
+            self.exit_jump_mode();
+            return update;
+        }
         if final_adjust_config.enabled {
             if let Some(JumpSessionUpdate::Completed { x, y, region }) = update {
                 return Some(session.begin_final_adjust(x, y, region));
@@ -317,24 +323,10 @@ impl AppState {
             return None;
         };
 
-        let visual_context_margin_percent = stage_metadata
-            .get(session.stage_index)
-            .map(|stage| stage.visual_context_margin_percent)
-            .unwrap_or(0);
-        let session_region = session.current_region;
+        let session_region = session.session_region;
         let target_region = session.current_region;
-        let preview_source_region = expand_region_within(
-            target_region,
-            visual_context_margin_percent,
-            session.session_region,
-        )
-        .unwrap_or(target_region);
-        let client_draw_region = JumpRegion {
-            left: 0,
-            top: 0,
-            width: session.session_region.width,
-            height: session.session_region.height,
-        };
+        let preview_source_region = target_region;
+        let client_draw_region = target_region;
 
         Some(JumpOverlayView {
             stage_index: session.stage_index,
@@ -659,6 +651,7 @@ mod tests {
 
     fn final_adjust_config(enabled: bool) -> Config {
         let mut config = Config::default();
+        config.jump.mode = crate::JumpMode::Single;
         config.final_adjust.enabled = enabled;
         config.final_adjust.small_step_px = 2;
         config.final_adjust.large_step_px = 9;
@@ -1018,6 +1011,86 @@ mod tests {
             state.handle_jump_input(KeyEvent::new(VirtualKey::Escape, true), None),
             Some(JumpSessionUpdate::Cancelled)
         );
+        assert!(!state.is_jump_active());
+        assert_eq!(state.resolve_jump_overlay(), JumpOverlayResolution::Hidden);
+    }
+
+    #[test]
+    fn default_jump_config_starts_with_two_enabled_stages() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::F);
+
+        let view = state.jump_view().unwrap();
+        assert_eq!(view.stage_count, 2);
+        assert_eq!(view.stages.len(), 2);
+        assert_eq!(view.stage_index, 0);
+    }
+
+    #[test]
+    fn valid_default_label_advances_then_completes() {
+        let config = Config::default().normalize().unwrap();
+        let mut state = AppState::default();
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::F
+        ));
+
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::J, true), None),
+            Some(JumpSessionUpdate::StageAdvanced {
+                stage_index: 1,
+                region: JumpRegion {
+                    left: 90,
+                    top: 0,
+                    width: 10,
+                    height: 10,
+                },
+            })
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None),
+            Some(JumpSessionUpdate::Completed {
+                x: 91,
+                y: 1,
+                region: JumpRegion {
+                    left: 90,
+                    top: 0,
+                    width: 2,
+                    height: 2,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn default_stage_two_view_region_is_selected_stage_one_cell() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::F);
+
+        state.handle_jump_input(KeyEvent::new(VirtualKey::A, true), None);
+        state.handle_jump_input(KeyEvent::new(VirtualKey::J, true), None);
+
+        let selected_cell = JumpRegion {
+            left: 90,
+            top: 0,
+            width: 10,
+            height: 10,
+        };
+        let view = state.jump_view().unwrap();
+        assert_eq!(view.stage_index, 1);
+        assert_eq!(view.target_region, selected_cell);
+        assert_eq!(view.preview_source_region, selected_cell);
+        assert_eq!(view.client_draw_region, selected_cell);
     }
 
     #[test]
@@ -1174,7 +1247,7 @@ mod tests {
         let view = state.jump_view().unwrap();
 
         assert_eq!(view.stage_index, 0);
-        assert_eq!(view.stage_count, 1);
+        assert_eq!(view.stage_count, 2);
         assert_eq!(view.session_region, jump_region());
         assert_eq!(view.target_region, jump_region());
         assert_eq!(view.preview_source_region, jump_region());
@@ -1189,7 +1262,7 @@ mod tests {
         );
         assert_eq!(view.grid_size, (10, 10));
         assert_eq!(view.input, "");
-        assert_eq!(view.stages.len(), 1);
+        assert_eq!(view.stages.len(), 2);
         assert_eq!(
             view.stages[0].target_region_mode,
             crate::JumpTargetRegionMode::ExactRegion
@@ -1197,6 +1270,8 @@ mod tests {
         assert_eq!(view.stages[0].target_margin_percent, 0);
         assert_eq!(view.stages[0].visual_context_margin_percent, 0);
         assert_eq!(view.stages[0].zoom_scale, 1.0);
+        assert_eq!(view.stages[1].visual_context_margin_percent, 0);
+        assert_eq!(view.stages[1].zoom_scale, 1.0);
     }
 
     #[test]
@@ -1278,7 +1353,7 @@ mod tests {
     }
 
     #[test]
-    fn jump_view_exposes_distinct_context_region_without_expanding_target() {
+    fn jump_view_keeps_stage_two_preview_region_exact_despite_context_config() {
         let mut config = Config::default();
         config.jump.mode = crate::JumpMode::Precision;
         config.jump.coarse.width = 5;
@@ -1315,17 +1390,18 @@ mod tests {
         );
 
         let view = state.jump_view().unwrap();
-        assert_eq!(view.session_region, view.target_region);
-        assert_ne!(view.preview_source_region, view.target_region);
+        assert_eq!(view.session_region, jump_region());
         assert_eq!(
-            view.preview_source_region,
+            view.target_region,
             JumpRegion {
-                left: 19,
-                top: 19,
-                width: 22,
-                height: 22,
+                left: 20,
+                top: 20,
+                width: 20,
+                height: 20,
             }
         );
+        assert_eq!(view.preview_source_region, view.target_region);
+        assert_eq!(view.client_draw_region, view.target_region);
     }
 
     #[test]
@@ -1489,6 +1565,20 @@ mod tests {
         assert_eq!(
             collect_commands(&mut state),
             vec![AppCommand::JumpInput(event, None)]
+        );
+    }
+
+    #[test]
+    fn movement_keys_route_to_jump_input_while_jump_is_active() {
+        let mut state = AppState::default();
+        enter_jump_mode(&mut state, VirtualKey::F);
+        let event = KeyEvent::new(VirtualKey::Left, true);
+
+        state.route_key_event(event, Some(Action::MoveLeft));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::JumpInput(event, Some(Action::MoveLeft))]
         );
     }
 

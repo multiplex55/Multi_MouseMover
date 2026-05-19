@@ -60,6 +60,16 @@ fn region_to_rect(region: JumpRegion) -> RECT {
     }
 }
 
+fn screen_region_to_overlay_client(region: JumpRegion) -> JumpRegion {
+    let screen = ScreenRect::from_virtual_screen();
+    JumpRegion {
+        left: region.left - screen.left,
+        top: region.top - screen.top,
+        width: region.width,
+        height: region.height,
+    }
+}
+
 fn overlay_colorkey() -> COLORREF {
     RGB(0, 0, 0)
 }
@@ -99,13 +109,11 @@ fn cell_center_color() -> COLORREF {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransparencyMode {
     ColorKey { color: COLORREF, alpha: u8 },
-    Opaque { alpha: u8 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DrawMode {
     TransparentGrid,
-    MagnifiedPreview,
 }
 
 fn overlay_ex_style() -> WINDOW_EX_STYLE {
@@ -125,19 +133,13 @@ fn apply_layered_attributes(hwnd: HWND, mode: TransparencyMode) {
             TransparencyMode::ColorKey { color, alpha } => {
                 let _ = SetLayeredWindowAttributes(hwnd, color, alpha, LWA_COLORKEY);
             }
-            TransparencyMode::Opaque { alpha } => {
-                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
-            }
         }
     }
 }
 
 fn draw_mode_for_view(view: &JumpOverlayView) -> DrawMode {
-    if view.stage_index > 0 {
-        DrawMode::MagnifiedPreview
-    } else {
-        DrawMode::TransparentGrid
-    }
+    let _ = view;
+    DrawMode::TransparentGrid
 }
 
 fn format_jump_indicator(view: &JumpOverlayView) -> String {
@@ -411,6 +413,10 @@ fn active_stage_metadata(view: &JumpOverlayView) -> Option<&JumpStageMetadata> {
 }
 
 fn preview_source_region_for_view(view: &JumpOverlayView) -> JumpRegion {
+    if draw_mode_for_view(view) == DrawMode::TransparentGrid {
+        return view.preview_source_region;
+    }
+
     active_stage_metadata(view)
         .and_then(|stage| {
             let base_region = expand_region_within(
@@ -562,22 +568,16 @@ impl JumpOverlay {
     }
 
     fn effective_draw_mode(&self) -> DrawMode {
-        let Some(view) = &self.view else {
-            return DrawMode::TransparentGrid;
-        };
-        match (draw_mode_for_view(view), self.snapshot.as_ref()) {
-            (DrawMode::MagnifiedPreview, Some(_)) => DrawMode::MagnifiedPreview,
-            _ => DrawMode::TransparentGrid,
-        }
+        self.view
+            .as_ref()
+            .map(draw_mode_for_view)
+            .unwrap_or(DrawMode::TransparentGrid)
     }
 
     fn apply_view_layering(&self) {
         if let Some(hwnd) = self.hwnd {
             let mode = match self.effective_draw_mode() {
                 DrawMode::TransparentGrid => transparency_mode(),
-                DrawMode::MagnifiedPreview => TransparencyMode::Opaque {
-                    alpha: OVERLAY_ALPHA,
-                },
             };
             apply_layered_attributes(hwnd, mode);
         }
@@ -594,7 +594,7 @@ impl JumpOverlay {
 
     fn client_draw_rect(&self, view: &JumpOverlayView, client_rect: RECT) -> JumpRegion {
         if view.client_draw_region.is_valid() {
-            view.client_draw_region
+            screen_region_to_overlay_client(view.client_draw_region)
         } else {
             JumpRegion {
                 left: client_rect.left,
@@ -709,48 +709,13 @@ impl JumpOverlay {
     }
 
     fn draw_background(&self, hdc: HDC, client_rect: &RECT, view: &JumpOverlayView) {
+        let _ = view;
         unsafe {
             match self.effective_draw_mode() {
                 DrawMode::TransparentGrid => {
                     let bg_brush = CreateSolidBrush(overlay_colorkey());
                     let _ = FillRect(hdc, client_rect, bg_brush);
                     let _ = DeleteObject(bg_brush.into());
-                }
-                DrawMode::MagnifiedPreview => {
-                    if let Some(snapshot) = &self.snapshot {
-                        let _ = BitBlt(
-                            hdc,
-                            0,
-                            0,
-                            snapshot.width,
-                            snapshot.height,
-                            Some(snapshot.hdc()),
-                            0,
-                            0,
-                            SRCCOPY,
-                        );
-
-                        let src = preview_source_rect(view, snapshot);
-                        let src_w = src.right - src.left;
-                        let src_h = src.bottom - src.top;
-                        if src_w > 0 && src_h > 0 {
-                            let draw_region = self.client_draw_rect(view, *client_rect);
-                            let _ = SetStretchBltMode(hdc, HALFTONE);
-                            let _ = StretchBlt(
-                                hdc,
-                                draw_region.left,
-                                draw_region.top,
-                                draw_region.width,
-                                draw_region.height,
-                                Some(snapshot.hdc()),
-                                snapshot.source_x(src.left),
-                                snapshot.source_y(src.top),
-                                src_w,
-                                src_h,
-                                SRCCOPY,
-                            );
-                        }
-                    }
                 }
             }
         }
@@ -990,10 +955,22 @@ mod tests {
     }
 
     #[test]
-    fn later_stages_use_magnified_preview() {
+    fn later_stages_remain_transparent_grid() {
         assert_eq!(
             draw_mode_for_view(&view(1, 2, "")),
-            DrawMode::MagnifiedPreview
+            DrawMode::TransparentGrid
+        );
+    }
+
+    #[test]
+    fn overlay_mode_remains_transparent_grid_for_both_default_stages() {
+        assert_eq!(
+            draw_mode_for_view(&view(0, 2, "")),
+            DrawMode::TransparentGrid
+        );
+        assert_eq!(
+            draw_mode_for_view(&view(1, 2, "")),
+            DrawMode::TransparentGrid
         );
     }
 
@@ -1210,7 +1187,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_source_region_uses_visual_context_margin() {
+    fn transparent_preview_source_region_ignores_visual_context_margin() {
         let mut view = view(1, 2, "");
         view.target_region = JumpRegion {
             left: 25,
@@ -1245,16 +1222,16 @@ mod tests {
         assert_eq!(
             preview_source_region_for_view(&view),
             JumpRegion {
-                left: 17,
-                top: 31,
-                width: 56,
-                height: 28,
+                left: 25,
+                top: 35,
+                width: 40,
+                height: 20,
             }
         );
     }
 
     #[test]
-    fn preview_source_region_area_decreases_as_zoom_increases() {
+    fn transparent_preview_source_region_ignores_zoom_scale() {
         let mut low_zoom = view(1, 2, "");
         low_zoom.target_region = JumpRegion {
             left: 100,
@@ -1289,32 +1266,13 @@ mod tests {
 
         let low_region = preview_source_region_for_view(&low_zoom);
         let high_region = preview_source_region_for_view(&high_zoom);
-        let low_area = low_region.width * low_region.height;
-        let high_area = high_region.width * high_region.height;
 
-        assert!(high_area < low_area);
-        assert_eq!(
-            low_region,
-            JumpRegion {
-                left: 50,
-                top: 60,
-                width: 200,
-                height: 160,
-            }
-        );
-        assert_eq!(
-            high_region,
-            JumpRegion {
-                left: 100,
-                top: 100,
-                width: 100,
-                height: 80,
-            }
-        );
+        assert_eq!(low_region, low_zoom.preview_source_region);
+        assert_eq!(high_region, high_zoom.preview_source_region);
     }
 
     #[test]
-    fn preview_edge_behavior_shifts_source_into_snapshot() {
+    fn transparent_preview_edge_behavior_does_not_shift_source() {
         let mut view = view(1, 2, "");
         view.target_region = JumpRegion {
             left: 5,
@@ -1343,8 +1301,8 @@ mod tests {
             RECT {
                 left: 0,
                 top: 0,
-                right: 35,
-                bottom: 35
+                right: 100,
+                bottom: 100
             }
         );
     }
