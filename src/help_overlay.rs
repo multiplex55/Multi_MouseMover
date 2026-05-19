@@ -721,6 +721,11 @@ fn format_action(action: &Action) -> String {
         Action::SlowMouse => "Slow mouse".to_string(),
         Action::JumpMode => "Jump mode".to_string(),
         Action::JumpModeProfile(profile) => format!("Jump mode profile: {profile}"),
+        Action::GridMode => "Grid mode".to_string(),
+        Action::ScreenSelect => "Screen select".to_string(),
+        Action::NavigateBack => "Navigate back".to_string(),
+        Action::NavigateForward => "Navigate forward".to_string(),
+        Action::Disable => "Disable".to_string(),
         Action::ShowHelp => "Show help".to_string(),
     }
 }
@@ -763,10 +768,16 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::MoveToRightEdge
         | Action::CenterCurrentMonitor
         | Action::JumpMode
-        | Action::JumpModeProfile(_) => HelpBindingCategory::Jump,
-        Action::Exit | Action::ReloadConfig | Action::PanicReset | Action::ShowHelp => {
-            HelpBindingCategory::System
-        }
+        | Action::JumpModeProfile(_)
+        | Action::GridMode
+        | Action::ScreenSelect
+        | Action::NavigateBack
+        | Action::NavigateForward => HelpBindingCategory::Jump,
+        Action::Exit
+        | Action::ReloadConfig
+        | Action::PanicReset
+        | Action::Disable
+        | Action::ShowHelp => HelpBindingCategory::System,
     }
 }
 

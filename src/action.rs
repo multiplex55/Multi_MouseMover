@@ -54,6 +54,11 @@ pub enum Action {
     SlowMouse,
     JumpMode,
     JumpModeProfile(String),
+    GridMode,
+    ScreenSelect,
+    NavigateBack,
+    NavigateForward,
+    Disable,
     ShowHelp,
 }
 
@@ -103,7 +108,12 @@ impl Action {
             "panic_reset" => Some(Self::PanicReset),
             "slow_mouse" => Some(Self::SlowMouse),
             "jump_mode" => Some(Self::JumpMode),
-            "show_help" | "help" | "toggle_help" => Some(Self::ShowHelp),
+            "grid_mode" | "grid" => Some(Self::GridMode),
+            "screen_select" | "select_screen" => Some(Self::ScreenSelect),
+            "navigate_back" | "browser_back" => Some(Self::NavigateBack),
+            "navigate_forward" | "browser_forward" => Some(Self::NavigateForward),
+            "disable" | "disable_app" | "idle_mode" => Some(Self::Disable),
+            "show_help" | "help" | "toggle_help" | "hints" | "show_hints" => Some(Self::ShowHelp),
             action
                 if action.starts_with("movement_profile:")
                     || action.starts_with("mouse_profile:")
@@ -205,6 +215,11 @@ mod tests {
             ("move_to_bottom_edge", Action::MoveToBottomEdge),
             ("move_to_left_edge", Action::MoveToLeftEdge),
             ("move_to_right_edge", Action::MoveToRightEdge),
+            ("grid_mode", Action::GridMode),
+            ("screen_select", Action::ScreenSelect),
+            ("navigate_back", Action::NavigateBack),
+            ("navigate_forward", Action::NavigateForward),
+            ("disable", Action::Disable),
             ("show_help", Action::ShowHelp),
         ];
 
@@ -225,8 +240,16 @@ mod tests {
             ("drag_mode", Action::ToggleDragMode),
             ("toggle_left_drag", Action::ToggleDragMode),
             ("toggle_left_button_hold", Action::ToggleDragMode),
+            ("grid", Action::GridMode),
+            ("select_screen", Action::ScreenSelect),
+            ("browser_back", Action::NavigateBack),
+            ("browser_forward", Action::NavigateForward),
+            ("disable_app", Action::Disable),
+            ("idle_mode", Action::Disable),
             ("help", Action::ShowHelp),
             ("toggle_help", Action::ShowHelp),
+            ("hints", Action::ShowHelp),
+            ("show_hints", Action::ShowHelp),
         ];
 
         for (input, expected) in cases {
@@ -242,6 +265,12 @@ mod tests {
             ("cLiCk_ThEn_DiSaBlE", Action::ClickThenDisable),
             ("WHEEL_SPEED_DOWN", Action::WheelSpeedDown),
             ("Jump_Mode", Action::JumpMode),
+            ("GRID_MODE", Action::GridMode),
+            ("Select_Screen", Action::ScreenSelect),
+            ("BROWSER_BACK", Action::NavigateBack),
+            ("browser_FORWARD", Action::NavigateForward),
+            ("Idle_Mode", Action::Disable),
+            ("SHOW_HINTS", Action::ShowHelp),
         ];
 
         for (input, expected) in cases {
@@ -313,6 +342,11 @@ mod tests {
             Action::PanicReset,
             Action::SlowMouse,
             Action::JumpMode,
+            Action::GridMode,
+            Action::ScreenSelect,
+            Action::NavigateBack,
+            Action::NavigateForward,
+            Action::Disable,
             Action::ShowHelp,
         ];
 
@@ -364,6 +398,11 @@ mod tests {
             Action::ReloadConfig,
             Action::PanicReset,
             Action::JumpMode,
+            Action::GridMode,
+            Action::ScreenSelect,
+            Action::NavigateBack,
+            Action::NavigateForward,
+            Action::Disable,
             Action::ShowHelp,
         ];
 

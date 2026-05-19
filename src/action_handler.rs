@@ -297,7 +297,14 @@ impl<B: MouseBackend> MouseMaster<B> {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
             Action::ReloadConfig => self.push_config_reload_notification(),
-            Action::JumpMode | Action::JumpModeProfile(_) | Action::ShowHelp => {}
+            Action::JumpMode
+            | Action::JumpModeProfile(_)
+            | Action::GridMode
+            | Action::ScreenSelect
+            | Action::NavigateBack
+            | Action::NavigateForward
+            | Action::ShowHelp => {}
+            Action::Disable => self.set_active_mode(false),
             Action::PanicReset => {
                 self.hard_reset_runtime();
                 self.push_panic_reset_notification();
