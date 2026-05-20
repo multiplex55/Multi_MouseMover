@@ -70,8 +70,8 @@ grid_size = { width = 10, height = 10 }
 [grid_mode]
 enabled = true
 start_region = "current_monitor"
-width_percent = 0.5
-height_percent = 0.5
+width_percent = 1.0
+height_percent = 1.0
 center_on_cursor = true
 min_width_px = 80
 min_height_px = 80
