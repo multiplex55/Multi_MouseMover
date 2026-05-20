@@ -719,14 +719,14 @@ fn format_action(action: &Action) -> String {
         Action::ReloadConfig => "Reload config".to_string(),
         Action::PanicReset => "Panic reset".to_string(),
         Action::SlowMouse => "Slow mouse".to_string(),
-        Action::JumpMode => "Jump mode".to_string(),
+        Action::JumpMode => "Jump".to_string(),
         Action::JumpModeProfile(profile) => format!("Jump mode profile: {profile}"),
-        Action::GridMode => "Grid mode".to_string(),
+        Action::GridMode => "Grid".to_string(),
         Action::ScreenSelect => "Screen select".to_string(),
         Action::NavigateBack => "Navigate back".to_string(),
         Action::NavigateForward => "Navigate forward".to_string(),
         Action::Disable => "Disable".to_string(),
-        Action::ShowHelp => "Show help".to_string(),
+        Action::ShowHelp => "Hints / Help".to_string(),
     }
 }
 
@@ -811,10 +811,39 @@ mod tests {
             stats: HelpRuntimeStats::default(),
             bindings: vec![HelpBinding {
                 key: "H".to_string(),
-                action: "Show help".to_string(),
+                action: "Hints / Help".to_string(),
                 category: HelpBindingCategory::System,
             }],
             help_max_bindings: TooltipOverlayConfig::default().help_max_bindings,
+        }
+    }
+
+    #[test]
+    fn format_action_uses_ui_labels_for_mode_navigation_and_help_actions() {
+        let cases = [
+            (Action::JumpMode, "Jump"),
+            (Action::GridMode, "Grid"),
+            (Action::ScreenSelect, "Screen select"),
+            (Action::NavigateBack, "Navigate back"),
+            (Action::NavigateForward, "Navigate forward"),
+            (Action::Disable, "Disable"),
+            (Action::ShowHelp, "Hints / Help"),
+        ];
+
+        for (action, expected) in cases {
+            let label = format_action(&action);
+            assert_eq!(label, expected);
+        }
+
+        for (action, raw_name) in [
+            (Action::JumpMode, "JumpMode"),
+            (Action::GridMode, "GridMode"),
+            (Action::ScreenSelect, "ScreenSelect"),
+            (Action::NavigateBack, "NavigateBack"),
+            (Action::NavigateForward, "NavigateForward"),
+            (Action::ShowHelp, "ShowHelp"),
+        ] {
+            assert_ne!(format_action(&action), raw_name);
         }
     }
 
@@ -828,12 +857,36 @@ mod tests {
         assert!(view
             .bindings
             .iter()
-            .any(|binding| { binding.key == "F" && binding.action == "Jump mode" }));
+            .any(|binding| { binding.key == "F" && binding.action == "Jump" }));
         assert!(view
             .bindings
             .iter()
-            .any(|binding| { binding.key == "H" && binding.action == "Show help" }));
+            .any(|binding| { binding.key == "H" && binding.action == "Hints / Help" }));
         assert_eq!(view.stats, HelpRuntimeStats::default());
+    }
+
+    #[test]
+    fn help_lines_include_formatted_action_labels() {
+        let view = help_view_from_bindings([
+            (KeyChord::from_key(VirtualKey::F), Action::JumpMode),
+            (KeyChord::from_key(VirtualKey::G), Action::GridMode),
+            (KeyChord::from_key(VirtualKey::S), Action::ScreenSelect),
+            (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
+        ]);
+
+        let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
+
+        for expected in [
+            "F  -  Jump",
+            "G  -  Grid",
+            "S  -  Screen select",
+            "H  -  Hints / Help",
+        ] {
+            assert!(lines.contains(expected), "{expected}");
+        }
+        for raw_name in ["JumpMode", "GridMode", "ScreenSelect", "ShowHelp"] {
+            assert!(!lines.contains(raw_name), "{raw_name}");
+        }
     }
 
     #[test]
@@ -913,7 +966,7 @@ mod tests {
                 },
                 HelpBinding {
                     key: "J".to_string(),
-                    action: "Jump mode".to_string(),
+                    action: "Jump".to_string(),
                     category: HelpBindingCategory::Jump,
                 },
                 HelpBinding {
@@ -923,7 +976,7 @@ mod tests {
                 },
                 HelpBinding {
                     key: "H".to_string(),
-                    action: "Show help".to_string(),
+                    action: "Hints / Help".to_string(),
                     category: HelpBindingCategory::System,
                 },
             ],
