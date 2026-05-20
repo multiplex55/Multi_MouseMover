@@ -201,6 +201,14 @@ mod tests {
     }
 
     #[test]
+    fn small_custom_keyset_generates_expected_label_sequence() {
+        assert_eq!(
+            generate_labels((2, 2), &['X', 'Y']).unwrap(),
+            vec!["XX", "XY", "YX", "YY"]
+        );
+    }
+
+    #[test]
     fn generated_labels_reject_duplicate_selection_keys() {
         assert_eq!(generate_labels((3, 1), &['A', 'A', 'B']), None);
     }

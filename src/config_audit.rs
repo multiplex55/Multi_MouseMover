@@ -284,6 +284,7 @@ fn is_known_active_path(path: &str) -> bool {
         "jump.cursor_between_stages",
         "jump.start_region",
         "jump.preview_edge_behavior",
+        "jump.hints.selection_keys",
         "jump.visuals.selected_region_outline",
         "jump.visuals.preview_outline",
         "jump.visuals.active_grid_outline",

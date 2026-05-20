@@ -1,5 +1,5 @@
 use crate::{
-    jump_grid::{generate_default_labels, letters_needed_for_base, DEFAULT_SELECTION_KEYS},
+    jump_grid::{generate_labels, letters_needed_for_base, DEFAULT_SELECTION_KEYS},
     keyboard::VirtualKey,
     JumpAimPoint, JumpTargetRegionMode,
 };
@@ -35,6 +35,7 @@ pub struct JumpStage {
     pub target_margin_percent: u8,
     pub visual_context_margin_percent: u8,
     pub target_region_mode: JumpTargetRegionMode,
+    pub selection_keys: Vec<char>,
     pub labels: Vec<String>,
 }
 
@@ -50,6 +51,7 @@ impl JumpStage {
             target_margin_percent: 0,
             visual_context_margin_percent: 0,
             target_region_mode: JumpTargetRegionMode::ExactRegion,
+            selection_keys: DEFAULT_SELECTION_KEYS.to_vec(),
             labels: Vec::new(),
         };
         stage.refresh_labels();
@@ -67,6 +69,7 @@ impl JumpStage {
             target_margin_percent,
             visual_context_margin_percent: 0,
             target_region_mode: JumpTargetRegionMode::ExpandedTarget,
+            selection_keys: DEFAULT_SELECTION_KEYS.to_vec(),
             labels: Vec::new(),
         };
         stage.refresh_labels();
@@ -83,6 +86,30 @@ impl JumpStage {
         visual_context_margin_percent: u8,
         target_region_mode: JumpTargetRegionMode,
     ) -> Self {
+        Self::with_selection_keys(
+            width,
+            height,
+            aim_point,
+            aim_offset_x_px,
+            aim_offset_y_px,
+            target_margin_percent,
+            visual_context_margin_percent,
+            target_region_mode,
+            DEFAULT_SELECTION_KEYS.to_vec(),
+        )
+    }
+
+    pub fn with_selection_keys(
+        width: u32,
+        height: u32,
+        aim_point: JumpAimPoint,
+        aim_offset_x_px: i32,
+        aim_offset_y_px: i32,
+        target_margin_percent: u8,
+        visual_context_margin_percent: u8,
+        target_region_mode: JumpTargetRegionMode,
+        selection_keys: Vec<char>,
+    ) -> Self {
         let mut stage = Self {
             width,
             height,
@@ -92,6 +119,7 @@ impl JumpStage {
             target_margin_percent,
             visual_context_margin_percent,
             target_region_mode,
+            selection_keys,
             labels: Vec::new(),
         };
         stage.refresh_labels();
@@ -105,12 +133,12 @@ impl JumpStage {
     pub fn expected_len(&self) -> usize {
         letters_needed_for_base(
             self.width as usize * self.height as usize,
-            DEFAULT_SELECTION_KEYS.len(),
+            self.selection_keys.len(),
         )
     }
 
     fn refresh_labels(&mut self) {
-        self.labels = generate_default_labels(self.grid()).unwrap_or_default();
+        self.labels = generate_labels(self.grid(), &self.selection_keys).unwrap_or_default();
     }
 }
 
@@ -290,7 +318,7 @@ impl JumpSession {
 
     fn handle_character_key(&mut self, key: VirtualKey) -> Option<JumpSessionUpdate> {
         let ch = key.to_char()?;
-        if !ch.is_ascii_uppercase() {
+        if !self.current_stage().selection_keys.contains(&ch) {
             return None;
         }
 

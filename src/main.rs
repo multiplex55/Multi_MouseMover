@@ -644,6 +644,7 @@ struct JumpConfig {
     cursor_between_stages: CursorBetweenStagesMode,
     start_region: JumpStartRegion,
     preview_edge_behavior: PreviewEdgeBehavior,
+    hints: JumpHintsConfig,
     visuals: JumpVisualsConfig,
     coarse: JumpStageConfig,
     fine: JumpStageConfig,
@@ -658,6 +659,7 @@ impl Default for JumpConfig {
             cursor_between_stages: CursorBetweenStagesMode::None,
             start_region: JumpStartRegion::CurrentMonitor,
             preview_edge_behavior: PreviewEdgeBehavior::Clamp,
+            hints: JumpHintsConfig::default(),
             visuals: JumpVisualsConfig::default(),
             coarse: JumpStageConfig::missing_coarse(),
             fine: JumpStageConfig {
@@ -707,6 +709,7 @@ struct JumpConfigToml {
     move_cursor_after_each_stage: Option<bool>,
     start_region: JumpStartRegion,
     preview_edge_behavior: PreviewEdgeBehavior,
+    hints: JumpHintsConfig,
     visuals: JumpVisualsConfig,
     coarse: JumpStageConfig,
     fine: JumpStageConfig,
@@ -723,6 +726,7 @@ impl Default for JumpConfigToml {
             move_cursor_after_each_stage: None,
             start_region: default.start_region,
             preview_edge_behavior: default.preview_edge_behavior,
+            hints: default.hints,
             visuals: default.visuals,
             coarse: default.coarse,
             fine: default.fine,
@@ -751,6 +755,7 @@ impl<'de> Deserialize<'de> for JumpConfig {
             cursor_between_stages,
             start_region: fields.start_region,
             preview_edge_behavior: fields.preview_edge_behavior,
+            hints: fields.hints,
             visuals: fields.visuals,
             coarse: fields.coarse,
             fine: fields.fine,
@@ -771,6 +776,20 @@ struct JumpProfileConfig {
     coarse: Option<JumpStageConfig>,
     fine: Option<JumpStageConfig>,
     precise: Option<JumpStageConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
+struct JumpHintsConfig {
+    selection_keys: String,
+}
+
+impl Default for JumpHintsConfig {
+    fn default() -> Self {
+        Self {
+            selection_keys: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -1233,6 +1252,10 @@ impl Config {
             self.jump.coarse.height = self.grid_size.height;
         }
 
+        self.jump.hints.selection_keys = normalize_jump_selection_keys(
+            "jump.hints.selection_keys",
+            &self.jump.hints.selection_keys,
+        );
         normalize_jump_stage("jump.coarse", &mut self.jump.coarse);
         normalize_jump_stage("jump.fine", &mut self.jump.fine);
         normalize_jump_stage("jump.precise", &mut self.jump.precise);
@@ -1670,6 +1693,26 @@ fn normalize_jump_stage(name: &str, stage: &mut JumpStageConfig) {
             "{name}.labels.hide_threshold_px is below 0; clamping to 0"
         ));
         stage.labels.hide_threshold_px = 0;
+    }
+}
+
+fn normalize_jump_selection_keys(name: &str, value: &str) -> String {
+    let mut normalized = String::new();
+
+    for ch in value.chars().flat_map(char::to_uppercase) {
+        if ch.is_whitespace() || normalized.contains(ch) {
+            continue;
+        }
+        normalized.push(ch);
+    }
+
+    if normalized.chars().count() < 2 {
+        warn_config_normalized(&format!(
+            "{name} must contain at least 2 unique keys; using default"
+        ));
+        JumpHintsConfig::default().selection_keys
+    } else {
+        normalized
     }
 }
 
@@ -3714,6 +3757,9 @@ mod tests {
             start_region = "virtual_screen"
             preview_edge_behavior = "clamp"
 
+            [jump.hints]
+            selection_keys = "xy"
+
             [jump.profiles.window]
             start_region = "active_window_bounds"
             preview_edge_behavior = "shift_into_bounds"
@@ -3728,9 +3774,11 @@ mod tests {
 
         let default_jump = config.resolved_jump_config(None).unwrap();
         assert_eq!(default_jump.start_region, JumpStartRegion::VirtualScreen);
+        assert_eq!(default_jump.hints.selection_keys, "XY");
 
         let profile = config.resolved_jump_config(Some("window")).unwrap();
         assert_eq!(profile.start_region, JumpStartRegion::ActiveWindowBounds);
+        assert_eq!(profile.hints.selection_keys, "XY");
         assert_eq!(
             profile.preview_edge_behavior,
             PreviewEdgeBehavior::ShiftIntoBounds
@@ -3775,6 +3823,53 @@ mod tests {
         assert!(config.jump.fine.labels.center_marker);
         assert!(config.jump.fine.labels.separators);
         assert_eq!(config.jump.fine.labels.hide_threshold_px, 0);
+    }
+
+    #[test]
+    fn selection_keys_normalization_uppercases_and_dedupes() {
+        let config = parse_config(
+            r#"
+            [jump.hints]
+            selection_keys = "abcaBCd"
+            "#,
+        );
+
+        assert_eq!(config.jump.hints.selection_keys, "ABCD");
+    }
+
+    #[test]
+    fn selection_keys_strips_whitespace() {
+        let config = parse_config(
+            r#"
+            [jump.hints]
+            selection_keys = "a b\tc\n d"
+            "#,
+        );
+
+        assert_eq!(config.jump.hints.selection_keys, "ABCD");
+    }
+
+    #[test]
+    fn selection_keys_invalid_falls_back_to_default() {
+        let _ = take_config_warnings();
+
+        let config = parse_config(
+            r#"
+            [jump.hints]
+            selection_keys = " a A "
+            "#,
+        );
+        let warnings = take_config_warnings();
+
+        assert_eq!(
+            config.jump.hints.selection_keys,
+            JumpHintsConfig::default().selection_keys
+        );
+        assert!(warnings.iter().any(|warning| {
+            warning.contains("jump.hints.selection_keys")
+                && warning.contains("at least 2 unique keys")
+                && warning.contains("using default")
+        }));
     }
 
     #[test]

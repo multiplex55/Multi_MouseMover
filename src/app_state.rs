@@ -1,7 +1,7 @@
 use crate::action::Action;
 use crate::action_handler::{final_adjust_control_for_event, FinalAdjustControl};
 use crate::grid_session::GridSession;
-use crate::jump_grid::generate_default_labels;
+use crate::jump_grid::generate_labels;
 use crate::jump_session::{JumpRegion, JumpSession, JumpSessionUpdate, JumpStage};
 use crate::jump_view::{
     FinalAdjustOverlayView, GridOverlayMetadata, JumpOverlayView, JumpStageMetadata, JumpVisuals,
@@ -279,7 +279,7 @@ impl AppState {
         let stages = stage_metadata
             .iter()
             .map(|stage| {
-                JumpStage::with_target_region_mode(
+                JumpStage::with_selection_keys(
                     stage.grid_size.0,
                     stage.grid_size.1,
                     stage.aim_point,
@@ -288,6 +288,7 @@ impl AppState {
                     stage.target_margin_percent,
                     stage.visual_context_margin_percent,
                     stage.target_region_mode,
+                    config.hints.selection_keys.chars().collect(),
                 )
             })
             .collect();
@@ -802,6 +803,7 @@ impl AppState {
 }
 
 fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
+    let selection_keys: Vec<char> = config.hints.selection_keys.chars().collect();
     let mut stages = vec![JumpStageMetadata {
         index: 0,
         grid_size: (config.coarse.width, config.coarse.height),
@@ -817,7 +819,7 @@ fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
             .preview_edge_behavior
             .unwrap_or(config.preview_edge_behavior),
         labels: config.coarse.labels.into(),
-        cell_labels: generate_default_labels((config.coarse.width, config.coarse.height))
+        cell_labels: generate_labels((config.coarse.width, config.coarse.height), &selection_keys)
             .unwrap_or_default(),
     }];
 
@@ -837,7 +839,7 @@ fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
                 .preview_edge_behavior
                 .unwrap_or(config.preview_edge_behavior),
             labels: config.fine.labels.into(),
-            cell_labels: generate_default_labels((config.fine.width, config.fine.height))
+            cell_labels: generate_labels((config.fine.width, config.fine.height), &selection_keys)
                 .unwrap_or_default(),
         });
     }
@@ -858,8 +860,11 @@ fn jump_stage_metadata(config: &JumpConfig) -> Vec<JumpStageMetadata> {
                 .preview_edge_behavior
                 .unwrap_or(config.preview_edge_behavior),
             labels: config.precise.labels.into(),
-            cell_labels: generate_default_labels((config.precise.width, config.precise.height))
-                .unwrap_or_default(),
+            cell_labels: generate_labels(
+                (config.precise.width, config.precise.height),
+                &selection_keys,
+            )
+            .unwrap_or_default(),
         });
     }
 
@@ -1490,6 +1495,46 @@ mod tests {
                     top: 0,
                     width: 10,
                     height: 10,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn jump_labels_use_configured_keyset_not_hardcoded_default() {
+        let mut config = Config::default();
+        config.jump.hints.selection_keys = "XY".to_string();
+        config.jump.coarse.width = 2;
+        config.jump.coarse.height = 2;
+        config.jump.fine.enabled = false;
+        config.jump.precise.enabled = false;
+        let config = config.normalize().unwrap();
+        let mut state = AppState::default();
+
+        assert!(state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::F
+        ));
+
+        let view = state.jump_view().unwrap();
+        assert_eq!(view.stages[0].cell_labels, vec!["XX", "XY", "YX", "YY"]);
+
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::X, true), None),
+            Some(JumpSessionUpdate::Consumed)
+        );
+        assert_eq!(
+            state.handle_jump_input(KeyEvent::new(VirtualKey::Y, true), None),
+            Some(JumpSessionUpdate::Completed {
+                x: 75,
+                y: 25,
+                region: JumpRegion {
+                    left: 50,
+                    top: 0,
+                    width: 50,
+                    height: 50,
                 },
             })
         );
