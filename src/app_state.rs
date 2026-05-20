@@ -179,7 +179,7 @@ impl AppState {
     pub fn set_active_mode(&mut self, active_mode: bool) {
         self.active_mode = active_mode;
         if !active_mode {
-            self.clear_active_action_keys();
+            self.clear_active_action_keys_and_exit_exclusive_modes();
             self.hide_help();
         }
     }
@@ -588,6 +588,11 @@ impl AppState {
             && self.is_toggle_active_key_down_event(&event)
         {
             self.enqueue_command(AppCommand::ToggleActiveMode);
+            return;
+        }
+
+        if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
+            self.enqueue_command(AppCommand::SetActiveMode { active: false });
             return;
         }
 
@@ -2133,6 +2138,50 @@ mod tests {
 
         assert_eq!(collect_commands(&mut state), Vec::new());
         assert!(!state.is_jump_active());
+    }
+
+    #[test]
+    fn disable_action_routes_one_way_set_instead_of_toggle() {
+        let mut state = state_with_bound_key(VirtualKey::Q);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::Q, true), Some(Action::Disable));
+        state.route_key_event(KeyEvent::new(VirtualKey::Q, false), Some(Action::Disable));
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::SetActiveMode { active: false }]
+        );
+    }
+
+    #[test]
+    fn disable_action_routes_before_exclusive_mode_inputs() {
+        for mode in ["jump", "grid"] {
+            let mut state = state_with_bound_key(VirtualKey::Q);
+            match mode {
+                "jump" => enter_jump_mode(&mut state, VirtualKey::J),
+                "grid" => enter_grid_mode(&mut state, VirtualKey::G),
+                _ => unreachable!(),
+            }
+
+            state.route_key_event(KeyEvent::new(VirtualKey::Q, true), Some(Action::Disable));
+
+            assert_eq!(
+                collect_commands(&mut state),
+                vec![AppCommand::SetActiveMode { active: false }],
+                "{mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn inactive_disable_action_does_not_toggle_back_on() {
+        let mut state = state_with_bound_key(VirtualKey::Q);
+        state.set_active_mode(false);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::Q, true), Some(Action::Disable));
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(!state.active_mode());
     }
 
     #[test]

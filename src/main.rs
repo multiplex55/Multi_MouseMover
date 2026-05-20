@@ -2017,6 +2017,17 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
         return None;
     }
 
+    if action == Action::Disable {
+        if is_down {
+            return Some(apply_active_mode_transition(
+                action_handler,
+                app_state,
+                false,
+            ));
+        }
+        return None;
+    }
+
     if is_down {
         if action == Action::ReloadConfig || action == Action::PanicReset {
             return None;
@@ -4501,6 +4512,97 @@ mod tests {
         assert!(!app_state.help_visible());
         assert!(!app_state.has_active_action_keys());
         assert_eq!(resolution, JumpOverlayResolution::Hidden);
+    }
+
+    #[test]
+    fn disable_key_action_clears_navigation_help_active_keys_and_exclusive_modes() {
+        for mode in ["jump", "grid"] {
+            let mut app_state = AppState::default();
+            app_state.set_bound_keys([VirtualKey::Left, VirtualKey::H, VirtualKey::Q]);
+            app_state.toggle_help();
+            app_state.route_key_event(
+                KeyEvent::new(VirtualKey::Left, true),
+                Some(Action::MoveLeft),
+            );
+            app_state.route_key_event(
+                KeyEvent::new(VirtualKey::H, true),
+                Some(Action::NavigateBack),
+            );
+            match mode {
+                "jump" => {
+                    let config = Config::default().normalize().unwrap();
+                    assert!(app_state.enter_jump_mode(
+                        &config.jump,
+                        config.final_adjust.clone(),
+                        jump_region(),
+                        VirtualKey::J,
+                    ));
+                }
+                "grid" => {
+                    assert!(app_state.enter_grid_mode(
+                        jump_region(),
+                        jump_region(),
+                        25,
+                        25,
+                        true,
+                        true,
+                        true,
+                        VirtualKey::G,
+                    ));
+                }
+                _ => unreachable!(),
+            }
+
+            let mouse_master =
+                MouseMaster::new_with_backend(Config::default(), FakeBackend::default());
+            let mut action_handler = ActionHandler::new(mouse_master);
+            action_handler.process_active_keys(Action::MoveLeft, true);
+            action_handler.process_active_keys(Action::NavigateBack, true);
+            action_handler
+                .mouse_master
+                .handle_action(Action::ToggleDragMode);
+
+            let resolution = execute_key_action_command(
+                &mut action_handler,
+                &mut app_state,
+                Action::Disable,
+                true,
+            );
+
+            assert_eq!(
+                action_handler.mouse_master.backend.operations,
+                vec![
+                    MouseOperation::ButtonDown(Button::Left),
+                    MouseOperation::ButtonUp(Button::Left),
+                ],
+                "{mode}"
+            );
+            assert!(!action_handler.mouse_master.left_button_held(), "{mode}");
+            assert_eq!(action_handler.mouse_master.current_mode, ModeState::Idle);
+            assert!(action_handler.active_keys.is_empty(), "{mode}");
+            assert!(!app_state.active_mode(), "{mode}");
+            assert!(!app_state.help_visible(), "{mode}");
+            assert!(!app_state.has_active_action_keys(), "{mode}");
+            assert!(!app_state.is_jump_active(), "{mode}");
+            assert!(!app_state.is_grid_active(), "{mode}");
+            assert_eq!(resolution, Some(JumpOverlayResolution::Hidden), "{mode}");
+            assert_eq!(
+                app_state.resolve_jump_overlay(),
+                JumpOverlayResolution::Hidden,
+                "{mode}"
+            );
+
+            let second_resolution = execute_key_action_command(
+                &mut action_handler,
+                &mut app_state,
+                Action::Disable,
+                true,
+            );
+
+            assert_eq!(second_resolution, None, "{mode}");
+            assert_eq!(action_handler.mouse_master.current_mode, ModeState::Idle);
+            assert!(!app_state.active_mode(), "{mode}");
+        }
     }
 
     #[test]
