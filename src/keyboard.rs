@@ -1,6 +1,14 @@
 use crate::action::Action;
 use crate::app_state::KeyEvent;
 use crate::key_chord::KeyChord;
+use std::mem::size_of;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+    VIRTUAL_KEY,
+};
+
+const LLKHF_INJECTED_BITS: u32 = 0x10;
+const LLKHF_LOWER_IL_INJECTED_BITS: u32 = 0x02;
 
 /// Enum representing virtual key codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -599,6 +607,88 @@ impl VirtualKey {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntheticKeyEvent {
+    Press(VirtualKey),
+    Release(VirtualKey),
+}
+
+pub trait KeyboardSender {
+    fn send_key_event(&mut self, event: SyntheticKeyEvent) -> Result<(), String>;
+
+    fn send_sequence(&mut self, events: &[SyntheticKeyEvent]) -> Result<(), String> {
+        for event in events {
+            self.send_key_event(*event)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct WindowsKeyboardSender;
+
+impl KeyboardSender for WindowsKeyboardSender {
+    fn send_key_event(&mut self, event: SyntheticKeyEvent) -> Result<(), String> {
+        let (key, flags) = match event {
+            SyntheticKeyEvent::Press(key) => (key, KEYBD_EVENT_FLAGS(0)),
+            SyntheticKeyEvent::Release(key) => (key, KEYEVENTF_KEYUP),
+        };
+        let input = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(key.to_vk_code() as u16),
+                    wScan: 0,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+
+        let sent = unsafe { SendInput(&[input], size_of::<INPUT>() as i32) };
+        if sent == 1 {
+            Ok(())
+        } else {
+            Err(format!("SendInput sent {sent} of 1 keyboard events"))
+        }
+    }
+}
+
+pub fn navigation_sequence(action: &Action) -> Option<[SyntheticKeyEvent; 4]> {
+    match action {
+        Action::NavigateBack => Some([
+            SyntheticKeyEvent::Press(VirtualKey::Alt),
+            SyntheticKeyEvent::Press(VirtualKey::Left),
+            SyntheticKeyEvent::Release(VirtualKey::Left),
+            SyntheticKeyEvent::Release(VirtualKey::Alt),
+        ]),
+        Action::NavigateForward => Some([
+            SyntheticKeyEvent::Press(VirtualKey::Alt),
+            SyntheticKeyEvent::Press(VirtualKey::Right),
+            SyntheticKeyEvent::Release(VirtualKey::Right),
+            SyntheticKeyEvent::Release(VirtualKey::Alt),
+        ]),
+        _ => None,
+    }
+}
+
+pub fn send_navigation_action<S: KeyboardSender>(
+    sender: &mut S,
+    action: &Action,
+) -> Result<bool, String> {
+    let Some(sequence) = navigation_sequence(action) else {
+        return Ok(false);
+    };
+
+    sender.send_sequence(&sequence)?;
+    Ok(true)
+}
+
+pub fn is_injected_keyboard_hook_flags(flags: u32) -> bool {
+    flags & (LLKHF_INJECTED_BITS | LLKHF_LOWER_IL_INJECTED_BITS) != 0
+}
+
 /// Struct for managing keybindings
 #[derive(Debug)]
 pub struct KeyBindings {
@@ -680,6 +770,66 @@ impl KeyBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct MockKeyboardSender {
+        events: Vec<SyntheticKeyEvent>,
+    }
+
+    impl KeyboardSender for MockKeyboardSender {
+        fn send_key_event(&mut self, event: SyntheticKeyEvent) -> Result<(), String> {
+            self.events.push(event);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn navigate_back_emits_alt_left_sequence() {
+        let mut sender = MockKeyboardSender::default();
+
+        assert_eq!(
+            send_navigation_action(&mut sender, &Action::NavigateBack),
+            Ok(true)
+        );
+
+        assert_eq!(
+            sender.events,
+            vec![
+                SyntheticKeyEvent::Press(VirtualKey::Alt),
+                SyntheticKeyEvent::Press(VirtualKey::Left),
+                SyntheticKeyEvent::Release(VirtualKey::Left),
+                SyntheticKeyEvent::Release(VirtualKey::Alt),
+            ]
+        );
+    }
+
+    #[test]
+    fn navigate_forward_emits_alt_right_sequence() {
+        let mut sender = MockKeyboardSender::default();
+
+        assert_eq!(
+            send_navigation_action(&mut sender, &Action::NavigateForward),
+            Ok(true)
+        );
+
+        assert_eq!(
+            sender.events,
+            vec![
+                SyntheticKeyEvent::Press(VirtualKey::Alt),
+                SyntheticKeyEvent::Press(VirtualKey::Right),
+                SyntheticKeyEvent::Release(VirtualKey::Right),
+                SyntheticKeyEvent::Release(VirtualKey::Alt),
+            ]
+        );
+    }
+
+    #[test]
+    fn injected_keyboard_hook_flags_are_detected() {
+        assert!(is_injected_keyboard_hook_flags(0x10));
+        assert!(is_injected_keyboard_hook_flags(0x02));
+        assert!(is_injected_keyboard_hook_flags(0x12));
+        assert!(!is_injected_keyboard_hook_flags(0));
+    }
 
     #[test]
     fn parses_required_punctuation_aliases() {

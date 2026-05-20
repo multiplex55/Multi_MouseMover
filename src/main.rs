@@ -1733,15 +1733,26 @@ fn decode_key_event(w_param: WPARAM, kbd: KBDLLHOOKSTRUCT) -> Option<KeyEvent> {
     })
 }
 
-unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
-    if code == HC_ACTION.try_into().unwrap()
+fn is_keyboard_hook_key_message(code: i32, w_param: WPARAM) -> bool {
+    code == HC_ACTION.try_into().unwrap()
         && (w_param.0 as u32 == WM_KEYDOWN
             || w_param.0 as u32 == WM_SYSKEYDOWN
             || w_param.0 as u32 == WM_KEYUP
             || w_param.0 as u32 == WM_SYSKEYUP)
-    {
-        HOOK_EVENTS_SEEN.fetch_add(1, Ordering::Relaxed);
+}
+
+fn is_keyboard_hook_routing_event(code: i32, w_param: WPARAM, flags: u32) -> bool {
+    is_keyboard_hook_key_message(code, w_param) && !is_injected_keyboard_hook_flags(flags)
+}
+
+unsafe extern "system" fn keyboard_hook(code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+    if is_keyboard_hook_key_message(code, w_param) {
         let kbd = *(l_param.0 as *const KBDLLHOOKSTRUCT);
+        if is_injected_keyboard_hook_flags(kbd.flags.0) {
+            return CallNextHookEx(None, code, w_param, l_param);
+        }
+
+        HOOK_EVENTS_SEEN.fetch_add(1, Ordering::Relaxed);
         if let Some(event) = decode_key_event(w_param, kbd) {
             HOOK_EVENTS_DECODED.fetch_add(1, Ordering::Relaxed);
             let swallow = {
@@ -1967,6 +1978,23 @@ fn execute_key_action_command<B: MouseBackend>(
     action: Action,
     is_down: bool,
 ) -> Option<JumpOverlayResolution> {
+    let mut keyboard_sender = WindowsKeyboardSender;
+    execute_key_action_command_with_keyboard(
+        action_handler,
+        app_state,
+        action,
+        is_down,
+        &mut keyboard_sender,
+    )
+}
+
+fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
+    action_handler: &mut ActionHandler<B>,
+    app_state: &mut AppState,
+    action: Action,
+    is_down: bool,
+    keyboard_sender: &mut K,
+) -> Option<JumpOverlayResolution> {
     if action_handler.mouse_master.current_mode != ModeState::Active {
         return None;
     }
@@ -1992,6 +2020,14 @@ fn execute_key_action_command<B: MouseBackend>(
     if is_down {
         if action == Action::ReloadConfig || action == Action::PanicReset {
             return None;
+        }
+        match send_navigation_action(keyboard_sender, &action) {
+            Ok(true) => return None,
+            Ok(false) => {}
+            Err(error) => {
+                eprintln!("[keyboard] failed to send {action:?}: {error}");
+                return None;
+            }
         }
         action_handler.execute_action(&action);
     }
@@ -2732,6 +2768,18 @@ mod tests {
 
         fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), String> {
             self.scrolls.push((length, axis));
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct MockKeyboardSender {
+        events: Vec<SyntheticKeyEvent>,
+    }
+
+    impl KeyboardSender for MockKeyboardSender {
+        fn send_key_event(&mut self, event: SyntheticKeyEvent) -> Result<(), String> {
+            self.events.push(event);
             Ok(())
         }
     }
@@ -4212,6 +4260,64 @@ mod tests {
         let event = KeyEvent::new(VirtualKey::Escape, false);
 
         assert!(!should_log_routing_event(&event, None));
+    }
+
+    #[test]
+    fn injected_keyboard_hook_events_bypass_routing() {
+        let code = HC_ACTION.try_into().unwrap();
+
+        assert!(is_keyboard_hook_routing_event(
+            code,
+            WPARAM(WM_KEYDOWN as usize),
+            0
+        ));
+        assert!(!is_keyboard_hook_routing_event(
+            code,
+            WPARAM(WM_KEYDOWN as usize),
+            0x10
+        ));
+        assert!(!is_keyboard_hook_routing_event(
+            code,
+            WPARAM(WM_KEYDOWN as usize),
+            0x02
+        ));
+    }
+
+    #[test]
+    fn navigate_back_action_executes_alt_left_only_when_active() {
+        let mut app_state = AppState::default();
+        let mouse_master = MouseMaster::new_with_backend(Config::default(), FakeBackend::default());
+        let mut action_handler = ActionHandler::new(mouse_master);
+        let mut keyboard_sender = MockKeyboardSender::default();
+
+        execute_key_action_command_with_keyboard(
+            &mut action_handler,
+            &mut app_state,
+            Action::NavigateBack,
+            true,
+            &mut keyboard_sender,
+        );
+
+        assert_eq!(
+            keyboard_sender.events,
+            vec![
+                SyntheticKeyEvent::Press(VirtualKey::Alt),
+                SyntheticKeyEvent::Press(VirtualKey::Left),
+                SyntheticKeyEvent::Release(VirtualKey::Left),
+                SyntheticKeyEvent::Release(VirtualKey::Alt),
+            ]
+        );
+
+        action_handler.mouse_master.set_active_mode(false);
+        execute_key_action_command_with_keyboard(
+            &mut action_handler,
+            &mut app_state,
+            Action::NavigateBack,
+            true,
+            &mut keyboard_sender,
+        );
+
+        assert_eq!(keyboard_sender.events.len(), 4);
     }
 
     #[test]
