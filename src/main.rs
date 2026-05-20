@@ -174,7 +174,71 @@ lazy_static! {
     };
     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
     static ref APP_STATE: RwLock<AppState> = RwLock::new(AppState::default());
-    static ref CONFIG_WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    static ref CONFIG_WARNINGS: Mutex<Vec<StoredConfigWarning>> = Mutex::new(Vec::new());
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StoredConfigWarning {
+    path: String,
+    severity: ConfigAuditSeverity,
+    message: String,
+    suggestion: String,
+}
+
+impl StoredConfigWarning {
+    fn runtime_warning(message: &str) -> Self {
+        let path = message
+            .split_once(' ')
+            .map(|(path, _)| path)
+            .unwrap_or("<config>");
+
+        Self {
+            path: path.to_string(),
+            severity: ConfigAuditSeverity::Warning,
+            message: message.to_string(),
+            suggestion: "Review this config value and update config.toml.".to_string(),
+        }
+    }
+
+    fn runtime_info(message: &str) -> Self {
+        Self {
+            path: "<config>".to_string(),
+            severity: ConfigAuditSeverity::Info,
+            message: message.to_string(),
+            suggestion: "Review the preferred config path in config.toml.".to_string(),
+        }
+    }
+
+    fn from_audit(warning: &ConfigAuditWarning) -> Self {
+        Self {
+            path: warning.path.clone(),
+            severity: warning.severity,
+            message: warning.message.clone(),
+            suggestion: warning.suggestion.clone(),
+        }
+    }
+
+    fn summary_text(&self) -> String {
+        if self.suggestion.is_empty() {
+            self.message.clone()
+        } else if self.path == "<config>" || self.message.starts_with(&self.path) {
+            self.message.clone()
+        } else {
+            format!(
+                "{}: {} Suggestion: {}",
+                self.path, self.message, self.suggestion
+            )
+        }
+    }
+
+    fn to_overlay_warning(&self) -> help_overlay::OverlayConfigWarning {
+        help_overlay::OverlayConfigWarning {
+            path: self.path.clone(),
+            severity: overlay_warning_severity(self.severity),
+            message: self.message.clone(),
+            fix_path: self.suggestion.clone(),
+        }
+    }
 }
 
 thread_local! {
@@ -1505,7 +1569,7 @@ impl Config {
 
 fn warn_config_normalized(message: &str) {
     if let Ok(mut warnings) = CONFIG_WARNINGS.lock() {
-        warnings.push(message.to_string());
+        warnings.push(StoredConfigWarning::runtime_warning(message));
     }
     eprintln!("[config warning] {message}");
 }
@@ -1513,7 +1577,7 @@ fn warn_config_normalized(message: &str) {
 fn warn_config_info(message: &str) {
     let message = format!("info: {message}");
     if let Ok(mut warnings) = CONFIG_WARNINGS.lock() {
-        warnings.push(message.clone());
+        warnings.push(StoredConfigWarning::runtime_info(&message));
     }
     eprintln!("[config warning] {message}");
 }
@@ -1522,7 +1586,7 @@ fn emit_config_audit_warnings(warnings: &[ConfigAuditWarning]) {
     for warning in warnings {
         let message = format_config_audit_warning(warning);
         if let Ok(mut stored_warnings) = CONFIG_WARNINGS.lock() {
-            stored_warnings.push(message.clone());
+            stored_warnings.push(StoredConfigWarning::from_audit(warning));
         }
         eprintln!(
             "{} {message}",
@@ -1548,7 +1612,32 @@ fn format_config_audit_warning(warning: &ConfigAuditWarning) -> String {
 fn take_config_warnings() -> Vec<String> {
     CONFIG_WARNINGS
         .lock()
-        .map(|mut warnings| std::mem::take(&mut *warnings))
+        .map(|mut warnings| {
+            std::mem::take(&mut *warnings)
+                .into_iter()
+                .map(|warning| warning.summary_text())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn overlay_warning_severity(severity: ConfigAuditSeverity) -> help_overlay::OverlayWarningSeverity {
+    match severity {
+        ConfigAuditSeverity::Info => help_overlay::OverlayWarningSeverity::Info,
+        ConfigAuditSeverity::Warning => help_overlay::OverlayWarningSeverity::Warning,
+        ConfigAuditSeverity::Deprecated => help_overlay::OverlayWarningSeverity::Deprecated,
+    }
+}
+
+fn recent_config_warnings_for_overlay() -> Vec<help_overlay::OverlayConfigWarning> {
+    CONFIG_WARNINGS
+        .lock()
+        .map(|warnings| {
+            warnings
+                .iter()
+                .map(StoredConfigWarning::to_overlay_warning)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -2212,6 +2301,7 @@ fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
     );
     view.stats = help_stats_from_snapshot(snapshot, slow_active, jump_active);
     view.help_max_bindings = help_config.help_max_bindings;
+    view.config_warnings = recent_config_warnings_for_overlay();
     view
 }
 
@@ -2339,6 +2429,18 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
         }
         AppCommand::ToggleHelp => {
+            let help_config = ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .config
+                .tooltip_overlay;
+            if !help_config.enabled || !help_config.show_help {
+                APP_STATE.write().unwrap().hide_help();
+                help_overlay::hide_help_overlay();
+                return;
+            }
+
             let visible = {
                 let mut app_state = APP_STATE.write().unwrap();
                 app_state.toggle_help();
@@ -4236,6 +4338,32 @@ mod tests {
         assert!(warnings
             .iter()
             .any(|warning| warning.contains("wheel.vertical_multiplier is below 1")));
+    }
+
+    #[test]
+    fn config_warning_store_accepts_audit_entries() {
+        let _ = take_config_warnings();
+        let audit_warning = ConfigAuditWarning {
+            path: "system_bindings.polling_rate".to_string(),
+            severity: ConfigAuditSeverity::Warning,
+            message: "top-level polling_rate is preferred".to_string(),
+            suggestion: "Move this value to polling_rate.".to_string(),
+        };
+
+        emit_config_audit_warnings(&[audit_warning]);
+        let overlay_warnings = recent_config_warnings_for_overlay();
+        let stored = overlay_warnings
+            .iter()
+            .find(|warning| warning.path == "system_bindings.polling_rate")
+            .expect("expected stored audit warning");
+
+        assert_eq!(
+            stored.severity,
+            help_overlay::OverlayWarningSeverity::Warning
+        );
+        assert!(stored.message.contains("top-level polling_rate"));
+        assert!(stored.fix_path.contains("Move this value"));
+        let _ = take_config_warnings();
     }
 
     #[test]

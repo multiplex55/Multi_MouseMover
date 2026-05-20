@@ -3,6 +3,7 @@ use crate::action_handler::{RuntimeNotification, RuntimeNotificationKind};
 use crate::key_chord::KeyChord;
 use crate::TooltipOverlayConfig;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ptr;
 use std::time::{Duration, Instant};
 use windows::core::w;
@@ -59,7 +60,23 @@ impl HelpBindingCategory {
 pub struct HelpOverlayView {
     pub stats: HelpRuntimeStats,
     pub bindings: Vec<HelpBinding>,
+    pub config_warnings: Vec<OverlayConfigWarning>,
     pub help_max_bindings: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OverlayWarningSeverity {
+    Info,
+    Warning,
+    Deprecated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OverlayConfigWarning {
+    pub path: String,
+    pub severity: OverlayWarningSeverity,
+    pub message: String,
+    pub fix_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -441,6 +458,65 @@ fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
     ]
 }
 
+fn overlay_warning_badge(severity: OverlayWarningSeverity) -> &'static str {
+    match severity {
+        OverlayWarningSeverity::Info => "INFO",
+        OverlayWarningSeverity::Warning => "WARN",
+        OverlayWarningSeverity::Deprecated => "DEPR",
+    }
+}
+
+pub fn collapsed_config_warnings(
+    warnings: &[OverlayConfigWarning],
+    max_warnings: usize,
+) -> Vec<OverlayConfigWarning> {
+    let mut seen = HashSet::new();
+    let mut collapsed = Vec::new();
+
+    for warning in warnings.iter().rev() {
+        if seen.insert(warning.clone()) {
+            collapsed.push(warning.clone());
+        }
+        if collapsed.len() == max_warnings {
+            break;
+        }
+    }
+
+    collapsed.reverse();
+    collapsed
+}
+
+pub fn format_config_warning_lines(
+    warnings: &[OverlayConfigWarning],
+    max_warnings: usize,
+) -> Vec<String> {
+    let collapsed = collapsed_config_warnings(warnings, max_warnings);
+    if collapsed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = vec![String::new(), "Config warnings:".to_string()];
+    lines.extend(collapsed.iter().map(|warning| {
+        format!(
+            "  [{}] {} - {} Fix: {}",
+            overlay_warning_badge(warning.severity),
+            warning.path,
+            warning.message,
+            warning.fix_path
+        )
+    }));
+
+    let unique_count = warnings.iter().cloned().collect::<HashSet<_>>().len();
+    if unique_count > collapsed.len() {
+        lines.push(format!(
+            "  ... {} more config warning(s)",
+            unique_count - collapsed.len()
+        ));
+    }
+
+    lines
+}
+
 fn on_off(value: bool) -> &'static str {
     if value {
         "on"
@@ -503,6 +579,7 @@ pub fn format_tooltip_message(
 
 pub fn format_help_lines(view: &HelpOverlayView, config: TooltipOverlayConfig) -> Vec<String> {
     let mut lines = help_stats_lines(&view.stats);
+    lines.extend(format_config_warning_lines(&view.config_warnings, 3));
     let max_bindings = config.help_max_bindings.max(0) as usize;
     let visible_bindings = sorted_bindings(&view.bindings, max_bindings);
 
@@ -642,6 +719,7 @@ where
     HelpOverlayView {
         stats: HelpRuntimeStats::default(),
         bindings,
+        config_warnings: Vec::new(),
         help_max_bindings: TooltipOverlayConfig::default().help_max_bindings,
     }
 }
@@ -814,6 +892,7 @@ mod tests {
                 action: "Hints / Help".to_string(),
                 category: HelpBindingCategory::System,
             }],
+            config_warnings: Vec::new(),
             help_max_bindings: TooltipOverlayConfig::default().help_max_bindings,
         }
     }
@@ -980,6 +1059,7 @@ mod tests {
                     category: HelpBindingCategory::System,
                 },
             ],
+            config_warnings: Vec::new(),
             help_max_bindings: 40,
         };
 
@@ -1015,6 +1095,43 @@ mod tests {
         assert!(lines.contains("D  -  Move right"));
         assert!(!lines.contains("W  -  Move up"));
         assert!(lines.contains("... 2 more binding(s)"));
+    }
+
+    #[test]
+    fn overlay_warning_formatter_includes_path_and_severity() {
+        let warning = OverlayConfigWarning {
+            path: "jump.coarse.preview_margin_percent".to_string(),
+            severity: OverlayWarningSeverity::Deprecated,
+            message: "legacy field is ignored".to_string(),
+            fix_path: "Use jump.coarse.visual_context_margin_percent.".to_string(),
+        };
+
+        let lines = format_config_warning_lines(&[warning], 3).join("\n");
+
+        assert!(lines.contains("[DEPR]"));
+        assert!(lines.contains("jump.coarse.preview_margin_percent"));
+        assert!(lines.contains("Fix: Use jump.coarse.visual_context_margin_percent."));
+    }
+
+    #[test]
+    fn duplicate_warning_collapse_behavior() {
+        let duplicate = OverlayConfigWarning {
+            path: "wheel.min_speed".to_string(),
+            severity: OverlayWarningSeverity::Warning,
+            message: "wheel.min_speed is below 1".to_string(),
+            fix_path: "Review this config value and update config.toml.".to_string(),
+        };
+        let distinct = OverlayConfigWarning {
+            path: "wheel.vertical_multiplier".to_string(),
+            severity: OverlayWarningSeverity::Warning,
+            message: "wheel.vertical_multiplier is below 1".to_string(),
+            fix_path: "Review this config value and update config.toml.".to_string(),
+        };
+
+        let collapsed =
+            collapsed_config_warnings(&[duplicate.clone(), distinct.clone(), duplicate.clone()], 3);
+
+        assert_eq!(collapsed, vec![distinct, duplicate]);
     }
 
     #[test]
