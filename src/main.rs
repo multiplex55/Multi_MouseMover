@@ -1,6 +1,7 @@
 mod action;
 mod action_handler;
 mod app_state;
+mod config_audit;
 mod grid_session;
 mod help_overlay;
 mod indicator;
@@ -17,6 +18,7 @@ mod screen_capture;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, GridInputUpdate, JumpOverlayResolution, KeyEvent};
+use config_audit::{audit_config_toml, ConfigAuditSeverity, ConfigAuditWarning};
 #[cfg(test)]
 use indicator::IndicatorState;
 use indicator::{
@@ -1378,7 +1380,7 @@ impl Config {
         // First attempt: path relative to current directory
         println!("[DEBUG] trying path: {}", path);
         match fs::read_to_string(path) {
-            Ok(config_str) => return toml::from_str::<Self>(&config_str)?.normalize(),
+            Ok(config_str) => return Self::parse_audited_config(&config_str),
             Err(e) => {
                 if e.kind() != io::ErrorKind::NotFound {
                     return Err(e.into());
@@ -1392,7 +1394,7 @@ impl Config {
             exe_path.push(path);
             println!("[DEBUG] trying exe path: {}", exe_path.display());
             match fs::read_to_string(&exe_path) {
-                Ok(config_str) => return toml::from_str::<Self>(&config_str)?.normalize(),
+                Ok(config_str) => return Self::parse_audited_config(&config_str),
                 Err(e) => {
                     if e.kind() != io::ErrorKind::NotFound {
                         return Err(e.into());
@@ -1403,6 +1405,11 @@ impl Config {
 
         eprintln!("Config file not found, using defaults");
         Self::default().normalize()
+    }
+
+    fn parse_audited_config(config_str: &str) -> Result<Self, Box<dyn Error>> {
+        emit_config_audit_warnings(&audit_config_toml(config_str).warnings);
+        toml::from_str::<Self>(config_str)?.normalize()
     }
 
     fn runtime_system_bindings(&self) -> Result<RuntimeSystemBindings, Box<dyn Error>> {
@@ -1462,6 +1469,33 @@ fn warn_config_normalized(message: &str) {
         warnings.push(message.to_string());
     }
     eprintln!("[config warning] {message}");
+}
+
+fn emit_config_audit_warnings(warnings: &[ConfigAuditWarning]) {
+    for warning in warnings {
+        let message = format_config_audit_warning(warning);
+        if let Ok(mut stored_warnings) = CONFIG_WARNINGS.lock() {
+            stored_warnings.push(message.clone());
+        }
+        eprintln!(
+            "{} {message}",
+            config_audit_warning_prefix(warning.severity)
+        );
+    }
+}
+
+fn config_audit_warning_prefix(severity: ConfigAuditSeverity) -> &'static str {
+    match severity {
+        ConfigAuditSeverity::Info | ConfigAuditSeverity::Warning => "[config warning]",
+        ConfigAuditSeverity::Deprecated => "[config deprecated]",
+    }
+}
+
+fn format_config_audit_warning(warning: &ConfigAuditWarning) -> String {
+    format!(
+        "{}: {} Suggestion: {}",
+        warning.path, warning.message, warning.suggestion
+    )
 }
 
 fn take_config_warnings() -> Vec<String> {
