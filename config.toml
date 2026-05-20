@@ -1,5 +1,7 @@
 # Multi MouseMover configuration
 #
+# Canonical config reference: docs/config.md
+#
 # Key names are parsed by src/keyboard.rs and chords use "+" between modifiers
 # and keys, for example "RightAlt+R". Use "/" for the main Slash key in
 # user-facing bindings; "Slash" and "FORWARD_SLASH" are accepted aliases.
@@ -182,6 +184,9 @@ mode = "precision"
 cursor_between_stages = "none"
 start_region = "current_monitor"
 preview_edge_behavior = "clamp"
+
+[jump.hints]
+selection_keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 # Overlay drawing flags for jump mode.
 [jump.visuals]

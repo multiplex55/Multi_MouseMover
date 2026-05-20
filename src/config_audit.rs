@@ -538,6 +538,98 @@ mod tests {
     }
 
     #[test]
+    fn docs_reference_paths_exist_in_config_schema_smoke() {
+        let docs = include_str!("../docs/config.md");
+        let rows = config_reference_rows(docs);
+        let required_paths = [
+            "polling_rate",
+            "grid_size.width",
+            "mouse_speed.default_speed",
+            "jump.coarse.width",
+            "jump.fine.width",
+            "jump.precise.enabled",
+            "jump.coarse.zoom_scale",
+            "jump.hints.selection_keys",
+        ];
+
+        assert!(!rows.is_empty(), "expected config reference rows");
+
+        for path in required_paths {
+            assert!(
+                rows.iter()
+                    .any(|(documented_path, _)| documented_path == path),
+                "docs/config.md does not document required path {path}"
+            );
+        }
+
+        for (path, status) in rows {
+            assert!(
+                matches!(
+                    status.as_str(),
+                    "Active" | "Legacy" | "Deprecated alias" | "Preview-related"
+                ),
+                "unexpected documented status {status:?} for {path}"
+            );
+            assert!(
+                is_known_active_path(&path) || is_documented_legacy_or_group_path(&path),
+                "docs/config.md documents {path}, but config_audit does not recognize it"
+            );
+        }
+    }
+
+    fn config_reference_rows(docs: &str) -> Vec<(String, String)> {
+        let mut in_config_paths = false;
+        let mut rows = Vec::new();
+
+        for line in docs.lines() {
+            match line {
+                "## Config Paths" => {
+                    in_config_paths = true;
+                    continue;
+                }
+                "## Critical Examples" => break,
+                _ => {}
+            }
+
+            if !in_config_paths || !line.starts_with("| `") {
+                continue;
+            }
+
+            let columns: Vec<&str> = line.split('|').map(str::trim).collect();
+            if columns.len() < 7 {
+                continue;
+            }
+
+            rows.push((
+                columns[1].trim_matches('`').to_string(),
+                columns[5].to_string(),
+            ));
+        }
+
+        rows
+    }
+
+    fn is_documented_legacy_or_group_path(path: &str) -> bool {
+        matches!(
+            path,
+            "jump.move_cursor_after_each_stage"
+                | "jump.<stage>.preview_margin_percent"
+                | "system_bindings.polling_rate"
+                | "system_bindings.grid_size"
+                | "grid_mode.starting_speed"
+                | "grid_mode.acceleration"
+                | "grid_mode.acceleration_rate"
+                | "grid_mode.top_speed"
+                | "jump.profiles.*.visuals.*"
+                | "jump.profiles.*.coarse.*"
+                | "jump.profiles.*.fine.*"
+                | "jump.profiles.*.precise.*"
+                | "status_overlay.fields.*"
+                | "tooltip_overlay.events.*"
+        )
+    }
+
+    #[test]
     fn audit_parses_invalid_toml_gracefully() {
         let report = audit_config_toml("[jump\nmode = \"precision\"");
 
