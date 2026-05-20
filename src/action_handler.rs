@@ -156,6 +156,8 @@ pub struct TopSpeedBehavior {
 impl TopSpeedBehavior {
     fn from_config(config: &Config) -> Self {
         Self {
+            // Preserve legacy top_speed semantics when the configured baseline moves:
+            // top_speed contributes ramp headroom above [mouse_speed].default_speed.
             acceleration_headroom: (config.top_speed - config.starting_speed).max(0),
         }
     }
@@ -1057,6 +1059,7 @@ fn advance_speed(
 ) -> i32 {
     *acceleration_counter += 1;
 
+    // These legacy top-level fields are still active runtime ramp controls.
     if *acceleration_counter >= config.acceleration_rate {
         *current_speed += config.acceleration;
         *acceleration_counter = 0;
@@ -1398,6 +1401,77 @@ mod tests {
 
         assert_eq!(first.speed, config.starting_speed);
         assert_eq!(second.speed, config.starting_speed + config.acceleration);
+    }
+
+    #[test]
+    fn legacy_acceleration_fields_still_affect_runtime_speed_ramp() {
+        let config = Config {
+            starting_speed: 3,
+            mouse_speed: crate::MouseSpeedConfig {
+                default_speed: 3,
+                min_speed: 1,
+                max_speed: 12,
+                speed_step: 1,
+                flash_indicator_ms: 700,
+            },
+            acceleration: 4,
+            acceleration_rate: 3,
+            top_speed: 9,
+            ..Config::default()
+        };
+        let mut current_speed = config.mouse_speed.default_speed;
+        let mut acceleration_counter = 0;
+        let active_actions = actions(&[Action::MoveRight]);
+
+        let first = tick(
+            &active_actions,
+            &config,
+            config.mouse_speed.default_speed,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+        let second = tick(
+            &active_actions,
+            &config,
+            config.mouse_speed.default_speed,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+        let third = tick(
+            &active_actions,
+            &config,
+            config.mouse_speed.default_speed,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+        let fourth = tick(
+            &active_actions,
+            &config,
+            config.mouse_speed.default_speed,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+        let fifth = tick(
+            &active_actions,
+            &config,
+            config.mouse_speed.default_speed,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+        let sixth = tick(
+            &active_actions,
+            &config,
+            config.mouse_speed.default_speed,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        assert_eq!(first.speed, 3);
+        assert_eq!(second.speed, 3);
+        assert_eq!(third.speed, 7);
+        assert_eq!(fourth.speed, 7);
+        assert_eq!(fifth.speed, 7);
+        assert_eq!(sixth.speed, 9);
     }
 
     #[test]

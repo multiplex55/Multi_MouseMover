@@ -203,10 +203,12 @@ struct Config {
     wheel: WheelConfig,
     wheel_profiles: HashMap<String, WheelProfileConfig>,
     edge_jump: EdgeJumpConfig,
-    starting_speed: i32,    // Initial speed in pixels
-    acceleration: i32,      // Increment value for acceleration
-    acceleration_rate: u32, // Polling cycles before applying acceleration
-    top_speed: i32,
+    // Legacy compatibility alias for the movement baseline. New configs should use
+    // [mouse_speed].default_speed; normalization keeps starting_speed synchronized.
+    starting_speed: i32,
+    acceleration: i32,      // Active ramp increment applied while movement is held.
+    acceleration_rate: u32, // Active polling cycles before applying acceleration.
+    top_speed: i32,         // Active legacy cap; treated as headroom above the baseline.
 }
 
 impl Default for Config {
@@ -994,6 +996,8 @@ impl Config {
         self.normalize_runtime_profiles();
         self.normalize_edge_jump_config();
         self.normalize_tooltip_overlay_config();
+        // Keep the legacy field stable for downstream code and diagnostics after the
+        // modern baseline has won normalization.
         self.starting_speed = self.mouse_speed.default_speed;
         self.runtime_system_bindings()?;
         Ok(self)
@@ -1108,6 +1112,10 @@ impl Config {
     }
 
     fn normalize_mouse_speed_config(&mut self) {
+        let legacy_starting_speed = self.starting_speed;
+        let default_mouse_speed = MouseSpeedConfig::default().default_speed;
+        let legacy_starting_speed_set = legacy_starting_speed != Config::default().starting_speed;
+
         if self.mouse_speed.min_speed < 1 {
             warn_config_normalized("mouse_speed.min_speed is below 1; clamping to 1");
             self.mouse_speed.min_speed = 1;
@@ -1135,12 +1143,20 @@ impl Config {
             self.mouse_speed.flash_indicator_ms = DEFAULT_MOUSE_SPEED_FLASH_MS;
         }
 
-        if self.starting_speed != Config::default().starting_speed
-            && self.mouse_speed.default_speed == MouseSpeedConfig::default().default_speed
-        {
+        if legacy_starting_speed_set && self.mouse_speed.default_speed == default_mouse_speed {
+            warn_config_info(
+                "starting_speed is a compatibility field; prefer [mouse_speed].default_speed",
+            );
             self.mouse_speed.default_speed = self
                 .starting_speed
                 .clamp(self.mouse_speed.min_speed, self.mouse_speed.max_speed);
+        } else if legacy_starting_speed_set
+            && legacy_starting_speed != self.mouse_speed.default_speed
+        {
+            warn_config_info(&format!(
+                "starting_speed={} is ignored because [mouse_speed].default_speed={} is the preferred movement baseline",
+                legacy_starting_speed, self.mouse_speed.default_speed
+            ));
         }
     }
 
@@ -1467,6 +1483,14 @@ impl Config {
 fn warn_config_normalized(message: &str) {
     if let Ok(mut warnings) = CONFIG_WARNINGS.lock() {
         warnings.push(message.to_string());
+    }
+    eprintln!("[config warning] {message}");
+}
+
+fn warn_config_info(message: &str) {
+    let message = format!("info: {message}");
+    if let Ok(mut warnings) = CONFIG_WARNINGS.lock() {
+        warnings.push(message.clone());
     }
     eprintln!("[config warning] {message}");
 }
@@ -3961,6 +3985,21 @@ mod tests {
     }
 
     #[test]
+    fn normalize_prefers_mouse_speed_default_for_starting_speed() {
+        let config = parse_config(
+            r#"
+            starting_speed = 4
+
+            [mouse_speed]
+            default_speed = 5
+            "#,
+        );
+
+        assert_eq!(config.mouse_speed.default_speed, 5);
+        assert_eq!(config.starting_speed, 5);
+    }
+
+    #[test]
     fn wheel_and_edge_jump_sections_parse_with_sane_defaults() {
         let config = parse_config(
             r#"
@@ -4102,6 +4141,38 @@ mod tests {
         assert!(warnings
             .iter()
             .any(|warning| warning.contains("wheel.vertical_multiplier is below 1")));
+    }
+
+    #[test]
+    fn movement_policy_warnings_emitted_for_legacy_preferred_paths() {
+        let _ = take_config_warnings();
+
+        let legacy_seeded = parse_config("starting_speed = 4");
+        let seeded_warnings = take_config_warnings();
+
+        assert_eq!(legacy_seeded.mouse_speed.default_speed, 4);
+        assert!(seeded_warnings.iter().any(|warning| {
+            warning.contains("info:")
+                && warning.contains("starting_speed is a compatibility field")
+                && warning.contains("[mouse_speed].default_speed")
+        }));
+
+        let modern_preferred = parse_config(
+            r#"
+            starting_speed = 4
+
+            [mouse_speed]
+            default_speed = 5
+            "#,
+        );
+        let preferred_warnings = take_config_warnings();
+
+        assert_eq!(modern_preferred.starting_speed, 5);
+        assert!(preferred_warnings.iter().any(|warning| {
+            warning.contains("info:")
+                && warning.contains("starting_speed=4 is ignored")
+                && warning.contains("[mouse_speed].default_speed=5")
+        }));
     }
 
     #[test]
