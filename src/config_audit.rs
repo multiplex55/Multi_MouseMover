@@ -511,6 +511,32 @@ mod tests {
     }
 
     #[test]
+    fn default_config_has_no_mis_scoped_legacy_fields() {
+        let report = audit_config_toml(include_str!("../config.toml"));
+        let mis_scoped_paths = [
+            "system_bindings.polling_rate",
+            "system_bindings.grid_size",
+            "system_bindings.grid_size.width",
+            "system_bindings.grid_size.height",
+            "grid_mode.starting_speed",
+            "grid_mode.acceleration",
+            "grid_mode.acceleration_rate",
+            "grid_mode.top_speed",
+            "jump.move_cursor_after_each_stage",
+        ];
+
+        assert!(
+            report
+                .warnings
+                .iter()
+                .all(|warning| !mis_scoped_paths.contains(&warning.path.as_str())
+                    && !warning.path.ends_with(".preview_margin_percent")),
+            "mis-scoped legacy warnings in default config: {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
     fn audit_parses_invalid_toml_gracefully() {
         let report = audit_config_toml("[jump\nmode = \"precision\"");
 

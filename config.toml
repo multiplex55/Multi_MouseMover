@@ -1,12 +1,32 @@
 # Multi MouseMover configuration
 #
-# Key names are parsed by src/keyboard.rs and chords use "+" between modifiers and
-# keys, for example "RightAlt+R". Action names are parsed by src/action.rs.
+# Key names are parsed by src/keyboard.rs and chords use "+" between modifiers
+# and keys, for example "RightAlt+R". Use "/" for the main Slash key in
+# user-facing bindings; "Slash" and "FORWARD_SLASH" are accepted aliases.
+# Action names are parsed by src/action.rs.
 
 # ---------------------------------------------------------------------------
-# Action bindings
+# Root runtime settings
 # ---------------------------------------------------------------------------
-# These bindings are handled only while active mode is enabled.
+# polling_rate controls the main input loop delay in milliseconds.
+polling_rate = 8
+
+# Held movement starts at starting_speed, then adds acceleration every
+# acceleration_rate polling cycles until it reaches top_speed.
+starting_speed = 1
+acceleration = 2
+acceleration_rate = 1
+top_speed = 6
+
+# Deprecated compatibility fallback for older configs. grid_size is used only
+# when [jump.coarse] is missing or has width/height set to 0x0. Prefer
+# [jump.coarse].width and [jump.coarse].height in new configs.
+grid_size = { width = 10, height = 10 }
+
+# ---------------------------------------------------------------------------
+# Key and system bindings
+# ---------------------------------------------------------------------------
+# These action bindings are handled only while active mode is enabled.
 key_bindings = [
     ["W", "move_up"],
     ["A", "move_left"],
@@ -51,41 +71,14 @@ key_bindings = [
     ["/", "show_help"]
 ]
 
-# ---------------------------------------------------------------------------
-# System bindings
-# ---------------------------------------------------------------------------
 # These bindings remain available in both active and idle mode.
 [system_bindings]
 toggle_active = "Ctrl+E"
 exit = "Escape"
 
 # ---------------------------------------------------------------------------
-# Movement
+# Movement speed and profiles
 # ---------------------------------------------------------------------------
-polling_rate = 8
-
-# Legacy coarse-grid fallback. Prefer [jump.coarse] for new configs.
-grid_size = { width = 10, height = 10 }
-
-[grid_mode]
-enabled = true
-start_region = "current_monitor"
-width_percent = 1.0
-height_percent = 1.0
-center_on_cursor = true
-min_width_px = 80
-min_height_px = 80
-move_cursor_each_step = true
-line_visible = true
-show_direction_labels = true
-
-# Held movement starts at [mouse_speed].default_speed, then ramps with these
-# legacy acceleration settings.
-acceleration = 2
-acceleration_rate = 1
-starting_speed = 1
-top_speed = 6
-
 [mouse_speed]
 default_speed = 1
 min_speed = 1
@@ -117,7 +110,22 @@ speed_step = 1
 flash_indicator_ms = 700
 
 # ---------------------------------------------------------------------------
-# Click
+# Grid mode
+# ---------------------------------------------------------------------------
+[grid_mode]
+enabled = true
+start_region = "current_monitor"
+width_percent = 1.0
+height_percent = 1.0
+center_on_cursor = true
+min_width_px = 80
+min_height_px = 80
+move_cursor_each_step = true
+line_visible = true
+show_direction_labels = true
+
+# ---------------------------------------------------------------------------
+# Click bindings
 # ---------------------------------------------------------------------------
 # Click actions are bound above:
 # - SPACE: left_click
@@ -127,7 +135,7 @@ flash_indicator_ms = 700
 # - .: click_then_disable
 
 # ---------------------------------------------------------------------------
-# Wheel
+# Wheel speed and profiles
 # ---------------------------------------------------------------------------
 [wheel]
 default_speed = 3
@@ -167,14 +175,15 @@ horizontal_multiplier = 3
 vertical_multiplier = 1
 
 # ---------------------------------------------------------------------------
-# Jump
+# Jump mode, stages, visuals, and labels
 # ---------------------------------------------------------------------------
 [jump]
 mode = "precision"
 cursor_between_stages = "none"
-start_region = "virtual_screen"
+start_region = "current_monitor"
 preview_edge_behavior = "clamp"
 
+# Overlay drawing flags for jump mode.
 [jump.visuals]
 selected_region_outline = true
 preview_outline = true
@@ -192,6 +201,11 @@ final_crosshair = true
 # visual_context_margin_percent expands only the preview source. With
 # target_margin_percent = 0 and visual_context_margin_percent = 5, the overlay
 # shows 5% surrounding context without making that context selectable.
+# zoom_scale affects only the captured preview image size for opaque previews;
+# it does not change the target grid math. Transparent-grid mode draws over the
+# real desktop and ignores preview zoom/source shifting.
+# preview_edge_behavior controls how opaque preview context behaves near screen
+# edges. Stage-level values override the [jump] default.
 #
 # Deprecated alias: preview_margin_percent is accepted during the compatibility
 # window and maps to visual_context_margin_percent only when that new field is
@@ -233,7 +247,7 @@ separators = true
 hide_threshold_px = 0
 
 [jump.precise]
-enabled = true
+enabled = false
 width = 5
 height = 5
 aim_point = "center"
@@ -316,8 +330,7 @@ use_work_area = false
 # ---------------------------------------------------------------------------
 # Profiles
 # ---------------------------------------------------------------------------
-# Jump profiles merge over [jump] for one launch. Bind with either
-# jump_mode_profile:<name> or jump_mode_profile.<name>.
+# Jump profiles merge over [jump] for one launch.
 [jump.profiles.fast]
 mode = "single"
 cursor_between_stages = "none"
