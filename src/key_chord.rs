@@ -89,8 +89,7 @@ impl KeyChord {
         self.key == event.key
             && modifier_matches(self.ctrl, event.ctrl_down, is_ctrl_key(self.key))
             && modifier_matches(self.alt, event.alt_down, is_alt_key(self.key))
-            && ((!self.right_alt || event.right_alt_down)
-                || (!self.right_alt && event.right_alt_down && self.key == VirtualKey::RightAlt))
+            && (!self.right_alt || event.right_alt_down)
             && modifier_matches(self.shift, event.shift_down, is_shift_key(self.key))
             && self.win == event.win_down
     }

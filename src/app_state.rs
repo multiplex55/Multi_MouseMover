@@ -81,6 +81,7 @@ pub struct AppState {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum JumpState {
     Inactive,
     Active {
@@ -121,6 +122,7 @@ pub enum GridInputUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum JumpOverlayResolution {
     Hidden,
     Visible(JumpOverlayView),
@@ -310,6 +312,7 @@ impl AppState {
         true
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn enter_grid_mode(
         &mut self,
         monitor_bounds: JumpRegion,

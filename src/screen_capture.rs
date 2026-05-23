@@ -4,6 +4,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ScreenSnapshot {
     pub left: i32,
     pub top: i32,

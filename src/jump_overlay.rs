@@ -168,6 +168,7 @@ fn format_jump_indicator(view: &JumpOverlayView) -> String {
     )
 }
 
+#[allow(dead_code)]
 fn preview_source_rect(view: &JumpOverlayView, snapshot: &ScreenSnapshot) -> RECT {
     let preview_source_region = preview_source_region_for_view(view);
     let target_region = view.target_region;
@@ -200,6 +201,7 @@ fn preview_source_rect(view: &JumpOverlayView, snapshot: &ScreenSnapshot) -> REC
     region_to_rect(region)
 }
 
+#[allow(dead_code)]
 fn context_would_exceed_bounds(
     region: JumpRegion,
     margin_percent: u8,
@@ -213,6 +215,7 @@ fn context_would_exceed_bounds(
         || region.top + region.height + margin_y > snapshot.top + snapshot.height
 }
 
+#[allow(dead_code)]
 fn clamp_region_to_snapshot(region: JumpRegion, snapshot: &ScreenSnapshot) -> JumpRegion {
     let left = region.left.max(snapshot.left);
     let top = region.top.max(snapshot.top);
@@ -226,6 +229,7 @@ fn clamp_region_to_snapshot(region: JumpRegion, snapshot: &ScreenSnapshot) -> Ju
     }
 }
 
+#[allow(dead_code)]
 fn shift_region_into_snapshot(region: JumpRegion, snapshot: &ScreenSnapshot) -> JumpRegion {
     let width = region.width.min(snapshot.width).max(0);
     let height = region.height.min(snapshot.height).max(0);

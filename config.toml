@@ -88,6 +88,16 @@ max_speed = 12
 speed_step = 1
 flash_indicator_ms = 700
 
+[slow_mouse]
+strategy = "fixed" # fixed | multiplier | subtract
+fixed_speed = 1
+multiplier = 0.25
+subtract_speed = 4
+min_speed = 1
+max_speed = 2
+acceleration = 0
+acceleration_rate = 1
+
 # Preset examples. Cycle them with RightAlt+C / RightAlt+X or bind
 # movement_profile:<name> directly.
 [movement_profiles.fast]

@@ -720,7 +720,7 @@ impl KeyBindings {
             self.bindings.push((chord, action));
         }
         self.bindings
-            .sort_by(|(left, _), (right, _)| right.specificity().cmp(&left.specificity()));
+            .sort_by_key(|(chord, _)| std::cmp::Reverse(chord.specificity()));
     }
 
     pub fn clear(&mut self) {
