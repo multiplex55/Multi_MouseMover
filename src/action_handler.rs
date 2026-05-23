@@ -974,6 +974,18 @@ fn debug_diagnostics_enabled() -> bool {
         .unwrap_or(false)
 }
 
+fn effective_slow_speed(config: &Config, baseline_speed: i32) -> i32 {
+    let resolved = match config.slow_mouse.strategy {
+        crate::SlowMouseStrategy::Fixed => config.slow_mouse.fixed_speed,
+        crate::SlowMouseStrategy::Multiplier => {
+            (f64::from(baseline_speed) * f64::from(config.slow_mouse.multiplier)).round() as i32
+        }
+        crate::SlowMouseStrategy::Subtract => baseline_speed - config.slow_mouse.subtract_speed,
+    };
+
+    resolved.clamp(config.slow_mouse.min_speed, config.slow_mouse.max_speed)
+}
+
 fn calculate_movement(
     active_actions: &HashSet<Action>,
     config: &Config,
@@ -1025,7 +1037,7 @@ fn calculate_movement(
     let speed = if active_actions.contains(&Action::SlowMouse) {
         *current_speed = baseline_speed;
         *acceleration_counter = 0;
-        *current_speed
+        effective_slow_speed(config, baseline_speed)
     } else {
         advance_speed(
             config,
@@ -1535,8 +1547,8 @@ mod tests {
             &mut acceleration_counter,
         );
 
-        assert_eq!(movement.speed, config.starting_speed);
-        assert_eq!(movement.dx, f64::from(config.starting_speed));
+        assert_eq!(movement.speed, effective_slow_speed(&config, config.starting_speed));
+        assert_eq!(movement.dx, f64::from(effective_slow_speed(&config, config.starting_speed)));
         assert_eq!(movement.dy, 0.0);
     }
 
@@ -1832,9 +1844,28 @@ mod tests {
         let slow_tick = mouse.tick_movement(&slow_actions, Duration::from_millis(8));
         let release_tick = mouse.tick_movement(&movement_actions, Duration::from_millis(8));
 
-        assert_eq!(slow_tick.speed, 4);
+        assert_eq!(slow_tick.speed, effective_slow_speed(&mouse.config, 4));
         assert_eq!(release_tick.speed, 4);
         assert_eq!(mouse.mouse_speed_baseline, 4);
+    }
+
+    #[test]
+    fn effective_slow_speed_applies_strategy_and_clamps() {
+        let mut config = test_config();
+        config.slow_mouse.min_speed = 2;
+        config.slow_mouse.max_speed = 6;
+
+        config.slow_mouse.strategy = crate::SlowMouseStrategy::Fixed;
+        config.slow_mouse.fixed_speed = 9;
+        assert_eq!(effective_slow_speed(&config, 5), 6);
+
+        config.slow_mouse.strategy = crate::SlowMouseStrategy::Multiplier;
+        config.slow_mouse.multiplier = 0.49;
+        assert_eq!(effective_slow_speed(&config, 9), 4);
+
+        config.slow_mouse.strategy = crate::SlowMouseStrategy::Subtract;
+        config.slow_mouse.subtract_speed = 10;
+        assert_eq!(effective_slow_speed(&config, 9), 2);
     }
 
     #[test]
