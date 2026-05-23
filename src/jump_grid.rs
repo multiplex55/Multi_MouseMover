@@ -3,8 +3,7 @@
 /// This is intentionally not spreadsheet style. For a one-letter axis, labels
 /// are `A` through `Z`. For a two-letter label, index 0 is `AA`, index 25 is
 /// `AZ`, index 26 is `BA`, and so on.
-#![allow(dead_code)]
-
+#[allow(dead_code)]
 pub const DEFAULT_SELECTION_KEYS: &[char] = &[
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
     'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
