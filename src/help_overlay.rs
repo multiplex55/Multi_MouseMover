@@ -120,25 +120,13 @@ impl Default for HelpRuntimeStats {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct HelpSpeedTier {
     pub current: i32,
     pub default: i32,
     pub min: i32,
     pub max: i32,
     pub step: i32,
-}
-
-impl Default for HelpSpeedTier {
-    fn default() -> Self {
-        Self {
-            current: 0,
-            default: 0,
-            min: 0,
-            max: 0,
-            step: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

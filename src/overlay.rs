@@ -78,44 +78,29 @@ struct IndicatorVisual {
     draw_outline: bool,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StatusOverlayVisibility {
+    #[default]
     Visible,
     Hidden,
 }
 
-impl Default for StatusOverlayVisibility {
-    fn default() -> Self {
-        Self::Visible
-    }
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StatusOverlayMode {
+    #[default]
     Minimal,
     Compact,
     Detailed,
     Hidden,
 }
 
-impl Default for StatusOverlayMode {
-    fn default() -> Self {
-        Self::Minimal
-    }
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StatusOverlayPositioning {
+    #[default]
     Cursor,
-}
-
-impl Default for StatusOverlayPositioning {
-    fn default() -> Self {
-        Self::Cursor
-    }
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -601,7 +586,7 @@ impl OverlayWindow {
 
                         // Only update if the position is different to avoid unnecessary SetWindowPos calls
                         let mut is_moving = is_moving_clone.lock().unwrap();
-                        if *is_moving == false {
+                        if !*is_moving {
                             *is_moving = true;
                             unsafe {
                                 let _ = SetWindowPos(

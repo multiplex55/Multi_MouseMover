@@ -219,9 +219,10 @@ impl StoredConfigWarning {
     }
 
     fn summary_text(&self) -> String {
-        if self.suggestion.is_empty() {
-            self.message.clone()
-        } else if self.path == "<config>" || self.message.starts_with(&self.path) {
+        if self.suggestion.is_empty()
+            || self.path == "<config>"
+            || self.message.starts_with(&self.path)
+        {
             self.message.clone()
         } else {
             format!(
@@ -346,19 +347,14 @@ fn default_key_bindings() -> Vec<(String, String)> {
     .collect()
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TooltipOverlayPositioning {
+    #[default]
     Cursor,
     Center,
     TopRight,
     BottomRight,
-}
-
-impl Default for TooltipOverlayPositioning {
-    fn default() -> Self {
-        Self::Cursor
-    }
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -419,21 +415,16 @@ impl Default for TooltipOverlayConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum JumpAimPoint {
+    #[default]
     Center,
     TopLeft,
     TopRight,
     BottomLeft,
     BottomRight,
     CustomOffset,
-}
-
-impl Default for JumpAimPoint {
-    fn default() -> Self {
-        Self::Center
-    }
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
@@ -490,9 +481,10 @@ pub struct MouseSpeedConfig {
     flash_indicator_ms: u64,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SlowMouseStrategy {
+    #[default]
     Fixed,
     Multiplier,
     Subtract,
@@ -538,12 +530,6 @@ impl Default for MouseSpeedConfig {
     }
 }
 
-impl Default for SlowMouseStrategy {
-    fn default() -> Self {
-        Self::Fixed
-    }
-}
-
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(default)]
 pub struct WheelConfig {
@@ -572,7 +558,7 @@ impl Default for WheelConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct WheelProfileConfig {
     default_speed: Option<i32>,
@@ -583,21 +569,6 @@ pub struct WheelProfileConfig {
     speed_indicator_ms: Option<u64>,
     vertical_multiplier: Option<i32>,
     horizontal_multiplier: Option<i32>,
-}
-
-impl Default for WheelProfileConfig {
-    fn default() -> Self {
-        Self {
-            default_speed: None,
-            min_speed: None,
-            max_speed: None,
-            speed_step: None,
-            tick_interval: None,
-            speed_indicator_ms: None,
-            vertical_multiplier: None,
-            horizontal_multiplier: None,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -664,76 +635,51 @@ impl Default for GridModeConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 enum JumpMode {
     Single,
+    #[default]
     Precision,
 }
 
-impl Default for JumpMode {
-    fn default() -> Self {
-        Self::Precision
-    }
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 enum CursorBetweenStagesMode {
+    #[default]
     None,
     MoveToRegionCenter,
     PreviewOnly,
     WarpAndContinue,
 }
 
-impl Default for CursorBetweenStagesMode {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewEdgeBehavior {
+    #[default]
     Clamp,
     ShiftIntoBounds,
     AllowAsymmetricContext,
     DisableContextNearEdges,
 }
 
-impl Default for PreviewEdgeBehavior {
-    fn default() -> Self {
-        Self::Clamp
-    }
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum JumpStartRegion {
     VirtualScreen,
+    #[default]
     CurrentMonitor,
     ActiveWindowMonitor,
     ActiveWindowBounds,
 }
 
-impl Default for JumpStartRegion {
-    fn default() -> Self {
-        Self::CurrentMonitor
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JumpTargetRegionMode {
+    #[default]
     ExactRegion,
     RegionWithContext,
     ExpandedTarget,
     CursorCenteredZoom,
-}
-
-impl Default for JumpTargetRegionMode {
-    fn default() -> Self {
-        Self::ExactRegion
-    }
 }
 
 fn parse_jump_target_region_mode(value: &str) -> Option<JumpTargetRegionMode> {
