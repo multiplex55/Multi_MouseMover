@@ -1966,6 +1966,7 @@ fn is_keyboard_hook_key_message(code: i32, w_param: WPARAM) -> bool {
             || w_param.0 as u32 == WM_SYSKEYUP)
 }
 
+#[allow(dead_code)]
 fn is_keyboard_hook_routing_event(code: i32, w_param: WPARAM, flags: u32) -> bool {
     is_keyboard_hook_key_message(code, w_param) && !is_injected_keyboard_hook_flags(flags)
 }

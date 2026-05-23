@@ -76,6 +76,7 @@ impl JumpStage {
         stage
     }
 
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub fn with_target_region_mode(
         width: u32,
         height: u32,
@@ -99,6 +100,7 @@ impl JumpStage {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_selection_keys(
         width: u32,
         height: u32,
