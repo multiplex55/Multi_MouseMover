@@ -638,6 +638,54 @@ mod tests {
     }
 
     #[test]
+    fn audit_treats_slow_mouse_paths_as_known_and_active() {
+        let report = audit_config_toml(
+            r#"
+            [slow_mouse]
+            strategy = "fixed"
+            fixed_speed = 1
+            multiplier = 0.75
+            subtract_speed = 1
+            min_speed = 1
+            max_speed = 5
+            acceleration = 1
+            acceleration_rate = 1
+            "#,
+        );
+
+        for path in [
+            "slow_mouse.strategy",
+            "slow_mouse.fixed_speed",
+            "slow_mouse.multiplier",
+            "slow_mouse.subtract_speed",
+            "slow_mouse.min_speed",
+            "slow_mouse.max_speed",
+            "slow_mouse.acceleration",
+            "slow_mouse.acceleration_rate",
+        ] {
+            assert!(
+                !report.warnings.iter().any(|warning| warning.path == path),
+                "expected {path} to be known/active, warnings: {:?}",
+                report.warnings
+            );
+        }
+    }
+
+    #[test]
+    fn audit_keeps_slow_mouse_typo_path_unknown() {
+        let report = audit_config_toml(
+            r#"
+            [slow_mouse]
+            multiplyer = 0.75
+            "#,
+        );
+
+        let warning = warning_for(&report, "slow_mouse.multiplyer");
+        assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
+        assert!(warning.message.contains("Unknown config path"));
+    }
+
+    #[test]
     fn audit_parses_invalid_toml_gracefully() {
         let report = audit_config_toml("[jump\nmode = \"precision\"");
 
