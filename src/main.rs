@@ -2373,6 +2373,12 @@ fn help_stats_from_snapshot(
         },
         acceleration: snapshot.acceleration,
         acceleration_rate: snapshot.acceleration_rate,
+        slow_strategy: snapshot.slow_strategy,
+        slow_effective_speed: snapshot.slow_effective_speed,
+        slow_min_speed: snapshot.slow_min_speed,
+        slow_max_speed: snapshot.slow_max_speed,
+        slow_acceleration: snapshot.slow_acceleration,
+        slow_acceleration_rate: snapshot.slow_acceleration_rate,
         top_speed: snapshot.top_speed,
         polling_rate_ms: snapshot.polling_rate_ms,
         wheel_tick_interval_ms: snapshot.wheel_tick_interval_ms,
@@ -2780,6 +2786,16 @@ fn startup_validation_summary(config: &Config, warnings: &[String]) -> String {
             config.wheel.vertical_multiplier,
             config.wheel.horizontal_multiplier,
             config.wheel_profiles.len()
+        ),
+        format!(
+            "slow_mouse strategy={:?} speed={} (default {}, range {}..{}) acceleration={} every {} tick(s)",
+            config.slow_mouse.strategy,
+            crate::action_handler::effective_slow_speed(config, config.mouse_speed.default_speed),
+            config.slow_mouse.fixed_speed,
+            config.slow_mouse.min_speed,
+            config.slow_mouse.max_speed,
+            config.slow_mouse.acceleration,
+            config.slow_mouse.acceleration_rate,
         ),
         format!(
             "jump mode={:?} start_region={:?} profiles={}",
@@ -4389,6 +4405,7 @@ mod tests {
         assert!(summary.contains("polling_rate=8ms"));
         assert!(summary.contains("mouse_speed default=1 range=1..12 step=1 profiles=1"));
         assert!(summary.contains("wheel default=3 range=1..12 step=1 tick=8ms"));
+        assert!(summary.contains("slow_mouse strategy=Fixed speed=1 (default 1, range 1..2) acceleration=0 every 1 tick(s)"));
         assert!(summary.contains("warnings=1"));
         assert!(summary.contains("warning: wheel.min_speed clamped"));
     }
