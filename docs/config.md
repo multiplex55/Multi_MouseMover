@@ -17,6 +17,14 @@ Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 | `mouse_speed.max_speed` | integer | `12` | Yes | Active | Upper bound for runtime mouse speed changes. |
 | `mouse_speed.speed_step` | integer | `1` | Yes | Active | Increment used by mouse speed up/down actions. |
 | `mouse_speed.flash_indicator_ms` | integer milliseconds | `700` | Yes | Active | Duration for mouse-speed feedback. |
+| `slow_mouse.strategy` | enum string | `"fixed"` | Yes | Active | Slow-mode speed strategy: `fixed`, `multiplier`, or `subtract`. |
+| `slow_mouse.fixed_speed` | integer | `1` | Yes | Active | Target speed used when `strategy = "fixed"`. |
+| `slow_mouse.multiplier` | float | `0.25` | Yes | Active | Multiplies current normal speed when `strategy = "multiplier"`. |
+| `slow_mouse.subtract_speed` | integer | `4` | Yes | Active | Amount subtracted from current normal speed when `strategy = "subtract"`. |
+| `slow_mouse.min_speed` | integer | `1` | Yes | Active | Lower clamp applied after strategy calculation. |
+| `slow_mouse.max_speed` | integer | `2` | Yes | Active | Upper clamp applied after strategy calculation. |
+| `slow_mouse.acceleration` | integer | `0` | Yes | Active | Slow-mode ramp increment applied while held movement continues. |
+| `slow_mouse.acceleration_rate` | integer polling cycles | `1` | Yes | Active | Slow-mode ramp cadence in polling cycles. |
 | `movement_profiles.*.default_speed` | integer | none | Yes | Active | Optional named movement profile override. |
 | `movement_profiles.*.min_speed` | integer | none | Yes | Active | Optional named movement profile override. |
 | `movement_profiles.*.max_speed` | integer | none | Yes | Active | Optional named movement profile override. |
@@ -151,6 +159,17 @@ Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 | `grid_mode.acceleration` | integer | none | No | Legacy | Mis-scoped old path. Move to top-level `acceleration`. |
 | `grid_mode.acceleration_rate` | integer | none | No | Legacy | Mis-scoped old path. Move to top-level `acceleration_rate`. |
 | `grid_mode.top_speed` | integer | none | No | Legacy | Mis-scoped old path. Move to top-level `top_speed`. |
+
+
+### Slow mouse strategy selection
+
+Slow mode is a separate held-movement tier and is independent from normal `[mouse_speed]` settings. Use `[mouse_speed]` for your regular movement baseline and use `[slow_mouse]` only for the temporary precision tier triggered by the `slow_mouse` action.
+
+- `fixed`: Uses `slow_mouse.fixed_speed` directly (then applies `min_speed`/`max_speed` clamps). Best when you want a predictable precision speed regardless of your current normal speed or profile.
+- `multiplier`: Uses `current_normal_speed * slow_mouse.multiplier` (then clamps). Best when you want slow mode to scale proportionally with whichever normal speed is currently active.
+- `subtract`: Uses `current_normal_speed - slow_mouse.subtract_speed` (then clamps). Best when you want to keep the current speed feel but step down by a consistent amount.
+
+If unsure, start with `fixed` for stable precision behavior, then switch to `multiplier` when you use multiple movement profiles and want consistent relative slowdown.
 
 ## Critical Examples
 
