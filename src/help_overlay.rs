@@ -92,6 +92,12 @@ pub struct HelpRuntimeStats {
     pub wheel_speed: HelpSpeedTier,
     pub acceleration: i32,
     pub acceleration_rate: u32,
+    pub slow_strategy: String,
+    pub slow_effective_speed: i32,
+    pub slow_min_speed: i32,
+    pub slow_max_speed: i32,
+    pub slow_acceleration: i32,
+    pub slow_acceleration_rate: u32,
     pub top_speed: i32,
     pub polling_rate_ms: u64,
     pub wheel_tick_interval_ms: u64,
@@ -112,6 +118,12 @@ impl Default for HelpRuntimeStats {
             wheel_speed: HelpSpeedTier::default(),
             acceleration: 0,
             acceleration_rate: 0,
+            slow_strategy: "fixed".to_string(),
+            slow_effective_speed: 1,
+            slow_min_speed: 1,
+            slow_max_speed: 2,
+            slow_acceleration: 0,
+            slow_acceleration_rate: 1,
             top_speed: 0,
             polling_rate_ms: 0,
             wheel_tick_interval_ms: 0,
@@ -431,6 +443,15 @@ fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
             stats.wheel_speed.min,
             stats.wheel_speed.max,
             stats.wheel_speed.step
+        ),
+        format!(
+            "Slow: {} | Speed: {} (range {}..{}) | Acceleration: {} every {} tick(s)",
+            stats.slow_strategy,
+            stats.slow_effective_speed,
+            stats.slow_min_speed,
+            stats.slow_max_speed,
+            stats.slow_acceleration,
+            stats.slow_acceleration_rate
         ),
         format!(
             "Acceleration: {} every {} tick(s) | Top speed: {} | Polling: {}ms | Wheel tick: {}ms",
@@ -992,6 +1013,12 @@ mod tests {
             },
             acceleration: 3,
             acceleration_rate: 2,
+            slow_strategy: "fixed".to_string(),
+            slow_effective_speed: 1,
+            slow_min_speed: 1,
+            slow_max_speed: 2,
+            slow_acceleration: 0,
+            slow_acceleration_rate: 1,
             top_speed: 15,
             polling_rate_ms: 8,
             wheel_tick_interval_ms: 12,
@@ -1006,6 +1033,7 @@ mod tests {
             lines.contains("Movement profile: fast | Speed: 7 (default 5, range 2..12, step 2)")
         );
         assert!(lines.contains("Wheel profile: precise | Speed: 4 (default 3, range 1..9, step 1)"));
+        assert!(lines.contains("Slow: fixed | Speed: 1 (range 1..2) | Acceleration: 0 every 1 tick(s)"));
         assert!(lines.contains(
             "Acceleration: 3 every 2 tick(s) | Top speed: 15 | Polling: 8ms | Wheel tick: 12ms"
         ));

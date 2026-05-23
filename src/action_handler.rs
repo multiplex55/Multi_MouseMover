@@ -38,6 +38,12 @@ pub struct MouseRuntimeSnapshot {
     pub wheel_speed_step: i32,
     pub acceleration: i32,
     pub acceleration_rate: u32,
+    pub slow_strategy: String,
+    pub slow_effective_speed: i32,
+    pub slow_min_speed: i32,
+    pub slow_max_speed: i32,
+    pub slow_acceleration: i32,
+    pub slow_acceleration_rate: u32,
     pub top_speed: i32,
     pub polling_rate_ms: u64,
     pub wheel_tick_interval_ms: u64,
@@ -227,6 +233,12 @@ impl<B: MouseBackend> MouseMaster<B> {
             wheel_speed_step: self.effective_wheel.speed_step,
             acceleration: self.config.acceleration,
             acceleration_rate: self.config.acceleration_rate,
+            slow_strategy: format!("{:?}", self.config.slow_mouse.strategy).to_lowercase(),
+            slow_effective_speed: effective_slow_speed(&self.config, self.mouse_speed_baseline),
+            slow_min_speed: self.config.slow_mouse.min_speed,
+            slow_max_speed: self.config.slow_mouse.max_speed,
+            slow_acceleration: self.config.slow_mouse.acceleration,
+            slow_acceleration_rate: self.config.slow_mouse.acceleration_rate,
             top_speed: self
                 .top_speed_behavior
                 .top_speed_for_baseline(self.mouse_speed_baseline),
@@ -974,7 +986,7 @@ fn debug_diagnostics_enabled() -> bool {
         .unwrap_or(false)
 }
 
-fn effective_slow_speed(config: &Config, baseline_speed: i32) -> i32 {
+pub(crate) fn effective_slow_speed(config: &Config, baseline_speed: i32) -> i32 {
     let resolved = match config.slow_mouse.strategy {
         crate::SlowMouseStrategy::Fixed => config.slow_mouse.fixed_speed,
         crate::SlowMouseStrategy::Multiplier => {
@@ -1602,7 +1614,10 @@ mod tests {
             &mut acceleration_counter,
         );
 
-        assert_eq!(slow_tick.speed, config.starting_speed);
+        assert_eq!(
+            slow_tick.speed,
+            effective_slow_speed(&config, config.starting_speed)
+        );
         assert_eq!(first_after_release.speed, config.starting_speed);
         assert_eq!(
             second_after_release.speed,
