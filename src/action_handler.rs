@@ -1614,7 +1614,10 @@ mod tests {
             &mut acceleration_counter,
         );
 
-        assert_eq!(slow_tick.speed, config.starting_speed);
+        assert_eq!(
+            slow_tick.speed,
+            effective_slow_speed(&config, config.starting_speed)
+        );
         assert_eq!(first_after_release.speed, config.starting_speed);
         assert_eq!(
             second_after_release.speed,
