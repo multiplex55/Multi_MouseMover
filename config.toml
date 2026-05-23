@@ -88,6 +88,38 @@ max_speed = 12
 speed_step = 1
 flash_indicator_ms = 700
 
+# Slow mode is a temporary precision tier triggered by the `slow_mouse` action
+# (LeftShift in this sample config). It is independent from normal [mouse_speed]:
+# [mouse_speed] controls your baseline movement tier, while [slow_mouse] controls
+# only the held slow-mode tier.
+#
+# Strategy reference:
+# - fixed:      use fixed_speed directly (most predictable; recommended default)
+# - multiplier: scale current normal speed by multiplier
+# - subtract:   reduce current normal speed by subtract_speed
+#
+# Recommended defaults for most users:
+# strategy = "fixed", fixed_speed = 1, min_speed = 1, max_speed = 2,
+# acceleration = 0, acceleration_rate = 1
+#
+# Optional preset snippets:
+# Precision-focused preset (high control, no ramp):
+# [slow_mouse]
+# strategy = "fixed"
+# fixed_speed = 1
+# min_speed = 1
+# max_speed = 2
+# acceleration = 0
+# acceleration_rate = 1
+#
+# Scaled slow mode preset (tracks current normal speed):
+# [slow_mouse]
+# strategy = "multiplier"
+# multiplier = 0.35
+# min_speed = 1
+# max_speed = 4
+# acceleration = 0
+# acceleration_rate = 1
 [slow_mouse]
 strategy = "fixed" # fixed | multiplier | subtract
 fixed_speed = 1
