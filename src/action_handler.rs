@@ -978,7 +978,7 @@ fn effective_slow_speed(config: &Config, baseline_speed: i32) -> i32 {
     let resolved = match config.slow_mouse.strategy {
         crate::SlowMouseStrategy::Fixed => config.slow_mouse.fixed_speed,
         crate::SlowMouseStrategy::Multiplier => {
-            (f64::from(baseline_speed) * config.slow_mouse.multiplier).round() as i32
+            (f64::from(baseline_speed) * f64::from(config.slow_mouse.multiplier)).round() as i32
         }
         crate::SlowMouseStrategy::Subtract => baseline_speed - config.slow_mouse.subtract_speed,
     };
