@@ -263,6 +263,7 @@ struct Config {
     status_overlay: StatusOverlayConfig,
     tooltip_overlay: TooltipOverlayConfig,
     mouse_speed: MouseSpeedConfig,
+    slow_mouse: SlowMouseConfig,
     movement_profiles: HashMap<String, MouseSpeedConfig>,
     wheel: WheelConfig,
     wheel_profiles: HashMap<String, WheelProfileConfig>,
@@ -288,6 +289,7 @@ impl Default for Config {
             status_overlay: StatusOverlayConfig::default(),
             tooltip_overlay: TooltipOverlayConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
+            slow_mouse: SlowMouseConfig::default(),
             movement_profiles: HashMap::new(),
             wheel: WheelConfig::default(),
             wheel_profiles: HashMap::new(),
@@ -488,6 +490,42 @@ pub struct MouseSpeedConfig {
     flash_indicator_ms: u64,
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SlowMouseStrategy {
+    Fixed,
+    Multiplier,
+    Subtract,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(default)]
+pub struct SlowMouseConfig {
+    strategy: SlowMouseStrategy,
+    fixed_speed: i32,
+    multiplier: f32,
+    subtract_speed: i32,
+    min_speed: i32,
+    max_speed: i32,
+    acceleration: i32,
+    acceleration_rate: u32,
+}
+
+impl Default for SlowMouseConfig {
+    fn default() -> Self {
+        Self {
+            strategy: SlowMouseStrategy::Fixed,
+            fixed_speed: 1,
+            multiplier: 0.25,
+            subtract_speed: 4,
+            min_speed: 1,
+            max_speed: 2,
+            acceleration: 0,
+            acceleration_rate: 1,
+        }
+    }
+}
+
 impl Default for MouseSpeedConfig {
     fn default() -> Self {
         Self {
@@ -497,6 +535,12 @@ impl Default for MouseSpeedConfig {
             speed_step: 1,
             flash_indicator_ms: DEFAULT_MOUSE_SPEED_FLASH_MS,
         }
+    }
+}
+
+impl Default for SlowMouseStrategy {
+    fn default() -> Self {
+        Self::Fixed
     }
 }
 
@@ -1075,6 +1119,7 @@ impl Config {
         self.normalize_jump_config();
         self.normalize_final_adjust_config();
         self.normalize_mouse_speed_config();
+        self.normalize_slow_mouse_config();
         self.normalize_wheel_config();
         self.normalize_runtime_profiles();
         self.normalize_edge_jump_config();
@@ -1282,6 +1327,50 @@ impl Config {
         if self.wheel.horizontal_multiplier < 1 {
             warn_config_normalized("wheel.horizontal_multiplier is below 1; clamping to 1");
             self.wheel.horizontal_multiplier = 1;
+        }
+    }
+
+    fn normalize_slow_mouse_config(&mut self) {
+        if self.slow_mouse.min_speed < 1 {
+            warn_config_normalized("slow_mouse.min_speed is below 1; clamping to 1");
+            self.slow_mouse.min_speed = 1;
+        }
+
+        if self.slow_mouse.max_speed < self.slow_mouse.min_speed {
+            warn_config_normalized("slow_mouse.max_speed is below slow_mouse.min_speed; clamping to min");
+            self.slow_mouse.max_speed = self.slow_mouse.min_speed;
+        }
+
+        let clamped_fixed = self
+            .slow_mouse
+            .fixed_speed
+            .clamp(self.slow_mouse.min_speed, self.slow_mouse.max_speed);
+        if clamped_fixed != self.slow_mouse.fixed_speed {
+            warn_config_normalized("slow_mouse.fixed_speed is outside slow_mouse min/max range; clamping");
+            self.slow_mouse.fixed_speed = clamped_fixed;
+        }
+
+        if self.slow_mouse.multiplier <= 0.0 {
+            warn_config_normalized("slow_mouse.multiplier is <= 0.0; using default 0.25");
+            self.slow_mouse.multiplier = SlowMouseConfig::default().multiplier;
+        } else if self.slow_mouse.multiplier > 1.0 {
+            warn_config_normalized("slow_mouse.multiplier is above 1.0; clamping to 1.0");
+            self.slow_mouse.multiplier = 1.0;
+        }
+
+        if self.slow_mouse.subtract_speed < 0 {
+            warn_config_normalized("slow_mouse.subtract_speed is below 0; clamping to 0");
+            self.slow_mouse.subtract_speed = 0;
+        }
+
+        if self.slow_mouse.acceleration < 0 {
+            warn_config_normalized("slow_mouse.acceleration is below 0; clamping to 0");
+            self.slow_mouse.acceleration = 0;
+        }
+
+        if self.slow_mouse.acceleration_rate == 0 {
+            warn_config_normalized("slow_mouse.acceleration_rate is 0; clamping to 1");
+            self.slow_mouse.acceleration_rate = 1;
         }
     }
 
@@ -4171,6 +4260,46 @@ mod tests {
             DEFAULT_MOUSE_SPEED_FLASH_MS
         );
         assert_eq!(config.starting_speed, config.mouse_speed.default_speed);
+    }
+
+    #[test]
+    fn slow_mouse_defaults_when_section_missing() {
+        let config = parse_config("");
+        assert_eq!(config.slow_mouse, SlowMouseConfig::default());
+    }
+
+    #[test]
+    fn slow_mouse_config_parses_and_normalizes_bounds() {
+        let _ = take_config_warnings();
+        let config = parse_config(
+            r#"
+            [slow_mouse]
+            strategy = "subtract"
+            fixed_speed = 99
+            multiplier = 2.0
+            subtract_speed = -2
+            min_speed = 0
+            max_speed = 0
+            acceleration = -1
+            acceleration_rate = 0
+            "#,
+        );
+        let warnings = take_config_warnings();
+
+        assert_eq!(config.slow_mouse.strategy, SlowMouseStrategy::Subtract);
+        assert_eq!(config.slow_mouse.min_speed, 1);
+        assert_eq!(config.slow_mouse.max_speed, 1);
+        assert_eq!(config.slow_mouse.fixed_speed, 1);
+        assert_eq!(config.slow_mouse.multiplier, 1.0);
+        assert_eq!(config.slow_mouse.subtract_speed, 0);
+        assert_eq!(config.slow_mouse.acceleration, 0);
+        assert_eq!(config.slow_mouse.acceleration_rate, 1);
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("slow_mouse.min_speed is below 1")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("slow_mouse.multiplier is above 1.0")));
     }
 
     #[test]
