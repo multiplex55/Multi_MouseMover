@@ -30,33 +30,33 @@ grid_size = { width = 10, height = 10 }
 # ---------------------------------------------------------------------------
 # These action bindings are handled only while active mode is enabled.
 key_bindings = [
-    ["W", "move_up"],
-    ["A", "move_left"],
-    ["S", "move_down"],
-    ["D", "move_right"],
+    ["E", "move_up"],
+    ["S", "move_left"],
+    ["D", "move_down"],
+    ["F", "move_right"],
     ["LeftShift", "slow_mouse"],
 
-    ["SPACE", "left_click"],
-    ["L", "right_click"],
-    ["RightShift", "middle_click"],
+    ["J", "left_click"],
+    ["K", "right_click"],
+    ["L", "middle_click"],
     ["N", "toggle_drag_mode"],
     [".", "click_then_disable"],
 
-    [",", "wheel_up"],
-    ["M", "wheel_down"],
+    ["W", "wheel_up"],
+    ["R", "wheel_down"],
     ["I", "wheel_left"],
     ["O", "wheel_right"],
 
-    ["X", "mouse_speed_down"],
-    ["Z", "mouse_speed_reset"],
-    ["V", "wheel_speed_up"],
-    ["B", "wheel_speed_down"],
+    ["M", "mouse_speed_down"],
+    [",", "mouse_speed_reset"],
+    ["U", "wheel_speed_up"],
+    ["I", "wheel_speed_down"],
     ["RightAlt+C", "movement_profile_next"],
     ["RightAlt+X", "movement_profile_previous"],
     ["RightAlt+V", "wheel_profile_next"],
     ["RightAlt+B", "wheel_profile_previous"],
 
-    ["F", "jump_mode"],
+    ["T", "jump_mode"],
     ["G", "grid_mode"],
     ["C", "screen_select"],
     ["H", "navigate_back"],
@@ -75,7 +75,7 @@ key_bindings = [
 
 # These bindings remain available in both active and idle mode.
 [system_bindings]
-toggle_active = "Ctrl+E"
+toggle_active = "Ctrl+Q"
 exit = "Escape"
 
 # ---------------------------------------------------------------------------
