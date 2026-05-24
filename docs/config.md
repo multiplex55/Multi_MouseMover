@@ -159,7 +159,7 @@ Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 | `ui_hints.include_owned_popups` | boolean | `true` | Yes | Config-only | Includes owned popup windows in candidate collection. |
 | `ui_hints.target_point` | enum string | `"clickable_point"` | Yes | Config-only | Target point choice for hint selection. |
 | `ui_hints.after_select` | enum string | `"move"` | Yes | Config-only | Post-selection behavior. |
-| `ui_hints.overlay.font_scale` | float | `1.0` | Yes | Config-only | UI hint overlay font scaling factor. |
+| `ui_hints.overlay.font_scale` | float | `1.0` | Yes | Active | UI hint overlay font scaling factor. |
 | `edge_jump.offset_px` | integer pixels | `1` | Yes | Active | Offset used by edge-jump actions. |
 | `edge_jump.use_work_area` | boolean | `false` | Yes | Active | Uses monitor work area instead of full bounds. |
 | `jump.move_cursor_after_each_stage` | boolean | none | Yes | Deprecated alias | Replace with `jump.cursor_between_stages`. `true` maps to `move_to_region_center`; `false` maps to `none`. |
@@ -206,6 +206,62 @@ enabled = false
 ```
 
 Use `jump.coarse.width` and `jump.coarse.height` for new coarse jump sizing. Keep `grid_size` only when preserving compatibility with older configs that do not define `[jump.coarse]`.
+
+
+## UI Hints Configuration
+
+`[ui_hints]` controls UI Automation based hint discovery and label generation for `ui_hint_mode` / `show_ui_hints`.
+
+| Path | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `ui_hints.enabled` | bool | `true` | Enables the mode and query workflow. |
+| `ui_hints.selection_keys` | string | `"ABCDEFGHIJKLMNOPQRSTUVWXYZ"` | Normalized to uppercase unique characters in-order. Empty/invalid values fall back to default alphabet. |
+| `ui_hints.label_length` | integer | `2` | Clamped to `1..=5`. |
+| `ui_hints.overflow_behavior` | enum | `"increase_length"` | Supported: `increase_length` (current runtime behavior). |
+| `ui_hints.max_hints` | integer | `400` | Clamped to `1..=2000`; hard cap on rendered/selectable hints. |
+| `ui_hints.min_hint_spacing_px` | integer px | `32` | Clamped to `0..=400`; dedupes nearby candidates to reduce noisy nested/duplicate controls. |
+| `ui_hints.include_thread_windows` | bool | `true` | Include same-thread windows during candidate collection. |
+| `ui_hints.include_owned_popups` | bool | `true` | Include owned popup windows (menus/dropdowns/tooltips) in candidate collection. |
+| `ui_hints.target_point` | enum | `"clickable_point"` | Supported: `clickable_point` (current runtime behavior). |
+| `ui_hints.after_select` | enum | `"move"` | Supported: `move` (moves cursor only). |
+
+`[ui_hints.overlay]` controls hint label rendering:
+
+| Path | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `ui_hints.overlay.font_scale` | float | `1.0` | Clamped to `0.5..=4.0`. Scales label text in UI hint overlay. |
+
+### UI Hints example
+
+```toml
+[ui_hints]
+enabled = true
+selection_keys = "ASDFJKL;"
+label_length = 2
+overflow_behavior = "increase_length"
+max_hints = 250
+min_hint_spacing_px = 28
+include_thread_windows = true
+include_owned_popups = true
+target_point = "clickable_point"
+after_select = "move"
+
+[ui_hints.overlay]
+font_scale = 1.1
+```
+
+### Normalization notes
+
+- `selection_keys` removes whitespace, uppercases alpha keys, and removes duplicates while preserving first occurrence order.
+- Values outside supported ranges are normalized and logged as config warnings so the mode remains usable.
+- Duplicate and deeply nested UIA controls are common in complex apps; increase `min_hint_spacing_px` to reduce visual crowding.
+- When many controls are visible, results may be capped by `max_hints`; consider larger `selection_keys` and spacing tuning before raising the cap aggressively.
+
+## UI Hints limitations
+
+- UIA dependency variability: each app exposes a different UIA tree, so discoverability and clickable points can vary widely between Explorer, browsers, Electron apps, Office apps, and custom IDE toolkits.
+- Elevation mismatch: an elevated foreground app can block or reduce non-elevated UIA visibility. Run Multi MouseMover at matching integrity level for consistent results.
+- Duplicate/nested controls: many apps surface overlapping descendants; `min_hint_spacing_px` is the primary noise-reduction control for this behavior.
 
 ## Migration Notes
 

@@ -14,8 +14,8 @@ mod keyboard;
 mod monitor;
 mod overlay;
 mod screen_capture;
-mod ui_hints;
 mod ui_hint_overlay;
+mod ui_hints;
 mod windows_uia;
 
 use action::*;
@@ -40,13 +40,13 @@ use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use ui_hint_overlay::{build_ui_hint_overlay_view, UiHintOverlay};
-use ui_hints::{build_ui_hint_targets, UiHintInputUpdate, UiHintSession};
+use std::sync::{Mutex, RwLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::{env, error::Error, fs, io};
+use ui_hint_overlay::{build_ui_hint_overlay_view, UiHintOverlay};
+use ui_hints::{build_ui_hint_targets, UiHintInputUpdate, UiHintSession};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
@@ -388,6 +388,10 @@ pub struct TooltipOverlayEvents {
     pub drag: bool,
     pub reload: bool,
     pub panic: bool,
+    pub ui_hints_query_start: bool,
+    pub ui_hints_query_fail: bool,
+    pub ui_hints_query_empty: bool,
+    pub ui_hints_query_capped_count: bool,
 }
 
 impl Default for TooltipOverlayEvents {
@@ -399,6 +403,10 @@ impl Default for TooltipOverlayEvents {
             drag: true,
             reload: true,
             panic: true,
+            ui_hints_query_start: false,
+            ui_hints_query_fail: true,
+            ui_hints_query_empty: true,
+            ui_hints_query_capped_count: false,
         }
     }
 }
@@ -1251,7 +1259,9 @@ impl Config {
             self.ui_hints.selection_keys = default_keys;
         } else {
             if unique.chars().count() != self.ui_hints.selection_keys.chars().count() {
-                warn_config_normalized("ui_hints.selection_keys contains duplicates; removing duplicates");
+                warn_config_normalized(
+                    "ui_hints.selection_keys contains duplicates; removing duplicates",
+                );
             }
             self.ui_hints.selection_keys = unique;
         }
@@ -2200,27 +2210,35 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
     diagnostics
 }
 
-
 fn process_ui_hint_query_results() {
     let next = {
         let guard = UI_HINT_QUERY_RX.lock().unwrap();
-        let Some(rx) = guard.as_ref() else { return; };
+        let Some(rx) = guard.as_ref() else {
+            return;
+        };
         match rx.try_recv() {
             Ok(msg) => Some(msg),
             Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => None,
         }
     };
 
-    let Some(message) = next else { return; };
+    let Some(message) = next else {
+        return;
+    };
     if message.query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
         return;
     }
 
     let command = match message.result {
-        Ok(elements) => AppCommand::UiHintQueryCompleted { query_id: message.query_id, elements },
+        Ok(elements) => AppCommand::UiHintQueryCompleted {
+            query_id: message.query_id,
+            elements,
+        },
         Err(err) => {
             eprintln!("[ui-hints] query failed: {err:?}");
-            AppCommand::UiHintQueryFailed { query_id: message.query_id }
+            AppCommand::UiHintQueryFailed {
+                query_id: message.query_id,
+            }
         }
     };
     APP_STATE.write().unwrap().enqueue_command(command);
@@ -2256,6 +2274,10 @@ fn runtime_notification_enabled(
         RuntimeNotificationKind::ConfigReload => config.events.reload,
         RuntimeNotificationKind::PanicReset => config.events.panic,
     }
+}
+
+fn ui_hint_tooltip_event_enabled(config: TooltipOverlayConfig, event_enabled: bool) -> bool {
+    config.enabled && config.show_temporary_tooltips && event_enabled
 }
 
 fn drain_runtime_notifications<B: MouseBackend>(action_handler: &mut ActionHandler<B>) {
@@ -2609,8 +2631,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     if event.is_down { "down" } else { "up" },
                 )
             }
-            AppCommand::UiHintQueryCompleted { query_id, .. } => println!("[command] UiHintQueryCompleted query_id={query_id}"),
-            AppCommand::UiHintQueryFailed { query_id } => println!("[command] UiHintQueryFailed query_id={query_id}"),
+            AppCommand::UiHintQueryCompleted { query_id, .. } => {
+                println!("[command] UiHintQueryCompleted query_id={query_id}")
+            }
+            AppCommand::UiHintQueryFailed { query_id } => {
+                println!("[command] UiHintQueryFailed query_id={query_id}")
+            }
         }
     }
 
@@ -2757,16 +2783,35 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::EnterUiHintMode { activation_key } => {
-            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.clone();
+            let config = ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .config
+                .ui_hints
+                .clone();
             if !config.enabled {
                 return;
             }
+            let tooltip_cfg = ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .config
+                .tooltip_overlay;
             clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
             APP_STATE
                 .write()
                 .unwrap()
                 .enter_ui_hint_querying(activation_key);
             *UI_HINT_SESSION.lock().unwrap() = None;
+            if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_start) {
+                help_overlay::show_temporary_tooltip(
+                    "UI Hints",
+                    "Querying visible controls…",
+                    Duration::from_millis(500),
+                );
+            }
             let query_id = UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1;
             let maybe_tx = UI_HINT_QUERY_TX.lock().unwrap().as_ref().cloned();
             if let Some(tx) = maybe_tx {
@@ -2919,14 +2964,22 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 return;
             }
             let mut session_guard = UI_HINT_SESSION.lock().unwrap();
-            let Some(session) = session_guard.as_mut() else { return; };
+            let Some(session) = session_guard.as_mut() else {
+                return;
+            };
             match session.handle_key(event.key) {
                 UiHintInputUpdate::Cancelled => {
                     *session_guard = None;
                     APP_STATE.write().unwrap().exit_ui_hint_mode();
                 }
                 UiHintInputUpdate::PrefixChanged => {
-                    let config = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.overlay;
+                    let config = ACTION_HANDLER
+                        .read()
+                        .unwrap()
+                        .mouse_master
+                        .config
+                        .ui_hints
+                        .overlay;
                     let view = build_ui_hint_overlay_view(
                         session,
                         config.font_scale,
@@ -2943,9 +2996,19 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     });
                 }
                 UiHintInputUpdate::Completed { target } => {
-                    let after_select = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.after_select;
+                    let after_select = ACTION_HANDLER
+                        .read()
+                        .unwrap()
+                        .mouse_master
+                        .config
+                        .ui_hints
+                        .after_select;
                     let _ = after_select;
-                    ACTION_HANDLER.write().unwrap().mouse_master.move_mouse_to(target.target_x, target.target_y);
+                    ACTION_HANDLER
+                        .write()
+                        .unwrap()
+                        .mouse_master
+                        .move_mouse_to(target.target_x, target.target_y);
                     *session_guard = None;
                     APP_STATE.write().unwrap().exit_ui_hint_mode();
                 }
@@ -2956,7 +3019,13 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
                 return;
             }
-            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.clone();
+            let config = ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .config
+                .ui_hints
+                .clone();
             let hint_config = ui_hints::UiHintConfig {
                 selection_keys: config.selection_keys.chars().collect(),
                 label_length: config.label_length.max(1) as usize,
@@ -2965,6 +3034,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 min_hint_spacing_px: config.min_hint_spacing_px,
                 target_point: ui_hints::UiHintTargetPoint::ClickablePoint,
             };
+            let discovered_count = elements.len();
             let raw_elements: Vec<ui_hints::RawUiElement> = elements
                 .into_iter()
                 .enumerate()
@@ -2977,16 +3047,55 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     clickable_point: e.clickable_point,
                 })
                 .collect();
-            let targets = build_ui_hint_targets(raw_elements, &hint_config);
+            let target_count = build_ui_hint_targets(raw_elements, &hint_config);
+            let targets = target_count;
+            let tooltip_cfg = ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .config
+                .tooltip_overlay;
+            if ui_hint_tooltip_event_enabled(
+                tooltip_cfg,
+                tooltip_cfg.events.ui_hints_query_capped_count,
+            ) && discovered_count > targets.len()
+            {
+                help_overlay::show_temporary_tooltip(
+                    "UI Hints",
+                    format!("Showing {} of {} controls", targets.len(), discovered_count),
+                    Duration::from_millis(900),
+                );
+            }
             if targets.is_empty() {
-                help_overlay::show_temporary_tooltip("UI hints", "No UI hint targets found", Duration::from_millis(900));
+                if ui_hint_tooltip_event_enabled(
+                    tooltip_cfg,
+                    tooltip_cfg.events.ui_hints_query_empty,
+                ) {
+                    help_overlay::show_temporary_tooltip(
+                        "UI Hints",
+                        "No UI hint targets found",
+                        Duration::from_millis(900),
+                    );
+                }
                 APP_STATE.write().unwrap().exit_ui_hint_mode();
                 *UI_HINT_SESSION.lock().unwrap() = None;
                 return;
             }
-            let Some(session) = UiHintSession::new(targets, config.selection_keys.chars().collect()) else { return; };
+            let Some(session) =
+                UiHintSession::new(targets, config.selection_keys.chars().collect())
+            else {
+                return;
+            };
             let overlay_cfg = config.overlay;
-            let view = build_ui_hint_overlay_view(&session, overlay_cfg.font_scale, 0, 0, true, true, true);
+            let view = build_ui_hint_overlay_view(
+                &session,
+                overlay_cfg.font_scale,
+                0,
+                0,
+                true,
+                true,
+                true,
+            );
             *UI_HINT_SESSION.lock().unwrap() = Some(session);
             APP_STATE.write().unwrap().activate_ui_hint_if_querying();
             UI_HINT_OVERLAY.with(|overlay| {
@@ -2999,7 +3108,19 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
                 return;
             }
-            help_overlay::show_temporary_tooltip("UI hints", "Query failed", Duration::from_millis(700));
+            let tooltip_cfg = ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .config
+                .tooltip_overlay;
+            if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_fail) {
+                help_overlay::show_temporary_tooltip(
+                    "UI Hints",
+                    "Query failed",
+                    Duration::from_millis(700),
+                );
+            }
             APP_STATE.write().unwrap().exit_ui_hint_mode();
             *UI_HINT_SESSION.lock().unwrap() = None;
         }
@@ -3956,10 +4077,8 @@ mod tests {
         );
 
         assert_eq!(
-            app_state.handle_grid_input(
-                KeyEvent::new(VirtualKey::F, true),
-                Some(Action::MoveRight)
-            ),
+            app_state
+                .handle_grid_input(KeyEvent::new(VirtualKey::F, true), Some(Action::MoveRight)),
             Some(GridInputUpdate::Updated {
                 region: JumpRegion {
                     left: 50,

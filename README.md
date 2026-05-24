@@ -177,6 +177,32 @@ separators = true
 hide_threshold_px = 0
 ```
 
+
+## UI Hints Mode
+
+UI Hints mode discovers accessible controls from the foreground app and overlays short labels so you can jump the cursor directly to UI targets. Trigger it with your configured binding (default sample config: `0`).
+
+Interaction flow:
+
+1. Press the UI Hints binding to start query mode.
+2. Multi MouseMover queries UI Automation (UIA) for visible actionable controls.
+3. Labels are rendered near discovered controls.
+4. Type label characters to narrow candidates; an exact match moves the cursor to the target point.
+5. `Backspace` removes one typed character; `Escape` cancels and exits UI Hints mode.
+
+Optional tooltip events for query lifecycle can be toggled under `[tooltip_overlay.events]`:
+
+- `ui_hints_query_start`
+- `ui_hints_query_fail`
+- `ui_hints_query_empty`
+- `ui_hints_query_capped_count`
+
+Limitations and caveats:
+
+- UIA output varies per app and framework, so hint availability is not uniform.
+- If the target app is elevated and Multi MouseMover is not, UIA visibility may be limited.
+- Apps with duplicated/nested controls can produce dense hint clusters; increase `ui_hints.min_hint_spacing_px` to reduce overlap noise.
+
 ## Final Adjust
 
 `[final_adjust]` is disabled by default. When enabled, a completed jump enters a small adjustment state before the cursor move is committed. Use the movement keys to nudge by `small_step_px`; hold `Shift` for `large_step_px`; press `Enter` to confirm, `Escape` to cancel, or `Backspace` to return to the previous jump stage. The status overlay can show when final-adjust is active.
