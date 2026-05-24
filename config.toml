@@ -73,7 +73,7 @@ key_bindings = [
     ["RightAlt+R", "reload_config"],
     ["RightAlt+Escape", "panic_reset"],
     ["/", "show_help"],
-    ["RightAlt+H", "ui_hint_mode"]
+    ["0", "ui_hint_mode"]
 ]
 
 [ui_hints]
