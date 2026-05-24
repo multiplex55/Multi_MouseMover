@@ -47,8 +47,10 @@ key_bindings = [
     ["I", "wheel_left"],
     ["O", "wheel_right"],
 
+
+    ["Z", "mouse_speed_reset"],
     ["M", "mouse_speed_down"],
-    [",", "mouse_speed_reset"],
+    [",", "mouse_speed_up"],
     ["U", "wheel_speed_up"],
     ["I", "wheel_speed_down"],
     ["RightAlt+C", "movement_profile_next"],

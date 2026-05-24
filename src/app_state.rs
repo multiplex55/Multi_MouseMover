@@ -62,7 +62,7 @@ pub enum AppCommand {
         is_down: bool,
     },
     JumpInput(KeyEvent, Option<Action>),
-    GridInput(KeyEvent),
+    GridInput(KeyEvent, Option<Action>),
 }
 
 #[derive(Debug)]
@@ -467,7 +467,11 @@ impl AppState {
         })
     }
 
-    pub fn handle_grid_input(&mut self, event: KeyEvent) -> Option<GridInputUpdate> {
+    pub fn handle_grid_input(
+        &mut self,
+        event: KeyEvent,
+        action: Option<Action>,
+    ) -> Option<GridInputUpdate> {
         if self.is_grid_activation_key_event(&event) {
             return Some(GridInputUpdate::Consumed);
         }
@@ -482,28 +486,6 @@ impl AppState {
 
         let move_cursor = session.move_cursor_each_step.unwrap_or(false);
         let update = match event.key {
-            VirtualKey::W => session.shrink_up().map(|region| GridInputUpdate::Updated {
-                region,
-                move_cursor,
-            }),
-            VirtualKey::A => session
-                .shrink_left()
-                .map(|region| GridInputUpdate::Updated {
-                    region,
-                    move_cursor,
-                }),
-            VirtualKey::S => session
-                .shrink_down()
-                .map(|region| GridInputUpdate::Updated {
-                    region,
-                    move_cursor,
-                }),
-            VirtualKey::D => session
-                .shrink_right()
-                .map(|region| GridInputUpdate::Updated {
-                    region,
-                    move_cursor,
-                }),
             VirtualKey::Backspace => session
                 .undo()
                 .map(|region| GridInputUpdate::Updated {
@@ -512,7 +494,7 @@ impl AppState {
                 })
                 .or(Some(GridInputUpdate::Consumed)),
             VirtualKey::Escape => Some(GridInputUpdate::Cancelled),
-            _ => Some(GridInputUpdate::Consumed),
+            _ => Self::apply_grid_direction(session, action, move_cursor),
         }?;
 
         if matches!(update, GridInputUpdate::Updated { .. }) && session.is_resolved() {
@@ -522,6 +504,44 @@ impl AppState {
         }
 
         Some(update)
+    }
+
+    fn apply_grid_direction(
+        session: &mut GridSession,
+        action: Option<Action>,
+        move_cursor: bool,
+    ) -> Option<GridInputUpdate> {
+        match action {
+            Some(Action::MoveUp) => session.shrink_up().map(|region| GridInputUpdate::Updated {
+                region,
+                move_cursor,
+            }),
+            Some(Action::MoveLeft) => {
+                session
+                    .shrink_left()
+                    .map(|region| GridInputUpdate::Updated {
+                        region,
+                        move_cursor,
+                    })
+            }
+            Some(Action::MoveDown) => {
+                session
+                    .shrink_down()
+                    .map(|region| GridInputUpdate::Updated {
+                        region,
+                        move_cursor,
+                    })
+            }
+            Some(Action::MoveRight) => {
+                session
+                    .shrink_right()
+                    .map(|region| GridInputUpdate::Updated {
+                        region,
+                        move_cursor,
+                    })
+            }
+            _ => Some(GridInputUpdate::Consumed),
+        }
     }
 
     pub fn grid_view(&self) -> Option<JumpOverlayView> {
@@ -646,7 +666,7 @@ impl AppState {
                 return;
             }
 
-            self.enqueue_command(AppCommand::GridInput(event));
+            self.enqueue_command(AppCommand::GridInput(event, action));
             return;
         }
 
@@ -1941,7 +1961,7 @@ mod tests {
 
         assert_eq!(
             collect_commands(&mut state),
-            vec![AppCommand::GridInput(event)]
+            vec![AppCommand::GridInput(event, Some(Action::MoveUp))]
         );
     }
 
@@ -1977,7 +1997,7 @@ mod tests {
             state.route_key_event(event, Some(Action::MoveLeft));
             assert_eq!(
                 state.pop_command(),
-                Some(AppCommand::GridInput(event)),
+                Some(AppCommand::GridInput(event, Some(Action::MoveLeft))),
                 "{key:?}"
             );
         }
@@ -1999,7 +2019,7 @@ mod tests {
         enter_grid_mode(&mut state, VirtualKey::G);
 
         assert_eq!(
-            state.handle_grid_input(KeyEvent::new(VirtualKey::D, true)),
+            state.handle_grid_input(KeyEvent::new(VirtualKey::D, true), Some(Action::MoveRight)),
             Some(GridInputUpdate::Updated {
                 region: JumpRegion {
                     left: 50,
@@ -2011,14 +2031,14 @@ mod tests {
             })
         );
         assert_eq!(
-            state.handle_grid_input(KeyEvent::new(VirtualKey::Backspace, true)),
+            state.handle_grid_input(KeyEvent::new(VirtualKey::Backspace, true), None),
             Some(GridInputUpdate::Updated {
                 region: jump_region(),
                 move_cursor: true,
             })
         );
         assert_eq!(
-            state.handle_grid_input(KeyEvent::new(VirtualKey::Escape, true)),
+            state.handle_grid_input(KeyEvent::new(VirtualKey::Escape, true), None),
             Some(GridInputUpdate::Cancelled)
         );
     }
@@ -2047,7 +2067,7 @@ mod tests {
             .insert(KeyChord::from_key(VirtualKey::W));
 
         assert_eq!(
-            state.handle_grid_input(KeyEvent::new(VirtualKey::A, true)),
+            state.handle_grid_input(KeyEvent::new(VirtualKey::A, true), Some(Action::MoveLeft)),
             Some(GridInputUpdate::Completed {
                 x: 13,
                 y: 50,
