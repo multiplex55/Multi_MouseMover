@@ -3460,8 +3460,14 @@ mod tests {
             config.grid_mode.start_region,
             JumpStartRegion::CurrentMonitor
         );
-        assert_eq!(config.grid_mode.width_percent, 1.0);
-        assert_eq!(config.grid_mode.height_percent, 1.0);
+        assert_eq!(
+            config.grid_mode.width_percent,
+            GridModeConfig::default().width_percent
+        );
+        assert_eq!(
+            config.grid_mode.height_percent,
+            GridModeConfig::default().height_percent
+        );
     }
 
     #[test]
@@ -3472,7 +3478,10 @@ mod tests {
         assert_eq!(config.acceleration, 2);
         assert_eq!(config.acceleration_rate, 1);
         assert_eq!(config.top_speed, 6);
-        assert_eq!(config.grid_mode.width_percent, 1.0);
+        assert_eq!(
+            config.grid_mode.width_percent,
+            GridModeConfig::default().width_percent
+        );
         assert_eq!(config.jump.start_region, JumpStartRegion::CurrentMonitor);
         assert!(!config.jump.precise.enabled);
     }
