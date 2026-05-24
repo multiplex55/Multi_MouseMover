@@ -57,12 +57,18 @@ pub enum AppCommand {
     EnterGridMode {
         activation_key: VirtualKey,
     },
+    EnterUiHintMode {
+        activation_key: VirtualKey,
+    },
     KeyAction {
         action: Action,
         is_down: bool,
     },
     JumpInput(KeyEvent, Option<Action>),
     GridInput(KeyEvent, Option<Action>),
+    UiHintInput(KeyEvent),
+    UiHintQueryCompleted,
+    UiHintQueryFailed,
 }
 
 #[derive(Debug)]
@@ -74,11 +80,19 @@ pub struct AppState {
     active_trigger_chords: HashSet<KeyChord>,
     jump: JumpState,
     grid: GridState,
+    ui_hints: UiHintState,
     active_mode: bool,
     preserve_global_shortcuts: bool,
     system_bindings: RuntimeSystemBindings,
     help_visible: bool,
     grid_direction_labels: GridDirectionLabels,
+}
+
+#[derive(Debug)]
+pub enum UiHintState {
+    Inactive,
+    Querying { activation_key: VirtualKey },
+    Active { activation_key: VirtualKey },
 }
 
 #[derive(Debug)]
@@ -159,6 +173,7 @@ impl Default for AppState {
             active_trigger_chords: HashSet::new(),
             jump: JumpState::Inactive,
             grid: GridState::Inactive,
+            ui_hints: UiHintState::Inactive,
             active_mode: true,
             preserve_global_shortcuts: true,
             system_bindings: RuntimeSystemBindings::default(),
@@ -226,6 +241,7 @@ impl AppState {
         self.clear_active_action_keys();
         self.exit_jump_mode();
         self.exit_grid_mode();
+        self.exit_ui_hint_mode();
     }
 
     pub fn set_system_bindings(&mut self, system_bindings: RuntimeSystemBindings) {
@@ -266,6 +282,25 @@ impl AppState {
 
     pub fn is_grid_active(&self) -> bool {
         matches!(self.grid, GridState::Active { .. })
+    }
+
+    pub fn is_ui_hint_active(&self) -> bool {
+        matches!(self.ui_hints, UiHintState::Active { .. })
+    }
+
+    pub fn is_ui_hint_querying(&self) -> bool {
+        matches!(self.ui_hints, UiHintState::Querying { .. })
+    }
+
+    pub fn exit_ui_hint_mode(&mut self) {
+        self.ui_hints = UiHintState::Inactive;
+    }
+
+    pub fn is_exclusive_mode_active(&self) -> bool {
+        self.is_jump_active()
+            || self.is_grid_active()
+            || self.is_ui_hint_active()
+            || self.is_ui_hint_querying()
     }
 
     pub fn jump_stage_status(&self) -> Option<(usize, usize)> {
@@ -611,7 +646,7 @@ impl AppState {
     }
 
     pub fn should_swallow_key(&self, event: &KeyEvent) -> bool {
-        if self.is_jump_active() || self.is_grid_active() {
+        if self.is_exclusive_mode_active() {
             return true;
         }
 
@@ -648,7 +683,20 @@ impl AppState {
         }
 
         if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
+            self.exit_ui_hint_mode();
             self.enqueue_command(AppCommand::SetActiveMode { active: false });
+            return;
+        }
+
+        if self.is_ui_hint_active() || self.is_ui_hint_querying() {
+            if matches!(
+                action.as_ref(),
+                Some(Action::ReloadConfig | Action::PanicReset)
+            ) && event.is_down
+            {
+                self.exit_ui_hint_mode();
+            }
+            self.enqueue_command(AppCommand::UiHintInput(event));
             return;
         }
 
@@ -703,11 +751,13 @@ impl AppState {
         }
 
         if event.is_down && matches!(action.as_ref(), Some(Action::ReloadConfig)) {
+            self.exit_ui_hint_mode();
             self.enqueue_command(AppCommand::ReloadConfig);
             return;
         }
 
         if event.is_down && matches!(action.as_ref(), Some(Action::PanicReset)) {
+            self.exit_ui_hint_mode();
             self.enqueue_command(AppCommand::PanicReset);
             return;
         }
@@ -731,6 +781,13 @@ impl AppState {
 
         if event.is_down && matches!(action.as_ref(), Some(Action::GridMode)) {
             self.enqueue_command(AppCommand::EnterGridMode {
+                activation_key: event.key,
+            });
+            return;
+        }
+
+        if event.is_down && matches!(action.as_ref(), Some(Action::UiHintMode)) {
+            self.enqueue_command(AppCommand::EnterUiHintMode {
                 activation_key: event.key,
             });
             return;
@@ -967,6 +1024,10 @@ mod tests {
         ));
     }
 
+    fn enter_ui_hint_mode(state: &mut AppState, activation_key: VirtualKey) {
+        state.ui_hints = UiHintState::Active { activation_key };
+    }
+
     fn final_adjust_config(enabled: bool) -> Config {
         let mut config = Config::default();
         config.jump.mode = crate::JumpMode::Single;
@@ -1037,6 +1098,14 @@ mod tests {
         enter_grid_mode(&mut state, VirtualKey::G);
 
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::W, true)));
+    }
+
+    #[test]
+    fn ui_hint_mode_swallows_normal_letters() {
+        let mut state = AppState::default();
+        enter_ui_hint_mode(&mut state, VirtualKey::U);
+
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::A, true)));
     }
 
     #[test]
@@ -1138,6 +1207,21 @@ mod tests {
             state.pop_command(),
             Some(AppCommand::EnterGridMode {
                 activation_key: VirtualKey::G,
+            })
+        );
+    }
+
+    #[test]
+    fn ui_hint_binding_queues_enter_ui_hint_mode() {
+        let mut state = state_with_bound_key(VirtualKey::U);
+        let event = KeyEvent::new(VirtualKey::U, true);
+
+        state.route_key_event(event, Some(Action::UiHintMode));
+
+        assert_eq!(
+            state.pop_command(),
+            Some(AppCommand::EnterUiHintMode {
+                activation_key: VirtualKey::U,
             })
         );
     }
@@ -1328,6 +1412,75 @@ mod tests {
             collect_commands(&mut state),
             vec![AppCommand::JumpInput(event, None)]
         );
+    }
+
+    #[test]
+    fn ui_hint_mode_routes_letters_to_ui_hint_input() {
+        let mut state = AppState::default();
+        enter_ui_hint_mode(&mut state, VirtualKey::U);
+        let event = KeyEvent::new(VirtualKey::A, true);
+
+        state.route_key_event(event, None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::UiHintInput(event)]
+        );
+    }
+
+    #[test]
+    fn escape_in_ui_hint_mode_cancels() {
+        let mut state = AppState::default();
+        state.ui_hints = UiHintState::Querying {
+            activation_key: VirtualKey::U,
+        };
+        let event = KeyEvent::new(VirtualKey::Escape, true);
+
+        state.route_key_event(event, None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::UiHintInput(event)]
+        );
+    }
+
+    #[test]
+    fn toggle_active_in_ui_hint_mode_disables_app() {
+        let mut state = AppState::default();
+        enter_ui_hint_mode(&mut state, VirtualKey::U);
+
+        state.route_key_event(ctrl_e_down(), None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ToggleActiveMode]
+        );
+    }
+
+    #[test]
+    fn disabled_app_does_not_enter_ui_hint_mode() {
+        let mut state = state_with_bound_key(VirtualKey::U);
+        state.set_active_mode(false);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::U, true), Some(Action::UiHintMode));
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn reload_or_panic_exits_ui_hint_mode() {
+        let mut reload_state = state_with_bound_key(VirtualKey::R);
+        enter_ui_hint_mode(&mut reload_state, VirtualKey::U);
+        reload_state.route_key_event(
+            KeyEvent::new(VirtualKey::R, true),
+            Some(Action::ReloadConfig),
+        );
+        assert!(!reload_state.is_ui_hint_active());
+
+        let mut panic_state = state_with_bound_key(VirtualKey::P);
+        enter_ui_hint_mode(&mut panic_state, VirtualKey::U);
+        panic_state.route_key_event(KeyEvent::new(VirtualKey::P, true), Some(Action::PanicReset));
+        assert!(!panic_state.is_ui_hint_active());
     }
 
     #[test]
