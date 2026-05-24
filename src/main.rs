@@ -2832,8 +2832,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 );
             }
             let query_id = UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1;
-            let foreground_hwnd =
-                windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize;
+            let foreground_hwnd = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize
+            };
             APP_STATE
                 .write()
                 .unwrap()
