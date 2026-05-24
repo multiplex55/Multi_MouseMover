@@ -115,3 +115,34 @@ available when active mode is disabled. Migration steps:
 5. After the system binding section is stable and covered by tests, remove the
    hardcoded Escape branch and require the default `system_bindings.exit` value to
    provide the emergency exit.
+
+## Post-Core Backlog: Precision Follow-Ups
+
+These items are **post-core** and are blocked until the core precision fix and its regression test coverage are complete.
+
+### 1) Optional slow-entry tooltip event
+
+- Add `RuntimeNotificationKind::SlowMouse` for slow-mode entry/exit notifications.
+- Add `tooltip_overlay.events.slow` configuration gating for this event category.
+- Emit the notification only on the inactive -> active slow-mode transition (not on every tick while held).
+
+### 2) Optional independent slow acceleration runtime state
+
+- Split slow-mode counters/state from normal movement runtime state.
+- Do not reuse normal acceleration fields for slow-mode acceleration behavior.
+- Keep the separation explicit in runtime structures so future tuning does not couple slow-mode and normal-mode internals.
+
+### 3) Optional new slow-mode actions
+
+- Add actions: `slow_speed_up`, `slow_speed_down`, `slow_speed_reset`, `toggle_slow_mouse`.
+- Include binding examples in docs/config samples.
+- Avoid enabling crowded defaults by default; keep default keymap conservative.
+
+### 4) Default keymap ergonomics follow-up
+
+- Add a default `mouse_speed_up` binding counterpart to existing default down/reset bindings.
+- Add a commented example showing direct binding to a precision movement profile.
+
+### Dependency gate
+
+- Do not start any of the above until the core precision fix is landed and regression tests pass.
