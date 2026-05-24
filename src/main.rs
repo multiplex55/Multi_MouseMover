@@ -2997,6 +2997,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jump_session::JumpRegion;
     use enigo::{Axis, Button};
 
     const LEGACY_PACKAGE_NAME: &str = concat!("Learn", "ing", "_", "Ru", "st");
@@ -3609,6 +3610,105 @@ mod tests {
             .key_bindings
             .iter()
             .any(|(_, action)| action == "exit"));
+    }
+
+    #[test]
+    fn remapped_grid_movement_routes_by_action_with_wasd_unbound() {
+        let config = parse_config(
+            r#"
+            key_bindings = [
+                ["F", "move_right"],
+                ["J", "move_left"],
+                ["I", "move_up"],
+                ["K", "move_down"]
+            ]
+            "#,
+        );
+
+        let mut bindings = KeyBindings::new();
+        for (key, action) in &config.key_bindings {
+            let chord = KeyChord::parse(key).unwrap();
+            let action = Action::from_string(action).unwrap();
+            bindings.add_chord_binding(chord, action);
+        }
+
+        let mut app_state = AppState::default();
+        assert!(app_state.enter_grid_mode(
+            JumpRegion {
+                left: 0,
+                top: 0,
+                width: 100,
+                height: 100,
+            },
+            JumpRegion {
+                left: 0,
+                top: 0,
+                width: 100,
+                height: 100,
+            },
+            25,
+            25,
+            true,
+            true,
+            true,
+            VirtualKey::G,
+        ));
+
+        for (key, expected_action) in [
+            (VirtualKey::F, Action::MoveRight),
+            (VirtualKey::J, Action::MoveLeft),
+            (VirtualKey::I, Action::MoveUp),
+            (VirtualKey::K, Action::MoveDown),
+        ] {
+            let event = KeyEvent::new(key, true);
+            let resolved = bindings.get_action_for_event(&event);
+            app_state.route_key_event(event, resolved);
+            assert_eq!(
+                app_state.pop_command(),
+                Some(AppCommand::GridInput(event, Some(expected_action)))
+            );
+        }
+
+        assert_eq!(
+            bindings.get_action_for_event(&KeyEvent::new(VirtualKey::W, true)),
+            None
+        );
+        assert_eq!(
+            app_state.handle_grid_input(KeyEvent::new(VirtualKey::W, true), None),
+            Some(GridInputUpdate::Consumed)
+        );
+
+        assert_eq!(
+            app_state.handle_grid_input(
+                KeyEvent::new(VirtualKey::F, true),
+                Some(Action::MoveRight)
+            ),
+            Some(GridInputUpdate::Updated {
+                region: JumpRegion {
+                    left: 50,
+                    top: 0,
+                    width: 50,
+                    height: 100,
+                },
+                move_cursor: true,
+            })
+        );
+        assert_eq!(
+            app_state.handle_grid_input(KeyEvent::new(VirtualKey::Backspace, true), None),
+            Some(GridInputUpdate::Updated {
+                region: JumpRegion {
+                    left: 0,
+                    top: 0,
+                    width: 100,
+                    height: 100,
+                },
+                move_cursor: true,
+            })
+        );
+        assert_eq!(
+            app_state.handle_grid_input(KeyEvent::new(VirtualKey::Escape, true), None),
+            Some(GridInputUpdate::Cancelled)
+        );
     }
 
     #[test]

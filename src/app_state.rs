@@ -1981,25 +1981,42 @@ mod tests {
     }
 
     #[test]
-    fn grid_mode_owns_wasd_escape_and_backspace() {
+    fn grid_mode_owns_directional_actions_plus_escape_and_backspace_keys() {
         let mut state = AppState::default();
         enter_grid_mode(&mut state, VirtualKey::G);
 
-        for key in [
-            VirtualKey::W,
-            VirtualKey::A,
-            VirtualKey::S,
-            VirtualKey::D,
-            VirtualKey::Backspace,
-            VirtualKey::Escape,
+        for (key, action) in [
+            (VirtualKey::F, Some(Action::MoveRight)),
+            (VirtualKey::J, Some(Action::MoveLeft)),
+            (VirtualKey::I, Some(Action::MoveUp)),
+            (VirtualKey::K, Some(Action::MoveDown)),
+            (VirtualKey::Backspace, None),
+            (VirtualKey::Escape, None),
         ] {
             let event = KeyEvent::new(key, true);
-            state.route_key_event(event, Some(Action::MoveLeft));
+            state.route_key_event(event, action.clone());
             assert_eq!(
                 state.pop_command(),
-                Some(AppCommand::GridInput(event, Some(Action::MoveLeft))),
+                Some(AppCommand::GridInput(event, action)),
                 "{key:?}"
             );
+        }
+    }
+
+    #[test]
+    fn grid_mode_still_owns_wasd_when_default_action_mapping_is_used() {
+        let mut state = AppState::default();
+        enter_grid_mode(&mut state, VirtualKey::G);
+
+        for (key, action) in [
+            (VirtualKey::W, Some(Action::MoveUp)),
+            (VirtualKey::A, Some(Action::MoveLeft)),
+            (VirtualKey::S, Some(Action::MoveDown)),
+            (VirtualKey::D, Some(Action::MoveRight)),
+        ] {
+            let event = KeyEvent::new(key, true);
+            state.route_key_event(event, action.clone());
+            assert_eq!(state.pop_command(), Some(AppCommand::GridInput(event, action)));
         }
     }
 
@@ -2044,6 +2061,77 @@ mod tests {
     }
 
     #[test]
+    fn grid_movement_uses_action_mapping_for_all_directions() {
+        let cases = [
+            (
+                VirtualKey::F,
+                Action::MoveRight,
+                JumpRegion {
+                    left: 50,
+                    top: 0,
+                    width: 50,
+                    height: 100,
+                },
+            ),
+            (
+                VirtualKey::J,
+                Action::MoveLeft,
+                JumpRegion {
+                    left: 0,
+                    top: 0,
+                    width: 50,
+                    height: 100,
+                },
+            ),
+            (
+                VirtualKey::I,
+                Action::MoveUp,
+                JumpRegion {
+                    left: 0,
+                    top: 0,
+                    width: 100,
+                    height: 50,
+                },
+            ),
+            (
+                VirtualKey::K,
+                Action::MoveDown,
+                JumpRegion {
+                    left: 0,
+                    top: 50,
+                    width: 100,
+                    height: 50,
+                },
+            ),
+        ];
+
+        for (key, action, expected_region) in cases {
+            let mut state = AppState::default();
+            enter_grid_mode(&mut state, VirtualKey::G);
+            let update = state.handle_grid_input(KeyEvent::new(key, true), Some(action.clone()));
+            assert_eq!(
+                update,
+                Some(GridInputUpdate::Updated {
+                    region: expected_region,
+                    move_cursor: true,
+                }),
+                "{key:?} should map via {action:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn grid_input_non_movement_action_is_consumed_without_splitting() {
+        let mut state = AppState::default();
+        enter_grid_mode(&mut state, VirtualKey::G);
+
+        assert_eq!(
+            state.handle_grid_input(KeyEvent::new(VirtualKey::F, true), Some(Action::ShowHelp)),
+            Some(GridInputUpdate::Consumed)
+        );
+    }
+
+    #[test]
     fn grid_completion_clears_active_keys_when_exiting() {
         let mut state = AppState::default();
         assert!(state.enter_grid_mode(
@@ -2083,6 +2171,40 @@ mod tests {
 
         assert!(!state.has_active_action_keys());
         assert_eq!(state.resolve_jump_overlay(), JumpOverlayResolution::Hidden);
+    }
+
+    #[test]
+    fn grid_completion_triggers_with_remapped_movement_action() {
+        let mut state = AppState::default();
+        assert!(state.enter_grid_mode(
+            jump_region(),
+            JumpRegion {
+                left: 50,
+                top: 0,
+                width: 50,
+                height: 100,
+            },
+            25,
+            25,
+            true,
+            true,
+            true,
+            VirtualKey::G,
+        ));
+
+        assert_eq!(
+            state.handle_grid_input(KeyEvent::new(VirtualKey::F, true), Some(Action::MoveRight)),
+            Some(GridInputUpdate::Completed {
+                x: 88,
+                y: 50,
+                region: JumpRegion {
+                    left: 75,
+                    top: 0,
+                    width: 25,
+                    height: 100,
+                },
+            })
+        );
     }
 
     #[test]
