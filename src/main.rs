@@ -109,6 +109,20 @@ struct UiHintQueryResult {
     result: Result<Vec<windows_uia::RawUiElement>, windows_uia::UiHintQueryError>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiHintQueryBackend {
+    WindowsUia,
+    DebugFakeTargets,
+}
+
+fn ui_hint_query_backend(config: &UiHintsConfig) -> UiHintQueryBackend {
+    if config.debug_fake_targets {
+        UiHintQueryBackend::DebugFakeTargets
+    } else {
+        UiHintQueryBackend::WindowsUia
+    }
+}
+
 const DEFAULT_POLLING_RATE_MS: u64 = 8;
 const DEFAULT_WHEEL_SPEED_INDICATOR_MS: u64 = 700;
 const DEFAULT_MOUSE_SPEED_FLASH_MS: u64 = 700;
@@ -2864,9 +2878,21 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .ui_hints
                 .clone();
             if !config.enabled {
-                let tooltip_cfg = ACTION_HANDLER.read().unwrap().mouse_master.config.tooltip_overlay;
-                if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_fail) {
-                    help_overlay::show_temporary_tooltip("UI Hints", "UI hints are disabled", Duration::from_millis(700));
+                let tooltip_cfg = ACTION_HANDLER
+                    .read()
+                    .unwrap()
+                    .mouse_master
+                    .config
+                    .tooltip_overlay;
+                if ui_hint_tooltip_event_enabled(
+                    tooltip_cfg,
+                    tooltip_cfg.events.ui_hints_query_fail,
+                ) {
+                    help_overlay::show_temporary_tooltip(
+                        "UI Hints",
+                        "UI hints are disabled",
+                        Duration::from_millis(700),
+                    );
                 }
                 exit_ui_hint_mode(UiHintExitReason::Disabled);
                 return;
@@ -2881,7 +2907,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .config
                 .tooltip_overlay;
             clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
-            APP_STATE.write().unwrap().enter_ui_hint_querying(activation_key, 0, 0);
+            APP_STATE
+                .write()
+                .unwrap()
+                .enter_ui_hint_querying(activation_key, 0, 0);
             if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_start) {
                 help_overlay::show_temporary_tooltip(
                     "UI Hints",
@@ -2893,10 +2922,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             let foreground_hwnd = unsafe {
                 windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize
             };
-            APP_STATE
-                .write()
-                .unwrap()
-                .enter_ui_hint_querying(activation_key, query_id, foreground_hwnd);
+            APP_STATE.write().unwrap().enter_ui_hint_querying(
+                activation_key,
+                query_id,
+                foreground_hwnd,
+            );
             if config.debug {
                 eprintln!(
                     "[ui-hints] query start: query_id={query_id} foreground_hwnd={foreground_hwnd}"
@@ -2905,7 +2935,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             let maybe_tx = UI_HINT_QUERY_TX.lock().unwrap().as_ref().cloned();
             if let Some(tx) = maybe_tx {
                 std::thread::spawn(move || {
-                    let result = windows_uia::find_ui_hint_targets(&config);
+                    let result = match ui_hint_query_backend(&config) {
+                        UiHintQueryBackend::DebugFakeTargets => Ok(Vec::new()),
+                        UiHintQueryBackend::WindowsUia => {
+                            windows_uia::find_ui_hint_targets(&config)
+                        }
+                    };
                     let _ = tx.send(UiHintQueryResult { query_id, result });
                 });
             }
@@ -3174,8 +3209,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     clickable_point: e.clickable_point,
                 })
                 .collect();
-            let target_count = build_ui_hint_targets(raw_elements, &hint_config);
-            let targets = target_count;
+            let targets = if config.debug_fake_targets {
+                ui_hints::generate_debug_fake_targets(&hint_config)
+            } else {
+                build_ui_hint_targets(raw_elements, &hint_config)
+            };
             if ui_hints_debug_enabled() {
                 eprintln!(
                     "[ui-hints] target build complete: query_id={query_id} targets={}",
@@ -5850,6 +5888,15 @@ mod tests {
     }
 
     #[test]
+    fn ui_hint_query_backend_uses_windows_uia_when_debug_fake_targets_disabled() {
+        let config = UiHintsConfig::default();
+        assert_eq!(
+            ui_hint_query_backend(&config),
+            UiHintQueryBackend::WindowsUia
+        );
+    }
+
+    #[test]
     fn ui_hint_cleanup_is_idempotent() {
         APP_STATE
             .write()
@@ -5858,7 +5905,10 @@ mod tests {
         *UI_HINT_SESSION.lock().unwrap() = None;
         exit_ui_hint_mode(UiHintExitReason::Cancelled);
         exit_ui_hint_mode(UiHintExitReason::Cancelled);
-        assert!(matches!(APP_STATE.read().unwrap().current_ui_hint_query_id(), None));
+        assert!(matches!(
+            APP_STATE.read().unwrap().current_ui_hint_query_id(),
+            None
+        ));
         assert!(UI_HINT_SESSION.lock().unwrap().is_none());
     }
 
@@ -5881,7 +5931,10 @@ mod tests {
                 .enter_ui_hint_querying(VirtualKey::U, 9, 1);
             *UI_HINT_SESSION.lock().unwrap() = None;
             exit_ui_hint_mode(reason);
-            assert!(matches!(APP_STATE.read().unwrap().current_ui_hint_query_id(), None));
+            assert!(matches!(
+                APP_STATE.read().unwrap().current_ui_hint_query_id(),
+                None
+            ));
             assert!(UI_HINT_SESSION.lock().unwrap().is_none());
         }
     }

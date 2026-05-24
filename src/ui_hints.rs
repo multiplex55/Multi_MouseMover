@@ -150,7 +150,10 @@ pub fn generate_ui_hint_labels(
         .collect()
 }
 
-pub fn build_ui_hint_targets(raw_elements: Vec<RawUiElement>, config: &UiHintConfig) -> Vec<UiHintTarget> {
+pub fn build_ui_hint_targets(
+    raw_elements: Vec<RawUiElement>,
+    config: &UiHintConfig,
+) -> Vec<UiHintTarget> {
     let mut elements: Vec<RawUiElement> = raw_elements
         .into_iter()
         .filter(|e| e.width > 0 && e.height > 0)
@@ -200,6 +203,43 @@ pub fn build_ui_hint_targets(raw_elements: Vec<RawUiElement>, config: &UiHintCon
                 target_y,
                 metadata: Some(format!("{}x{}", element.width, element.height)),
             }
+        })
+        .collect()
+}
+
+pub fn generate_debug_fake_targets(config: &UiHintConfig) -> Vec<UiHintTarget> {
+    let labels = generate_ui_hint_labels(
+        5,
+        &config.selection_keys,
+        config.label_length,
+        UiHintOverflowBehavior::IncreaseLength,
+        Some(5),
+    );
+    if labels.len() < 5 {
+        return Vec::new();
+    }
+
+    let center = (960, 540);
+    let spread = 120;
+    let points = [
+        center,
+        (center.0, center.1 - spread),
+        (center.0, center.1 + spread),
+        (center.0 - spread, center.1),
+        (center.0 + spread, center.1),
+    ];
+
+    points
+        .into_iter()
+        .zip(labels)
+        .enumerate()
+        .map(|(index, ((x, y), label))| UiHintTarget {
+            id: (index + 1) as u64,
+            label,
+            bounds: (x - 8, y - 8, 16, 16),
+            target_x: x,
+            target_y: y,
+            metadata: Some("debug_fake".to_string()),
         })
         .collect()
 }
@@ -255,7 +295,16 @@ mod tests {
 
     #[test]
     fn generates_fixed_two_letter_labels() {
-        let labels = generate_ui_hint_labels(27, &['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'], 2, UiHintOverflowBehavior::Cap, None);
+        let labels = generate_ui_hint_labels(
+            27,
+            &[
+                'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
+                'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+            ],
+            2,
+            UiHintOverflowBehavior::Cap,
+            None,
+        );
         assert_eq!(labels[0], "AA");
         assert_eq!(labels[25], "AZ");
         assert_eq!(labels[26], "BA");
@@ -263,7 +312,13 @@ mod tests {
 
     #[test]
     fn increases_label_length_on_overflow() {
-        let labels = generate_ui_hint_labels(5, &['A', 'B'], 2, UiHintOverflowBehavior::IncreaseLength, None);
+        let labels = generate_ui_hint_labels(
+            5,
+            &['A', 'B'],
+            2,
+            UiHintOverflowBehavior::IncreaseLength,
+            None,
+        );
         assert_eq!(labels, vec!["AAA", "AAB", "ABA", "ABB", "BAA"]);
     }
 
@@ -276,30 +331,42 @@ mod tests {
     #[test]
     fn sorts_targets_top_left_to_bottom_right() {
         let config = sample_config();
-        let targets = build_ui_hint_targets(vec![
-            raw(1, 50, 50, 10, 10, None),
-            raw(2, 10, 10, 10, 10, None),
-            raw(3, 20, 10, 10, 10, None),
-        ], &config);
-        assert_eq!(targets.iter().map(|t| t.id).collect::<Vec<_>>(), vec![2, 3, 1]);
+        let targets = build_ui_hint_targets(
+            vec![
+                raw(1, 50, 50, 10, 10, None),
+                raw(2, 10, 10, 10, 10, None),
+                raw(3, 20, 10, 10, 10, None),
+            ],
+            &config,
+        );
+        assert_eq!(
+            targets.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![2, 3, 1]
+        );
     }
 
     #[test]
     fn deduplicates_nearby_targets() {
         let mut config = sample_config();
         config.min_hint_spacing_px = 10;
-        let targets = build_ui_hint_targets(vec![
-            raw(1, 0, 0, 10, 10, None),
-            raw(2, 3, 4, 10, 10, None),
-            raw(3, 30, 30, 10, 10, None),
-        ], &config);
+        let targets = build_ui_hint_targets(
+            vec![
+                raw(1, 0, 0, 10, 10, None),
+                raw(2, 3, 4, 10, 10, None),
+                raw(3, 30, 30, 10, 10, None),
+            ],
+            &config,
+        );
         assert_eq!(targets.iter().map(|t| t.id).collect::<Vec<_>>(), vec![1, 3]);
     }
 
     #[test]
     fn exact_label_completes_session() {
         let mut session = UiHintSession::new(vec![target(1, "AA")], vec!['A', 'B']).unwrap();
-        assert_eq!(session.handle_key(VirtualKey::A), UiHintInputUpdate::PrefixChanged);
+        assert_eq!(
+            session.handle_key(VirtualKey::A),
+            UiHintInputUpdate::PrefixChanged
+        );
         match session.handle_key(VirtualKey::A) {
             UiHintInputUpdate::Completed { target } => assert_eq!(target.id, 1),
             other => panic!("unexpected update: {other:?}"),
@@ -308,15 +375,22 @@ mod tests {
 
     #[test]
     fn partial_label_updates_prefix() {
-        let mut session = UiHintSession::new(vec![target(1, "AA"), target(2, "AB")], vec!['A', 'B']).unwrap();
-        assert_eq!(session.handle_key(VirtualKey::A), UiHintInputUpdate::PrefixChanged);
+        let mut session =
+            UiHintSession::new(vec![target(1, "AA"), target(2, "AB")], vec!['A', 'B']).unwrap();
+        assert_eq!(
+            session.handle_key(VirtualKey::A),
+            UiHintInputUpdate::PrefixChanged
+        );
         assert_eq!(session.input, "A");
     }
 
     #[test]
     fn invalid_key_does_not_complete() {
         let mut session = UiHintSession::new(vec![target(1, "AA")], vec!['A', 'B']).unwrap();
-        assert_eq!(session.handle_key(VirtualKey::Num1), UiHintInputUpdate::Consumed);
+        assert_eq!(
+            session.handle_key(VirtualKey::Num1),
+            UiHintInputUpdate::Consumed
+        );
         assert_eq!(session.input, "");
     }
 
@@ -324,19 +398,58 @@ mod tests {
     fn backspace_removes_input() {
         let mut session = UiHintSession::new(vec![target(1, "AA")], vec!['A', 'B']).unwrap();
         session.input = "A".to_string();
-        assert_eq!(session.handle_key(VirtualKey::Backspace), UiHintInputUpdate::PrefixChanged);
+        assert_eq!(
+            session.handle_key(VirtualKey::Backspace),
+            UiHintInputUpdate::PrefixChanged
+        );
         assert_eq!(session.input, "");
     }
 
     #[test]
     fn escape_cancels() {
         let mut session = UiHintSession::new(vec![target(1, "AA")], vec!['A', 'B']).unwrap();
-        assert_eq!(session.handle_key(VirtualKey::Escape), UiHintInputUpdate::Cancelled);
+        assert_eq!(
+            session.handle_key(VirtualKey::Escape),
+            UiHintInputUpdate::Cancelled
+        );
     }
 
     #[test]
     fn empty_target_list_creates_no_session() {
         assert!(UiHintSession::new(Vec::new(), vec!['A']).is_none());
+    }
+
+    #[test]
+    fn debug_fake_target_generator_is_deterministic() {
+        let config = sample_config();
+        let targets = generate_debug_fake_targets(&config);
+        assert_eq!(
+            targets.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
+            vec!["AA", "AB", "AC", "AD", "AE"]
+        );
+        assert_eq!(targets[0].target_x, 960);
+        assert_eq!(targets[0].target_y, 540);
+        assert_eq!(targets[1].target_y, 420);
+        assert_eq!(targets[2].target_y, 660);
+        assert_eq!(targets[3].target_x, 840);
+        assert_eq!(targets[4].target_x, 1080);
+    }
+
+    #[test]
+    fn debug_fake_targets_support_prefix_and_completion_flow() {
+        let config = sample_config();
+        let targets = generate_debug_fake_targets(&config);
+        let mut session = UiHintSession::new(targets, vec!['A', 'B', 'C']).unwrap();
+        assert_eq!(
+            session.handle_key(VirtualKey::A),
+            UiHintInputUpdate::PrefixChanged
+        );
+        assert_eq!(
+            session.handle_key(VirtualKey::E),
+            UiHintInputUpdate::Completed {
+                target: session.targets[4].clone()
+            }
+        );
     }
 
     fn sample_config() -> UiHintConfig {
@@ -350,8 +463,22 @@ mod tests {
         }
     }
 
-    fn raw(id: u64, left: i32, top: i32, width: i32, height: i32, clickable_point: Option<(i32, i32)>) -> RawUiElement {
-        RawUiElement { id, left, top, width, height, clickable_point }
+    fn raw(
+        id: u64,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+        clickable_point: Option<(i32, i32)>,
+    ) -> RawUiElement {
+        RawUiElement {
+            id,
+            left,
+            top,
+            width,
+            height,
+            clickable_point,
+        }
     }
 
     fn target(id: u64, label: &str) -> UiHintTarget {
