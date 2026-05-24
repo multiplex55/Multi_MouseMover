@@ -15,6 +15,7 @@ mod monitor;
 mod overlay;
 mod screen_capture;
 mod ui_hints;
+mod ui_hint_overlay;
 
 use action::*;
 use action_handler::*;
