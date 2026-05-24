@@ -2,7 +2,7 @@ use crate::UiHintsConfig;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, EnumThreadWindows, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
-    IsWindowVisible, PtInRect, ScreenToClient,
+    IsWindowVisible,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub enum UiHintQueryError {
 
 pub fn find_ui_hint_targets(config: &UiHintsConfig) -> Result<Vec<RawUiElement>, UiHintQueryError> {
     let fg = unsafe { GetForegroundWindow() };
-    if fg.0 == 0 {
+    if fg.0.is_null() {
         return Err(UiHintQueryError::NoForegroundWindow);
     }
 
@@ -29,9 +29,15 @@ pub fn find_ui_hint_targets(config: &UiHintsConfig) -> Result<Vec<RawUiElement>,
     if config.include_thread_windows {
         let thread_id = unsafe { GetWindowThreadProcessId(fg, None) };
         let mut thread_windows = Vec::<HWND>::new();
-        unsafe {
-            EnumThreadWindows(thread_id, Some(enum_collect_windows), LPARAM((&mut thread_windows as *mut Vec<HWND>) as isize))
-                .map_err(|_| UiHintQueryError::EnumerationFailed)?;
+        let ok = unsafe {
+            EnumThreadWindows(
+                thread_id,
+                Some(enum_collect_windows),
+                LPARAM((&mut thread_windows as *mut Vec<HWND>) as isize),
+            )
+        };
+        if !ok.as_bool() {
+            return Err(UiHintQueryError::EnumerationFailed);
         }
         for w in thread_windows {
             if !windows.iter().any(|existing| existing.0 == w.0) {
@@ -54,7 +60,11 @@ pub fn find_ui_hint_targets(config: &UiHintsConfig) -> Result<Vec<RawUiElement>,
 
 fn collect_window_targets(root: HWND, out: &mut Vec<RawUiElement>) {
     unsafe {
-        let _ = EnumChildWindows(root, Some(enum_collect_elements), LPARAM((out as *mut Vec<RawUiElement>) as isize));
+        let _ = EnumChildWindows(
+            Some(root),
+            Some(enum_collect_elements),
+            LPARAM((out as *mut Vec<RawUiElement>) as isize),
+        );
     }
 }
 
@@ -72,7 +82,7 @@ unsafe extern "system" fn enum_collect_elements(hwnd: HWND, lparam: LPARAM) -> B
     }
 
     let mut rect = RECT::default();
-    if !GetWindowRect(hwnd, &mut rect).as_bool() {
+    if GetWindowRect(hwnd, &mut rect).is_err() {
         return BOOL(1);
     }
 
@@ -82,15 +92,14 @@ unsafe extern "system" fn enum_collect_elements(hwnd: HWND, lparam: LPARAM) -> B
         return BOOL(1);
     }
 
-    let mut center = POINT {
+    let center = POINT {
         x: rect.left + (width / 2),
         y: rect.top + (height / 2),
     };
-    let click = if PtInRect(&rect, center).as_bool() {
-        Some((center.x.clamp(rect.left, rect.right), center.y.clamp(rect.top, rect.bottom)))
-    } else {
-        None
-    };
+    let click = Some((
+        center.x.clamp(rect.left, rect.right.saturating_sub(1)),
+        center.y.clamp(rect.top, rect.bottom.saturating_sub(1)),
+    ));
 
     let out = &mut *(lparam.0 as *mut Vec<RawUiElement>);
     out.push(RawUiElement {
@@ -99,7 +108,5 @@ unsafe extern "system" fn enum_collect_elements(hwnd: HWND, lparam: LPARAM) -> B
         name: String::new(),
         control_type: "interactable".to_string(),
     });
-
-    let _ = ScreenToClient(hwnd, &mut center);
     BOOL(1)
 }

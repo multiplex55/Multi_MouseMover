@@ -2914,7 +2914,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::UiHintQueryCompleted => {
             let resolution = {
-                let mut app_state = APP_STATE.write().unwrap();
+                let app_state = APP_STATE.write().unwrap();
                 app_state.resolve_jump_overlay()
             };
             sync_jump_overlay(resolution);
