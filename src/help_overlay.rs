@@ -815,6 +815,7 @@ fn format_action(action: &Action) -> String {
         Action::NavigateForward => "Navigate forward".to_string(),
         Action::Disable => "Disable".to_string(),
         Action::ShowHelp => "Hints / Help".to_string(),
+        Action::UiHintMode => "UI hint mode".to_string(),
     }
 }
 
@@ -865,7 +866,8 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::ReloadConfig
         | Action::PanicReset
         | Action::Disable
-        | Action::ShowHelp => HelpBindingCategory::System,
+        | Action::ShowHelp
+        | Action::UiHintMode => HelpBindingCategory::System,
     }
 }
 
