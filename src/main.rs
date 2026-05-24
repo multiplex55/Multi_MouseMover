@@ -1283,7 +1283,9 @@ impl Config {
         }
 
         if self.slow_mouse.max_speed < self.slow_mouse.min_speed {
-            warn_config_normalized("slow_mouse.max_speed is below slow_mouse.min_speed; clamping to min");
+            warn_config_normalized(
+                "slow_mouse.max_speed is below slow_mouse.min_speed; clamping to min",
+            );
             self.slow_mouse.max_speed = self.slow_mouse.min_speed;
         }
 
@@ -1292,7 +1294,9 @@ impl Config {
             .fixed_speed
             .clamp(self.slow_mouse.min_speed, self.slow_mouse.max_speed);
         if clamped_fixed != self.slow_mouse.fixed_speed {
-            warn_config_normalized("slow_mouse.fixed_speed is outside slow_mouse min/max range; clamping");
+            warn_config_normalized(
+                "slow_mouse.fixed_speed is outside slow_mouse min/max range; clamping",
+            );
             self.slow_mouse.fixed_speed = clamped_fixed;
         }
 
@@ -2435,11 +2439,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     action
                 )
             }
-            AppCommand::GridInput(event) => {
+            AppCommand::GridInput(event, action) => {
                 println!(
-                    "[command] GridInput key={:?} state={}",
+                    "[command] GridInput key={:?} state={} action={:?}",
                     event.key,
-                    if event.is_down { "down" } else { "up" }
+                    if event.is_down { "down" } else { "up" },
+                    action
                 )
             }
         }
@@ -2664,10 +2669,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 }
             }
         }
-        AppCommand::GridInput(event) => {
+        AppCommand::GridInput(event, action) => {
             let (grid_result, view) = {
                 let mut app_state = APP_STATE.write().unwrap();
-                let grid_result = app_state.handle_grid_input(event);
+                let grid_result = app_state.handle_grid_input(event, action);
                 let view = match grid_result {
                     Some(GridInputUpdate::Consumed) | Some(GridInputUpdate::Updated { .. }) => {
                         app_state.grid_view()
@@ -4277,7 +4282,10 @@ mod tests {
             multiplier = 0.5
             "#,
         );
-        assert_eq!(multiplier.slow_mouse.strategy, SlowMouseStrategy::Multiplier);
+        assert_eq!(
+            multiplier.slow_mouse.strategy,
+            SlowMouseStrategy::Multiplier
+        );
         assert_eq!(multiplier.slow_mouse.multiplier, 0.5);
 
         let subtract = parse_config(
