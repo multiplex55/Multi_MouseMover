@@ -415,8 +415,6 @@ impl Default for TooltipOverlayEvents {
 #[serde(default)]
 pub struct TooltipOverlayConfig {
     pub enabled: bool,
-    pub debug: bool,
-    pub debug_fake_targets: bool,
     pub show_temporary_tooltips: bool,
     pub show_help: bool,
     pub positioning: TooltipOverlayPositioning,
@@ -2835,7 +2833,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
             let query_id = UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1;
             let foreground_hwnd =
-                windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().map(|h| h.0 as isize).unwrap_or_default();
+                windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize;
             APP_STATE
                 .write()
                 .unwrap()
@@ -3009,9 +3007,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 }
                 UiHintInputUpdate::PrefixChanged => {
                     if ui_hints_debug_enabled() {
-                        let prefix = session.input();
+                        let prefix = session.input.as_str();
                         let matches = session
-                            .visible_hints()
+                            .targets
                             .iter()
                             .filter(|hint| hint.label.starts_with(prefix))
                             .count();
@@ -3179,7 +3177,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if ui_hints_debug_enabled() {
                 eprintln!(
                     "[ui-hints] overlay shown: query_id={query_id} hints={}",
-                    view.hints.len()
+                    view.targets.len()
                 );
             }
         }
