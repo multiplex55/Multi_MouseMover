@@ -3813,6 +3813,10 @@ mod tests {
                 drag: false,
                 reload: false,
                 panic: false,
+                ui_hints_query_start: false,
+                ui_hints_query_fail: true,
+                ui_hints_query_empty: true,
+                ui_hints_query_capped_count: false,
             }
         );
     }
@@ -5789,7 +5793,7 @@ mod tests {
 
     #[test]
     fn ui_hints_section_parses_and_normalizes() {
-        let config = Config::from_toml(
+        let config = parse_config(
             r#"
             [ui_hints]
             selection_keys = "AABC"
@@ -5800,8 +5804,7 @@ mod tests {
             [ui_hints.overlay]
             font_scale = 10.0
             "#,
-        )
-        .unwrap();
+        );
 
         assert_eq!(config.ui_hints.selection_keys, "ABC");
         assert_eq!(config.ui_hints.label_length, 5);
@@ -5812,7 +5815,7 @@ mod tests {
 
     #[test]
     fn ui_hints_defaults_when_section_missing() {
-        let config = Config::from_toml("").unwrap();
+        let config = parse_config("");
         assert_eq!(config.ui_hints, UiHintsConfig::default());
         assert!(!config.ui_hints.debug);
         assert!(!config.ui_hints.debug_fake_targets);
