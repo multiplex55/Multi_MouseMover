@@ -78,6 +78,7 @@ pub struct AppState {
     preserve_global_shortcuts: bool,
     system_bindings: RuntimeSystemBindings,
     help_visible: bool,
+    grid_direction_labels: GridDirectionLabels,
 }
 
 #[derive(Debug)]
@@ -103,10 +104,30 @@ pub enum GridState {
         activation_key_released: bool,
         line_visible: bool,
         show_direction_labels: bool,
+        direction_labels: GridDirectionLabels,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridDirectionLabels {
+    pub up: String,
+    pub left: String,
+    pub down: String,
+    pub right: String,
+}
+
+impl Default for GridDirectionLabels {
+    fn default() -> Self {
+        Self {
+            up: "W".to_string(),
+            left: "A".to_string(),
+            down: "S".to_string(),
+            right: "D".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GridInputUpdate {
     Consumed,
     Updated {
@@ -142,6 +163,7 @@ impl Default for AppState {
             preserve_global_shortcuts: true,
             system_bindings: RuntimeSystemBindings::default(),
             help_visible: false,
+            grid_direction_labels: GridDirectionLabels::default(),
         }
     }
 }
@@ -208,6 +230,10 @@ impl AppState {
 
     pub fn set_system_bindings(&mut self, system_bindings: RuntimeSystemBindings) {
         self.system_bindings = system_bindings;
+    }
+
+    pub fn set_grid_direction_labels(&mut self, labels: GridDirectionLabels) {
+        self.grid_direction_labels = labels;
     }
 
     pub fn is_toggle_active_binding(&self, event: &KeyEvent) -> bool {
@@ -347,6 +373,7 @@ impl AppState {
             activation_key_released: false,
             line_visible,
             show_direction_labels,
+            direction_labels: self.grid_direction_labels.clone(),
         };
         true
     }
@@ -502,6 +529,7 @@ impl AppState {
             session,
             line_visible,
             show_direction_labels,
+            direction_labels,
             ..
         } = &self.grid
         else {
@@ -529,6 +557,10 @@ impl AppState {
             grid: Some(GridOverlayMetadata {
                 line_visible: *line_visible,
                 show_direction_labels: *show_direction_labels,
+                up_label: direction_labels.up.clone(),
+                left_label: direction_labels.left.clone(),
+                down_label: direction_labels.down.clone(),
+                right_label: direction_labels.right.clone(),
             }),
         })
     }
