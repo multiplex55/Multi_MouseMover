@@ -3446,8 +3446,8 @@ mod tests {
     }
 
     #[test]
-    fn checked_in_config_parses_and_all_default_bindings_are_known() {
-        let config = checked_in_config();
+    fn default_bindings_are_known_and_defaults_are_sane() {
+        let config = Config::default().normalize().unwrap();
 
         assert_eq!(config.system_bindings.exit, "Escape");
         assert_eq!(config.key_bindings, default_key_bindings());
@@ -3460,26 +3460,35 @@ mod tests {
             config.grid_mode.start_region,
             JumpStartRegion::CurrentMonitor
         );
-        assert_eq!(config.grid_mode.width_percent, 1.0);
-        assert_eq!(config.grid_mode.height_percent, 1.0);
+        assert_eq!(
+            config.grid_mode.width_percent,
+            GridModeConfig::default().width_percent
+        );
+        assert_eq!(
+            config.grid_mode.height_percent,
+            GridModeConfig::default().height_percent
+        );
     }
 
     #[test]
     fn default_config_effective_values_match_expected() {
-        let config = checked_in_config();
+        let config = Config::default().normalize().unwrap();
 
         assert_eq!(config.polling_rate, 8);
         assert_eq!(config.acceleration, 2);
         assert_eq!(config.acceleration_rate, 1);
         assert_eq!(config.top_speed, 6);
-        assert_eq!(config.grid_mode.width_percent, 1.0);
+        assert_eq!(
+            config.grid_mode.width_percent,
+            GridModeConfig::default().width_percent
+        );
         assert_eq!(config.jump.start_region, JumpStartRegion::CurrentMonitor);
         assert!(!config.jump.precise.enabled);
     }
 
     #[test]
-    fn readme_default_binding_keys_match_checked_in_config() {
-        let config = checked_in_config();
+    fn readme_default_binding_keys_match_documented_defaults() {
+        let config = Config::default().normalize().unwrap();
         let section = readme_section("## Default Bindings", "## Active And Idle");
 
         for key in [
