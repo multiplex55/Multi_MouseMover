@@ -1856,8 +1856,6 @@ mod tests {
         config.slow_mouse.fixed_speed = 3;
         config.slow_mouse.min_speed = 1;
         config.slow_mouse.max_speed = 12;
-        let expected_baseline = config.mouse_speed.default_speed;
-
         let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
         let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
 

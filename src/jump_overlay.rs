@@ -689,27 +689,35 @@ impl JumpOverlay {
         }
     }
 
-    fn draw_grid_direction_labels(&self, hdc: HDC, grid_rect: RECT) {
+    fn draw_grid_direction_labels(
+        &self,
+        hdc: HDC,
+        grid_rect: RECT,
+        up: &str,
+        left: &str,
+        down: &str,
+        right: &str,
+    ) {
         unsafe {
             let old_text_color = SetTextColor(hdc, label_color());
             let labels = [
                 (
-                    "W",
+                    up,
                     grid_rect.left + (grid_rect.right - grid_rect.left) / 2 - 4,
                     grid_rect.top + 12,
                 ),
                 (
-                    "A",
+                    left,
                     grid_rect.left + 12,
                     grid_rect.top + (grid_rect.bottom - grid_rect.top) / 2 - 8,
                 ),
                 (
-                    "S",
+                    down,
                     grid_rect.left + (grid_rect.right - grid_rect.left) / 2 - 4,
                     grid_rect.bottom - 24,
                 ),
                 (
-                    "D",
+                    right,
                     grid_rect.right - 20,
                     grid_rect.top + (grid_rect.bottom - grid_rect.top) / 2 - 8,
                 ),
@@ -845,12 +853,19 @@ impl JumpOverlay {
                 if branches.active_grid_outline {
                     self.draw_active_grid_outline(hdc, grid_rect);
                 }
-                if let Some(grid) = view.grid {
+                if let Some(grid) = &view.grid {
                     if grid.line_visible {
                         self.draw_grid_midlines(hdc, grid_rect);
                     }
                     if grid.show_direction_labels {
-                        self.draw_grid_direction_labels(hdc, grid_rect);
+                        self.draw_grid_direction_labels(
+                            hdc,
+                            grid_rect,
+                            &grid.up_label,
+                            &grid.left_label,
+                            &grid.down_label,
+                            &grid.right_label,
+                        );
                     }
                 }
                 if branches.cell_centers || label_plan.center_markers {
@@ -1017,6 +1032,10 @@ mod tests {
         view.grid = Some(GridOverlayMetadata {
             line_visible: true,
             show_direction_labels: true,
+            up_label: "W".to_string(),
+            left_label: "A".to_string(),
+            down_label: "S".to_string(),
+            right_label: "D".to_string(),
         });
         view.visuals.selected_region_outline = false;
         view.visuals.active_grid_outline = false;

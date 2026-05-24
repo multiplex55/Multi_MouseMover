@@ -47,10 +47,14 @@ pub struct FinalAdjustOverlayView {
     pub show_hint: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridOverlayMetadata {
     pub line_visible: bool,
     pub show_direction_labels: bool,
+    pub up_label: String,
+    pub left_label: String,
+    pub down_label: String,
+    pub right_label: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
