@@ -14,6 +14,7 @@ mod keyboard;
 mod monitor;
 mod overlay;
 mod screen_capture;
+mod ui_hints;
 
 use action::*;
 use action_handler::*;
