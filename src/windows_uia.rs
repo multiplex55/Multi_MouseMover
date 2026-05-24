@@ -1,7 +1,7 @@
 use crate::UiHintsConfig;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, EnumThreadWindows, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
+    EnumChildWindows, EnumThreadWindows, GetWindowRect, GetWindowThreadProcessId,
     IsWindowVisible,
 };
 
@@ -19,8 +19,11 @@ pub enum UiHintQueryError {
     EnumerationFailed,
 }
 
-pub fn find_ui_hint_targets(config: &UiHintsConfig) -> Result<Vec<RawUiElement>, UiHintQueryError> {
-    let fg = unsafe { GetForegroundWindow() };
+pub fn find_ui_hint_targets_for_window(
+    foreground_hwnd: isize,
+    config: UiHintsConfig,
+) -> Result<Vec<RawUiElement>, UiHintQueryError> {
+    let fg = HWND(foreground_hwnd as *mut core::ffi::c_void);
     if fg.0.is_null() {
         return Err(UiHintQueryError::NoForegroundWindow);
     }

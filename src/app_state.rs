@@ -323,6 +323,18 @@ impl AppState {
         }
     }
 
+    pub fn current_ui_hint_foreground_hwnd(&self) -> Option<isize> {
+        match self.ui_hints {
+            UiHintState::Querying {
+                foreground_hwnd, ..
+            }
+            | UiHintState::Active {
+                foreground_hwnd, ..
+            } => Some(foreground_hwnd),
+            UiHintState::Inactive => None,
+        }
+    }
+
     pub fn is_ui_hint_active_or_querying(&self) -> bool {
         self.is_ui_hint_active() || self.is_ui_hint_querying()
     }
@@ -1521,10 +1533,12 @@ mod tests {
         let mut state = AppState::default();
         state.enter_ui_hint_querying(VirtualKey::U, 7, 123);
         assert_eq!(state.current_ui_hint_query_id(), Some(7));
+        assert_eq!(state.current_ui_hint_foreground_hwnd(), Some(123));
         assert!(!state.activate_ui_hint_if_querying(8));
         assert!(state.is_ui_hint_querying());
         assert!(state.activate_ui_hint_if_querying(7));
         assert!(state.is_ui_hint_active());
+        assert_eq!(state.current_ui_hint_foreground_hwnd(), Some(123));
     }
 
     #[test]

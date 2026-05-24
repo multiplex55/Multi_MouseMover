@@ -106,7 +106,14 @@ fn sync_ui_hint_overlay_visibility(overlay: &mut dyn UiHintOverlayFacade, has_ta
 
 struct UiHintQueryResult {
     query_id: u64,
+    foreground_hwnd: isize,
     result: Result<Vec<windows_uia::RawUiElement>, windows_uia::UiHintQueryError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UiHintQueryRequest {
+    query_id: u64,
+    foreground_hwnd: isize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2304,6 +2311,13 @@ fn process_ui_hint_query_results() {
     if message.query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
         return;
     }
+    let current_state_hwnd = APP_STATE.read().unwrap().current_ui_hint_foreground_hwnd();
+    if ui_hints_debug_enabled() {
+        eprintln!(
+            "[ui-hints] query result dispatch: query_id={} result_hwnd={} state_hwnd={:?}",
+            message.query_id, message.foreground_hwnd, current_state_hwnd
+        );
+    }
 
     let command = match message.result {
         Ok(elements) => AppCommand::UiHintQueryCompleted {
@@ -2918,18 +2932,21 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     Duration::from_millis(500),
                 );
             }
-            let query_id = UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1;
-            let foreground_hwnd = unsafe {
+            let query_request = UiHintQueryRequest {
+                query_id: UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1,
+                foreground_hwnd: unsafe {
                 windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize
+                },
             };
             APP_STATE.write().unwrap().enter_ui_hint_querying(
                 activation_key,
-                query_id,
-                foreground_hwnd,
+                query_request.query_id,
+                query_request.foreground_hwnd,
             );
             if config.debug {
                 eprintln!(
-                    "[ui-hints] query start: query_id={query_id} foreground_hwnd={foreground_hwnd}"
+                    "[ui-hints] query start: query_id={} captured_hwnd={}",
+                    query_request.query_id, query_request.foreground_hwnd
                 );
             }
             let maybe_tx = UI_HINT_QUERY_TX.lock().unwrap().as_ref().cloned();
@@ -2938,10 +2955,23 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     let result = match ui_hint_query_backend(&config) {
                         UiHintQueryBackend::DebugFakeTargets => Ok(Vec::new()),
                         UiHintQueryBackend::WindowsUia => {
-                            windows_uia::find_ui_hint_targets(&config)
+                            windows_uia::find_ui_hint_targets_for_window(
+                                query_request.foreground_hwnd,
+                                config,
+                            )
                         }
                     };
-                    let _ = tx.send(UiHintQueryResult { query_id, result });
+                    if ui_hints_debug_enabled() {
+                        eprintln!(
+                            "[ui-hints] worker queried: query_id={} query_hwnd={}",
+                            query_request.query_id, query_request.foreground_hwnd
+                        );
+                    }
+                    let _ = tx.send(UiHintQueryResult {
+                        query_id: query_request.query_id,
+                        foreground_hwnd: query_request.foreground_hwnd,
+                        result,
+                    });
                 });
             }
         }
@@ -3176,9 +3206,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 return;
             }
             if ui_hints_debug_enabled() {
+                let state_hwnd = APP_STATE.read().unwrap().current_ui_hint_foreground_hwnd();
                 eprintln!(
-                    "[ui-hints] query complete: query_id={query_id} raw_elements={}",
-                    elements.len()
+                    "[ui-hints] query complete: query_id={query_id} state_hwnd={:?} raw_elements={}",
+                    state_hwnd, elements.len()
                 );
             }
             let config = ACTION_HANDLER
@@ -5893,6 +5924,36 @@ mod tests {
         assert_eq!(
             ui_hint_query_backend(&config),
             UiHintQueryBackend::WindowsUia
+        );
+    }
+
+    #[test]
+    fn ui_hint_query_request_preserves_captured_hwnd() {
+        let request = UiHintQueryRequest {
+            query_id: 44,
+            foreground_hwnd: 0x1234,
+        };
+        assert_eq!(request.query_id, 44);
+        assert_eq!(request.foreground_hwnd, 0x1234);
+    }
+
+    #[test]
+    fn ui_hint_query_result_preserves_captured_hwnd_even_if_global_changes() {
+        UI_HINT_QUERY_ID.store(200, Ordering::Relaxed);
+        APP_STATE
+            .write()
+            .unwrap()
+            .enter_ui_hint_querying(VirtualKey::U, 200, 0x2222);
+
+        let message = UiHintQueryResult {
+            query_id: 200,
+            foreground_hwnd: 0x2222,
+            result: Ok(Vec::new()),
+        };
+        assert_eq!(message.foreground_hwnd, 0x2222);
+        assert_eq!(
+            APP_STATE.read().unwrap().current_ui_hint_foreground_hwnd(),
+            Some(0x2222)
         );
     }
 
