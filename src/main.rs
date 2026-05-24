@@ -52,8 +52,6 @@ use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-#[derive(Debug)]
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UiHintExitReason {
     Cancelled,
