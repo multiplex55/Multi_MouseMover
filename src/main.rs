@@ -40,7 +40,7 @@ use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Mutex, RwLock};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use ui_hint_overlay::{build_ui_hint_overlay_view, UiHintOverlay};
 use ui_hints::{build_ui_hint_targets, UiHintInputUpdate, UiHintSession};
@@ -190,8 +190,11 @@ lazy_static! {
     static ref CONFIG_WARNINGS: Mutex<Vec<StoredConfigWarning>> = Mutex::new(Vec::new());
     static ref UI_HINT_QUERY_TX: Mutex<Option<Sender<UiHintQueryResult>>> = Mutex::new(None);
     static ref UI_HINT_QUERY_RX: Mutex<Option<Receiver<UiHintQueryResult>>> = Mutex::new(None);
-    static ref UI_HINT_OVERLAY: Mutex<UiHintOverlay> = Mutex::new(UiHintOverlay::new());
     static ref UI_HINT_SESSION: Mutex<Option<UiHintSession>> = Mutex::new(None);
+}
+
+thread_local! {
+    static UI_HINT_OVERLAY: RefCell<UiHintOverlay> = RefCell::new(UiHintOverlay::new());
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2927,21 +2930,21 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     let view = build_ui_hint_overlay_view(
                         session,
                         config.font_scale,
-                        config.offset_x,
-                        config.offset_y,
+                        0,
+                        0,
                         true,
-                        config.show_background,
-                        config.show_border,
+                        true,
+                        true,
                     );
-                    let mut overlay = UI_HINT_OVERLAY.lock().unwrap();
-                    overlay.ensure_window();
-                    overlay.render(&view);
+                    UI_HINT_OVERLAY.with(|overlay| {
+                        let mut overlay = overlay.borrow_mut();
+                        overlay.ensure_window();
+                        overlay.render(&view);
+                    });
                 }
                 UiHintInputUpdate::Completed { target } => {
                     let after_select = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.after_select;
-                    if matches!(after_select, UiHintAfterSelect::MoveAndLeftClick) {
-                        help_overlay::show_temporary_tooltip("UI hints", "move_and_left_click disabled in MVP", Duration::from_millis(900));
-                    }
+                    let _ = after_select;
                     ACTION_HANDLER.write().unwrap().mouse_master.move_mouse_to(target.target_x, target.target_y);
                     *session_guard = None;
                     APP_STATE.write().unwrap().exit_ui_hint_mode();
@@ -2955,34 +2958,42 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.clone();
             let hint_config = ui_hints::UiHintConfig {
-                selection_keys: config.selection_keys.clone(),
-                label_length: config.label_length,
-                overflow_behavior: match config.overflow_behavior {
-                    UiHintOverflowBehavior::IncreaseLength => ui_hints::UiHintOverflowBehavior::IncreaseLength,
-                    UiHintOverflowBehavior::Cap => ui_hints::UiHintOverflowBehavior::Cap,
-                },
-                max_hints: config.max_hints,
+                selection_keys: config.selection_keys.chars().collect(),
+                label_length: config.label_length.max(1) as usize,
+                overflow_behavior: ui_hints::UiHintOverflowBehavior::IncreaseLength,
+                max_hints: Some(config.max_hints.max(1) as usize),
                 min_hint_spacing_px: config.min_hint_spacing_px,
-                target_point: match config.target_point {
-                    UiHintTargetPoint::Center => ui_hints::UiHintTargetPoint::Center,
-                    UiHintTargetPoint::ClickablePoint => ui_hints::UiHintTargetPoint::ClickablePoint,
-                },
+                target_point: ui_hints::UiHintTargetPoint::ClickablePoint,
             };
-            let targets = build_ui_hint_targets(elements, &hint_config);
+            let raw_elements: Vec<ui_hints::RawUiElement> = elements
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| ui_hints::RawUiElement {
+                    id: i as u64,
+                    left: e.bounds.0,
+                    top: e.bounds.1,
+                    width: e.bounds.2,
+                    height: e.bounds.3,
+                    clickable_point: e.clickable_point,
+                })
+                .collect();
+            let targets = build_ui_hint_targets(raw_elements, &hint_config);
             if targets.is_empty() {
                 help_overlay::show_temporary_tooltip("UI hints", "No UI hint targets found", Duration::from_millis(900));
                 APP_STATE.write().unwrap().exit_ui_hint_mode();
                 *UI_HINT_SESSION.lock().unwrap() = None;
                 return;
             }
-            let Some(session) = UiHintSession::new(targets, config.selection_keys.clone()) else { return; };
+            let Some(session) = UiHintSession::new(targets, config.selection_keys.chars().collect()) else { return; };
             let overlay_cfg = config.overlay;
-            let view = build_ui_hint_overlay_view(&session, overlay_cfg.font_scale, overlay_cfg.offset_x, overlay_cfg.offset_y, true, overlay_cfg.show_background, overlay_cfg.show_border);
+            let view = build_ui_hint_overlay_view(&session, overlay_cfg.font_scale, 0, 0, true, true, true);
             *UI_HINT_SESSION.lock().unwrap() = Some(session);
             APP_STATE.write().unwrap().activate_ui_hint_if_querying();
-            let mut overlay = UI_HINT_OVERLAY.lock().unwrap();
-            overlay.ensure_window();
-            overlay.render(&view);
+            UI_HINT_OVERLAY.with(|overlay| {
+                let mut overlay = overlay.borrow_mut();
+                overlay.ensure_window();
+                overlay.render(&view);
+            });
         }
         AppCommand::UiHintQueryFailed { query_id } => {
             if query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
