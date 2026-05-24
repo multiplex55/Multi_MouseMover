@@ -3034,6 +3034,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 min_hint_spacing_px: config.min_hint_spacing_px,
                 target_point: ui_hints::UiHintTargetPoint::ClickablePoint,
             };
+            let discovered_count = elements.len();
             let raw_elements: Vec<ui_hints::RawUiElement> = elements
                 .into_iter()
                 .enumerate()
@@ -3057,11 +3058,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if ui_hint_tooltip_event_enabled(
                 tooltip_cfg,
                 tooltip_cfg.events.ui_hints_query_capped_count,
-            ) && elements.len() > targets.len()
+            ) && discovered_count > targets.len()
             {
                 help_overlay::show_temporary_tooltip(
                     "UI Hints",
-                    format!("Showing {} of {} controls", targets.len(), elements.len()),
+                    format!("Showing {} of {} controls", targets.len(), discovered_count),
                     Duration::from_millis(900),
                 );
             }

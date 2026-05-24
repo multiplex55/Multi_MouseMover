@@ -105,7 +105,10 @@ pub fn build_ui_hint_overlay_view(
 }
 
 fn screen_to_client(screen_x: i32, screen_y: i32, virtual_screen: VirtualScreen) -> (i32, i32) {
-    (screen_x - virtual_screen.left, screen_y - virtual_screen.top)
+    (
+        screen_x - virtual_screen.left,
+        screen_y - virtual_screen.top,
+    )
 }
 
 #[allow(non_snake_case)]
@@ -206,12 +209,17 @@ impl UiHintOverlay {
             let _ = SetBkMode(hdc, TRANSPARENT);
 
             for target in &view.targets {
-                let (client_x, client_y) = screen_to_client(target.screen_x, target.screen_y, self.virtual_screen);
+                let (client_x, client_y) =
+                    screen_to_client(target.screen_x, target.screen_y, self.virtual_screen);
                 let x = client_x + view.offset_x;
                 let y = client_y + view.offset_y;
 
-                let text: Vec<u16> = target.label.encode_utf16().chain(std::iter::once(0)).collect();
-                let mut text_rect = RECT {
+                let text: Vec<u16> = target
+                    .label
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                let text_rect = RECT {
                     left: x,
                     top: y,
                     right: x + 120,
@@ -227,7 +235,13 @@ impl UiHintOverlay {
                     let border = CreatePen(PS_SOLID, 1, RGB(120, 120, 120));
                     let old_pen = SelectObject(hdc, border.into());
                     let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-                    let _ = Rectangle(hdc, text_rect.left, text_rect.top, text_rect.right, text_rect.bottom);
+                    let _ = Rectangle(
+                        hdc,
+                        text_rect.left,
+                        text_rect.top,
+                        text_rect.right,
+                        text_rect.bottom,
+                    );
                     let _ = SelectObject(hdc, old_pen);
                     let _ = SelectObject(hdc, old_brush);
                     let _ = DeleteObject(border.into());
@@ -243,7 +257,12 @@ impl UiHintOverlay {
                     RGB(255, 255, 0)
                 };
                 let _ = SetTextColor(hdc, color);
-                let _ = TextOutW(hdc, text_rect.left + 4, text_rect.top + 2, &text[..text.len().saturating_sub(1)]);
+                let _ = TextOutW(
+                    hdc,
+                    text_rect.left + 4,
+                    text_rect.top + 2,
+                    &text[..text.len().saturating_sub(1)],
+                );
             }
 
             let _ = SelectObject(hdc, old);
@@ -281,7 +300,11 @@ mod tests {
     #[test]
     fn matching_labels_marked_for_input_prefix() {
         let session = UiHintSession {
-            targets: vec![target(1, "AA", 10, 10), target(2, "AB", 20, 20), target(3, "BC", 30, 30)],
+            targets: vec![
+                target(1, "AA", 10, 10),
+                target(2, "AB", 20, 20),
+                target(3, "BC", 30, 30),
+            ],
             input: "A".to_string(),
             selection_keys: vec!['A', 'B', 'C'],
         };
