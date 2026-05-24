@@ -1,8 +1,17 @@
 use crate::UiHintsConfig;
+use windows::core::Interface;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
+use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+use windows::Win32::UI::Accessibility::{
+    CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
+    IUIAutomationElementArray, TreeScope_Descendants, UIA_BoundingRectanglePropertyId,
+    UIA_ControlTypePropertyId, UIA_IsEnabledPropertyId, UIA_IsKeyboardFocusablePropertyId,
+    UIA_IsOffscreenPropertyId, UIA_NamePropertyId,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, EnumThreadWindows, GetWindowRect, GetWindowThreadProcessId,
-    IsWindowVisible,
+    EnumThreadWindows, GetForegroundWindow, GetMonitorInfoW, GetWindow, GetWindowRect,
+    GetWindowThreadProcessId, IsWindowEnabled, IsWindowVisible, MonitorFromWindow,
+    MONITOR_DEFAULTTONEAREST, MONITORINFO, GW_OWNER,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +26,8 @@ pub struct RawUiElement {
 pub enum UiHintQueryError {
     NoForegroundWindow,
     EnumerationFailed,
+    UiAutomationInitFailed,
+    UiAutomationQueryFailed,
 }
 
 pub fn find_ui_hint_targets_for_window(
@@ -28,13 +39,72 @@ pub fn find_ui_hint_targets_for_window(
         return Err(UiHintQueryError::NoForegroundWindow);
     }
 
-    let mut windows = vec![fg];
-    if config.include_thread_windows {
-        let thread_id = unsafe { GetWindowThreadProcessId(fg, None) };
+    let windows = discover_windows_in_scope(fg, config.include_thread_windows, config.include_owned_popups)?;
+
+    let _com = ComGuard::init()?;
+    let automation: IUIAutomation = unsafe {
+        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+            .map_err(|_| UiHintQueryError::UiAutomationInitFailed)?
+    };
+
+    let condition = build_interactive_condition(&automation)?;
+    let mut raw = Vec::new();
+    for hwnd in windows {
+        let mut elements = collect_window_elements(&automation, hwnd, &condition)?;
+        raw.append(&mut elements);
+    }
+
+    raw.retain(stage1_filter);
+    raw.sort_by_key(|e| (e.bounds.1, e.bounds.0, e.bounds.2 * e.bounds.3));
+    raw.dedup_by_key(|e| e.bounds);
+    Ok(raw)
+}
+
+struct ComGuard;
+impl ComGuard {
+    fn init() -> Result<Self, UiHintQueryError> {
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+            .map_err(|_| UiHintQueryError::UiAutomationInitFailed)?;
+        Ok(Self)
+    }
+}
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize() }
+    }
+}
+
+fn build_interactive_condition(automation: &IUIAutomation) -> Result<IUIAutomationCondition, UiHintQueryError> {
+    unsafe {
+        let enabled = automation
+            .CreatePropertyCondition(UIA_IsEnabledPropertyId, true.into())
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let onscreen = automation
+            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, false.into())
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let focusable = automation
+            .CreatePropertyCondition(UIA_IsKeyboardFocusablePropertyId, true.into())
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        automation
+            .CreateAndConditionFromArray(&[enabled, onscreen, focusable])
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)
+    }
+}
+
+fn discover_windows_in_scope(
+    foreground: HWND,
+    include_thread_windows: bool,
+    include_owned_popups: bool,
+) -> Result<Vec<HWND>, UiHintQueryError> {
+    let fg_thread = unsafe { GetWindowThreadProcessId(foreground, None) };
+    let fg_monitor = unsafe { monitor_rect(foreground) };
+
+    let mut windows = vec![foreground];
+    if include_thread_windows {
         let mut thread_windows = Vec::<HWND>::new();
         let ok = unsafe {
             EnumThreadWindows(
-                thread_id,
+                fg_thread,
                 Some(enum_collect_windows),
                 LPARAM((&mut thread_windows as *mut Vec<HWND>) as isize),
             )
@@ -42,74 +112,143 @@ pub fn find_ui_hint_targets_for_window(
         if !ok.as_bool() {
             return Err(UiHintQueryError::EnumerationFailed);
         }
-        for w in thread_windows {
-            if !windows.iter().any(|existing| existing.0 == w.0) {
-                windows.push(w);
+        for hwnd in thread_windows {
+            if should_include_thread_window(hwnd, foreground, include_owned_popups, fg_monitor)
+                && !windows.iter().any(|w| w.0 == hwnd.0)
+            {
+                windows.push(hwnd);
             }
         }
     }
-
-    let mut raw = Vec::new();
-    for hwnd in windows {
-        collect_window_targets(hwnd, &mut raw);
-    }
-
-    raw.retain(|e| e.bounds.2 > 0 && e.bounds.3 > 0);
-    raw.sort_by_key(|e| (e.bounds.1, e.bounds.0, e.bounds.2 * e.bounds.3));
-    raw.dedup_by_key(|e| e.bounds);
-
-    Ok(raw)
+    Ok(windows)
 }
 
-fn collect_window_targets(root: HWND, out: &mut Vec<RawUiElement>) {
-    unsafe {
-        let _ = EnumChildWindows(
-            Some(root),
-            Some(enum_collect_elements),
-            LPARAM((out as *mut Vec<RawUiElement>) as isize),
-        );
+fn should_include_thread_window(
+    hwnd: HWND,
+    foreground: HWND,
+    include_owned_popups: bool,
+    fg_monitor_rect: Option<RECT>,
+) -> bool {
+    if hwnd.0 == foreground.0 {
+        return true;
     }
+    if unsafe { !IsWindowVisible(hwnd).as_bool() || !IsWindowEnabled(hwnd).as_bool() } {
+        return false;
+    }
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() || !is_valid_rect(&rect) {
+        return false;
+    }
+    if let Some(fgmr) = fg_monitor_rect {
+        if !rects_intersect(rect, fgmr) {
+            return false;
+        }
+    }
+    if include_owned_popups && unsafe { GetWindow(hwnd, GW_OWNER) }.0 == foreground.0 {
+        return true;
+    }
+    unsafe { GetWindow(hwnd, GW_OWNER) }.0.is_null()
 }
 
 unsafe extern "system" fn enum_collect_windows(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let windows = &mut *(lparam.0 as *mut Vec<HWND>);
-    if IsWindowVisible(hwnd).as_bool() {
-        windows.push(hwnd);
-    }
+    windows.push(hwnd);
     BOOL(1)
 }
 
-unsafe extern "system" fn enum_collect_elements(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    if !IsWindowVisible(hwnd).as_bool() {
-        return BOOL(1);
+fn collect_window_elements(
+    automation: &IUIAutomation,
+    hwnd: HWND,
+    condition: &IUIAutomationCondition,
+) -> Result<Vec<RawUiElement>, UiHintQueryError> {
+    unsafe {
+        let root = automation
+            .ElementFromHandle(hwnd)
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let arr: IUIAutomationElementArray = root
+            .FindAll(TreeScope_Descendants, condition)
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let len = arr.Length().map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let mut out = Vec::new();
+        for i in 0..len {
+            if let Ok(el) = arr.GetElement(i) {
+                if let Some(raw) = normalize_element(&el) {
+                    out.push(raw);
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+fn normalize_element(el: &IUIAutomationElement) -> Option<RawUiElement> {
+    unsafe {
+        let rect = el.CurrentBoundingRectangle().ok()?;
+        if !is_valid_rect(&rect) {
+            return None;
+        }
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+
+        let clickable = el.GetClickablePoint().ok().map(|p| (p.x as i32, p.y as i32)).or_else(|| {
+            Some((rect.left + width / 2, rect.top + height / 2))
+        });
+
+        let name = el.CurrentName().ok().map(|s| s.to_string()).unwrap_or_default();
+        let control_type = el.CurrentControlType().ok().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
+
+        Some(RawUiElement {
+            bounds: (rect.left, rect.top, width, height),
+            clickable_point: clickable,
+            name,
+            control_type,
+        })
+    }
+}
+
+fn stage1_filter(e: &RawUiElement) -> bool {
+    let (_, _, w, h) = e.bounds;
+    w > 0 && h > 0
+}
+
+fn is_valid_rect(rect: &RECT) -> bool {
+    rect.right > rect.left && rect.bottom > rect.top
+}
+
+fn rects_intersect(a: RECT, b: RECT) -> bool {
+    a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+}
+
+unsafe fn monitor_rect(hwnd: HWND) -> Option<RECT> {
+    let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    if monitor.0.is_null() { return None; }
+    let mut info = MONITORINFO { cbSize: core::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+    if !GetMonitorInfoW(monitor, &mut info).as_bool() { return None; }
+    Some(info.rcMonitor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inclusion_filter_requires_visible_nonzero_intersecting() {
+        let fg = HWND(1 as *mut _);
+        let other = HWND(2 as *mut _);
+        let monitor = Some(RECT { left: 0, top: 0, right: 100, bottom: 100 });
+        // logic-only check
+        assert!(rects_intersect(
+            RECT { left: 10, top: 10, right: 20, bottom: 20 },
+            monitor.unwrap()
+        ));
+        assert!(!is_valid_rect(&RECT { left: 5, top: 5, right: 5, bottom: 10 }));
+        assert!(should_include_thread_window(fg, fg, false, monitor));
+        let _ = other;
     }
 
-    let mut rect = RECT::default();
-    if GetWindowRect(hwnd, &mut rect).is_err() {
-        return BOOL(1);
+    #[test]
+    fn stage1_filter_rejects_zero_size() {
+        assert!(!stage1_filter(&RawUiElement { bounds: (0, 0, 0, 10), clickable_point: None, name: String::new(), control_type: String::new() }));
+        assert!(stage1_filter(&RawUiElement { bounds: (0, 0, 1, 1), clickable_point: None, name: String::new(), control_type: String::new() }));
     }
-
-    let width = rect.right - rect.left;
-    let height = rect.bottom - rect.top;
-    if width <= 0 || height <= 0 {
-        return BOOL(1);
-    }
-
-    let center = POINT {
-        x: rect.left + (width / 2),
-        y: rect.top + (height / 2),
-    };
-    let click = Some((
-        center.x.clamp(rect.left, rect.right.saturating_sub(1)),
-        center.y.clamp(rect.top, rect.bottom.saturating_sub(1)),
-    ));
-
-    let out = &mut *(lparam.0 as *mut Vec<RawUiElement>);
-    out.push(RawUiElement {
-        bounds: (rect.left, rect.top, width, height),
-        clickable_point: click,
-        name: String::new(),
-        control_type: "interactable".to_string(),
-    });
-    BOOL(1)
 }
