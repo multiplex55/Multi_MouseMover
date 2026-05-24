@@ -1856,6 +1856,7 @@ mod tests {
         config.slow_mouse.fixed_speed = 3;
         config.slow_mouse.min_speed = 1;
         config.slow_mouse.max_speed = 12;
+        let expected_baseline = config.mouse_speed.default_speed;
 
         let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
         let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
@@ -1876,6 +1877,7 @@ mod tests {
         config.slow_mouse.multiplier = 3.0;
         config.slow_mouse.min_speed = 1;
         config.slow_mouse.max_speed = 6;
+        let expected_baseline = config.mouse_speed.default_speed;
 
         let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
         let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
@@ -1884,8 +1886,8 @@ mod tests {
 
         assert_eq!(slow_tick.speed, 6);
         assert_eq!(slow_tick.dx, 6.0);
-        assert_eq!(mouse.mouse_speed_baseline, config.mouse_speed.default_speed);
-        assert_eq!(mouse.current_speed, config.mouse_speed.default_speed);
+        assert_eq!(mouse.mouse_speed_baseline, expected_baseline);
+        assert_eq!(mouse.current_speed, expected_baseline);
         assert_eq!(mouse.acceleration_counter, 0);
     }
 
@@ -1896,6 +1898,7 @@ mod tests {
         config.slow_mouse.subtract_speed = 50;
         config.slow_mouse.min_speed = 2;
         config.slow_mouse.max_speed = 12;
+        let expected_baseline = config.mouse_speed.default_speed;
 
         let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
         let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
@@ -1904,8 +1907,8 @@ mod tests {
 
         assert_eq!(slow_tick.speed, 2);
         assert_eq!(slow_tick.dx, 2.0);
-        assert_eq!(mouse.mouse_speed_baseline, config.mouse_speed.default_speed);
-        assert_eq!(mouse.current_speed, config.mouse_speed.default_speed);
+        assert_eq!(mouse.mouse_speed_baseline, expected_baseline);
+        assert_eq!(mouse.current_speed, expected_baseline);
         assert_eq!(mouse.acceleration_counter, 0);
     }
 
