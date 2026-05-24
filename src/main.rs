@@ -2533,6 +2533,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             AppCommand::EnterGridMode { activation_key } => {
                 println!("[command] EnterGridMode activation_key={activation_key:?}")
             }
+            AppCommand::EnterUiHintMode { activation_key } => {
+                println!("[command] EnterUiHintMode activation_key={activation_key:?}")
+            }
             AppCommand::KeyAction { action, is_down } => {
                 println!(
                     "[command] KeyAction action={action:?} state={}",
@@ -2555,6 +2558,15 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     action
                 )
             }
+            AppCommand::UiHintInput(event) => {
+                println!(
+                    "[command] UiHintInput key={:?} state={}",
+                    event.key,
+                    if event.is_down { "down" } else { "up" },
+                )
+            }
+            AppCommand::UiHintQueryCompleted => println!("[command] UiHintQueryCompleted"),
+            AppCommand::UiHintQueryFailed => println!("[command] UiHintQueryFailed"),
         }
     }
 
@@ -2700,6 +2712,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 show_jump_overlay(view);
             }
         }
+        AppCommand::EnterUiHintMode { .. } => {}
         AppCommand::KeyAction { action, is_down } => {
             let resolution = {
                 let mut action_handler = ACTION_HANDLER.write().unwrap();
@@ -2838,6 +2851,18 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 None => {}
             }
         }
+        AppCommand::UiHintInput(event) => {
+            if event.is_down && event.key == VirtualKey::Escape {
+                let resolution = {
+                    let mut app_state = APP_STATE.write().unwrap();
+                    app_state.exit_ui_hint_mode();
+                    app_state.resolve_jump_overlay()
+                };
+                sync_jump_overlay(resolution);
+            }
+        }
+        AppCommand::UiHintQueryCompleted => {}
+        AppCommand::UiHintQueryFailed => {}
     }
 }
 
