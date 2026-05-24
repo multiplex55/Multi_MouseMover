@@ -2108,7 +2108,7 @@ mod tests {
         for (key, action, expected_region) in cases {
             let mut state = AppState::default();
             enter_grid_mode(&mut state, VirtualKey::G);
-            let update = state.handle_grid_input(KeyEvent::new(key, true), Some(action));
+            let update = state.handle_grid_input(KeyEvent::new(key, true), Some(action.clone()));
             assert_eq!(
                 update,
                 Some(GridInputUpdate::Updated {
