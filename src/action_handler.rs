@@ -1938,6 +1938,8 @@ mod tests {
         config.starting_speed = 7;
         config.slow_mouse.strategy = crate::SlowMouseStrategy::Fixed;
         config.slow_mouse.fixed_speed = 5;
+        config.slow_mouse.min_speed = 1;
+        config.slow_mouse.max_speed = 12;
         let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
         let slow_diagonal_actions = actions(&[Action::MoveUp, Action::MoveRight, Action::SlowMouse]);
 
