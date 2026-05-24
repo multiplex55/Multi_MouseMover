@@ -1848,7 +1848,69 @@ mod tests {
     }
 
     #[test]
-    fn slow_mouse_release_restores_selected_tier_baseline() {
+    fn slow_mouse_fixed_speed_ignores_high_mouse_speed_tier() {
+        let mut config = test_config();
+        config.mouse_speed.default_speed = 9;
+        config.starting_speed = 9;
+        config.slow_mouse.strategy = crate::SlowMouseStrategy::Fixed;
+        config.slow_mouse.fixed_speed = 3;
+        config.slow_mouse.min_speed = 1;
+        config.slow_mouse.max_speed = 12;
+
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
+
+        let slow_tick = mouse.tick_movement(&slow_actions, Duration::from_millis(8));
+
+        assert_eq!(slow_tick.speed, 3);
+        assert_eq!(slow_tick.dx, 3.0);
+        assert_eq!(mouse.mouse_speed_baseline, 9);
+        assert_eq!(mouse.current_speed, 9);
+        assert_eq!(mouse.acceleration_counter, 0);
+    }
+
+    #[test]
+    fn slow_mouse_multiplier_clamps_to_configured_max() {
+        let mut config = test_config();
+        config.slow_mouse.strategy = crate::SlowMouseStrategy::Multiplier;
+        config.slow_mouse.multiplier = 3.0;
+        config.slow_mouse.min_speed = 1;
+        config.slow_mouse.max_speed = 6;
+
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
+
+        let slow_tick = mouse.tick_movement(&slow_actions, Duration::from_millis(8));
+
+        assert_eq!(slow_tick.speed, 6);
+        assert_eq!(slow_tick.dx, 6.0);
+        assert_eq!(mouse.mouse_speed_baseline, config.mouse_speed.default_speed);
+        assert_eq!(mouse.current_speed, config.mouse_speed.default_speed);
+        assert_eq!(mouse.acceleration_counter, 0);
+    }
+
+    #[test]
+    fn slow_mouse_subtract_clamps_to_min() {
+        let mut config = test_config();
+        config.slow_mouse.strategy = crate::SlowMouseStrategy::Subtract;
+        config.slow_mouse.subtract_speed = 50;
+        config.slow_mouse.min_speed = 2;
+        config.slow_mouse.max_speed = 12;
+
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let slow_actions = actions(&[Action::MoveRight, Action::SlowMouse]);
+
+        let slow_tick = mouse.tick_movement(&slow_actions, Duration::from_millis(8));
+
+        assert_eq!(slow_tick.speed, 2);
+        assert_eq!(slow_tick.dx, 2.0);
+        assert_eq!(mouse.mouse_speed_baseline, config.mouse_speed.default_speed);
+        assert_eq!(mouse.current_speed, config.mouse_speed.default_speed);
+        assert_eq!(mouse.acceleration_counter, 0);
+    }
+
+    #[test]
+    fn slow_mouse_release_uses_slow_tick_then_returns_to_selected_tier_baseline() {
         let mut config = test_config();
         config.mouse_speed.default_speed = 4;
         config.starting_speed = 4;
@@ -1862,6 +1924,30 @@ mod tests {
         assert_eq!(slow_tick.speed, effective_slow_speed(&mouse.config, 4));
         assert_eq!(release_tick.speed, 4);
         assert_eq!(mouse.mouse_speed_baseline, 4);
+        assert_eq!(mouse.current_speed, 4);
+        assert_eq!(mouse.acceleration_counter, 1);
+    }
+
+    #[test]
+    fn slow_mouse_diagonal_movement_uses_slow_speed_magnitude() {
+        let mut config = test_config();
+        config.mouse_speed.default_speed = 7;
+        config.starting_speed = 7;
+        config.slow_mouse.strategy = crate::SlowMouseStrategy::Fixed;
+        config.slow_mouse.fixed_speed = 5;
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let slow_diagonal_actions = actions(&[Action::MoveUp, Action::MoveRight, Action::SlowMouse]);
+
+        let tick = mouse.tick_movement(&slow_diagonal_actions, Duration::from_millis(8));
+        let magnitude = (tick.dx.powi(2) + tick.dy.powi(2)).sqrt();
+
+        assert_eq!(tick.speed, 5);
+        assert!((magnitude - 5.0).abs() < f64::EPSILON);
+        assert!((tick.dx - (5.0 * DIAGONAL_NORMALIZATION)).abs() < f64::EPSILON);
+        assert!((tick.dy + (5.0 * DIAGONAL_NORMALIZATION)).abs() < f64::EPSILON);
+        assert_eq!(mouse.mouse_speed_baseline, 7);
+        assert_eq!(mouse.current_speed, 7);
+        assert_eq!(mouse.acceleration_counter, 0);
     }
 
     #[test]
