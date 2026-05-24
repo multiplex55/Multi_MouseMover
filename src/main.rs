@@ -263,6 +263,7 @@ struct Config {
     final_adjust: FinalAdjustConfig,
     status_overlay: StatusOverlayConfig,
     tooltip_overlay: TooltipOverlayConfig,
+    ui_hints: UiHintsConfig,
     mouse_speed: MouseSpeedConfig,
     slow_mouse: SlowMouseConfig,
     movement_profiles: HashMap<String, MouseSpeedConfig>,
@@ -289,6 +290,7 @@ impl Default for Config {
             final_adjust: FinalAdjustConfig::default(),
             status_overlay: StatusOverlayConfig::default(),
             tooltip_overlay: TooltipOverlayConfig::default(),
+            ui_hints: UiHintsConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             slow_mouse: SlowMouseConfig::default(),
             movement_profiles: HashMap::new(),
@@ -395,6 +397,73 @@ pub struct TooltipOverlayConfig {
     pub help_width: i32,
     pub help_max_bindings: i32,
     pub events: TooltipOverlayEvents,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UiHintOverflowBehavior {
+    #[default]
+    IncreaseLength,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UiHintTargetPoint {
+    #[default]
+    ClickablePoint,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UiHintAfterSelect {
+    #[default]
+    Move,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(default)]
+pub struct UiHintsOverlayConfig {
+    pub font_scale: f32,
+}
+
+impl Default for UiHintsOverlayConfig {
+    fn default() -> Self {
+        Self { font_scale: 1.0 }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct UiHintsConfig {
+    pub enabled: bool,
+    pub selection_keys: String,
+    pub label_length: i32,
+    pub overflow_behavior: UiHintOverflowBehavior,
+    pub max_hints: i32,
+    pub min_hint_spacing_px: i32,
+    pub include_thread_windows: bool,
+    pub include_owned_popups: bool,
+    pub target_point: UiHintTargetPoint,
+    pub after_select: UiHintAfterSelect,
+    pub overlay: UiHintsOverlayConfig,
+}
+
+impl Default for UiHintsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            selection_keys: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string(),
+            label_length: 2,
+            overflow_behavior: UiHintOverflowBehavior::IncreaseLength,
+            max_hints: 400,
+            min_hint_spacing_px: 32,
+            include_thread_windows: true,
+            include_owned_popups: true,
+            target_point: UiHintTargetPoint::ClickablePoint,
+            after_select: UiHintAfterSelect::Move,
+            overlay: UiHintsOverlayConfig::default(),
+        }
+    }
 }
 
 impl Default for TooltipOverlayConfig {
@@ -1070,6 +1139,7 @@ impl Config {
         self.normalize_runtime_profiles();
         self.normalize_edge_jump_config();
         self.normalize_tooltip_overlay_config();
+        self.normalize_ui_hints_config();
         // Keep the legacy field stable for downstream code and diagnostics after the
         // modern baseline has won normalization.
         self.starting_speed = self.mouse_speed.default_speed;
@@ -1146,6 +1216,42 @@ impl Config {
             ));
             self.edge_jump.offset_px = MAX_EDGE_JUMP_OFFSET_PX;
         }
+    }
+
+    fn normalize_ui_hints_config(&mut self) {
+        let default_keys = UiHintsConfig::default().selection_keys;
+        let mut unique = String::new();
+        for ch in self.ui_hints.selection_keys.chars() {
+            if !unique.contains(ch) {
+                unique.push(ch);
+            }
+        }
+        if unique.is_empty() {
+            warn_config_normalized("ui_hints.selection_keys is empty; using default");
+            self.ui_hints.selection_keys = default_keys;
+        } else {
+            if unique.chars().count() != self.ui_hints.selection_keys.chars().count() {
+                warn_config_normalized("ui_hints.selection_keys contains duplicates; removing duplicates");
+            }
+            self.ui_hints.selection_keys = unique;
+        }
+
+        self.ui_hints.label_length =
+            normalize_i32_range("ui_hints.label_length", self.ui_hints.label_length, 1, 5);
+        self.ui_hints.max_hints =
+            normalize_i32_range("ui_hints.max_hints", self.ui_hints.max_hints, 1, 2000);
+        self.ui_hints.min_hint_spacing_px = normalize_i32_range(
+            "ui_hints.min_hint_spacing_px",
+            self.ui_hints.min_hint_spacing_px,
+            0,
+            200,
+        );
+        self.ui_hints.overlay.font_scale = normalize_f32_range(
+            "ui_hints.overlay.font_scale",
+            self.ui_hints.overlay.font_scale,
+            0.25,
+            4.0,
+        );
     }
 
     fn normalize_final_adjust_config(&mut self) {
@@ -5276,5 +5382,34 @@ mod tests {
         assert!(!app_state.active_mode());
         assert!(!app_state.has_active_action_keys());
         assert_eq!(resolution, Some(JumpOverlayResolution::Hidden));
+    }
+
+    #[test]
+    fn ui_hints_section_parses_and_normalizes() {
+        let config = Config::from_toml(
+            r#"
+            [ui_hints]
+            selection_keys = "AABC"
+            label_length = 99
+            max_hints = 5000
+            min_hint_spacing_px = -10
+
+            [ui_hints.overlay]
+            font_scale = 10.0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.ui_hints.selection_keys, "ABC");
+        assert_eq!(config.ui_hints.label_length, 5);
+        assert_eq!(config.ui_hints.max_hints, 2000);
+        assert_eq!(config.ui_hints.min_hint_spacing_px, 0);
+        assert_eq!(config.ui_hints.overlay.font_scale, 4.0);
+    }
+
+    #[test]
+    fn ui_hints_defaults_when_section_missing() {
+        let config = Config::from_toml("").unwrap();
+        assert_eq!(config.ui_hints, UiHintsConfig::default());
     }
 }

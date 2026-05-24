@@ -149,6 +149,17 @@ Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 | `tooltip_overlay.help_width` | integer pixels | `420` | Yes | Active | Help overlay width before clamping. |
 | `tooltip_overlay.help_max_bindings` | integer | `40` | Yes | Active | Maximum bindings shown in help. |
 | `tooltip_overlay.events.*` | booleans | `true` | Yes | Active | Enables tooltip event categories. |
+| `ui_hints.enabled` | boolean | `true` | Yes | Config-only | Enables UI hint mode configuration (runtime overlay behavior not yet active). |
+| `ui_hints.selection_keys` | string chars | `"ABCDEFGHIJKLMNOPQRSTUVWXYZ"` | Yes | Config-only | Ordered key alphabet used for generated hint labels. |
+| `ui_hints.label_length` | integer | `2` | Yes | Config-only | Starting label length for hint tokens. |
+| `ui_hints.overflow_behavior` | enum string | `"increase_length"` | Yes | Config-only | Overflow strategy when labels are exhausted. |
+| `ui_hints.max_hints` | integer | `400` | Yes | Config-only | Maximum number of hints to generate. |
+| `ui_hints.min_hint_spacing_px` | integer pixels | `32` | Yes | Config-only | Minimum spacing between hints. |
+| `ui_hints.include_thread_windows` | boolean | `true` | Yes | Config-only | Includes same-thread windows in candidate collection. |
+| `ui_hints.include_owned_popups` | boolean | `true` | Yes | Config-only | Includes owned popup windows in candidate collection. |
+| `ui_hints.target_point` | enum string | `"clickable_point"` | Yes | Config-only | Target point choice for hint selection. |
+| `ui_hints.after_select` | enum string | `"move"` | Yes | Config-only | Post-selection behavior. |
+| `ui_hints.overlay.font_scale` | float | `1.0` | Yes | Config-only | UI hint overlay font scaling factor. |
 | `edge_jump.offset_px` | integer pixels | `1` | Yes | Active | Offset used by edge-jump actions. |
 | `edge_jump.use_work_area` | boolean | `false` | Yes | Active | Uses monitor work area instead of full bounds. |
 | `jump.move_cursor_after_each_stage` | boolean | none | Yes | Deprecated alias | Replace with `jump.cursor_between_stages`. `true` maps to `move_to_region_center`; `false` maps to `none`. |

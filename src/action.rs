@@ -60,6 +60,7 @@ pub enum Action {
     NavigateForward,
     Disable,
     ShowHelp,
+    UiHintMode,
 }
 
 impl Action {
@@ -114,6 +115,7 @@ impl Action {
             "navigate_forward" | "browser_forward" => Some(Self::NavigateForward),
             "disable" | "disable_app" | "idle_mode" => Some(Self::Disable),
             "show_help" | "help" | "toggle_help" | "hints" | "show_hints" => Some(Self::ShowHelp),
+            "ui_hint_mode" | "ui_hints" | "show_ui_hints" | "hint_mode" => Some(Self::UiHintMode),
             action
                 if action.starts_with("movement_profile:")
                     || action.starts_with("mouse_profile:")
@@ -221,6 +223,7 @@ mod tests {
             ("navigate_forward", Action::NavigateForward),
             ("disable", Action::Disable),
             ("show_help", Action::ShowHelp),
+            ("ui_hint_mode", Action::UiHintMode),
         ];
 
         for (input, expected) in cases {
@@ -250,6 +253,9 @@ mod tests {
             ("toggle_help", Action::ShowHelp),
             ("hints", Action::ShowHelp),
             ("show_hints", Action::ShowHelp),
+            ("ui_hints", Action::UiHintMode),
+            ("show_ui_hints", Action::UiHintMode),
+            ("hint_mode", Action::UiHintMode),
         ];
 
         for (input, expected) in cases {
@@ -348,6 +354,7 @@ mod tests {
             Action::NavigateForward,
             Action::Disable,
             Action::ShowHelp,
+            Action::UiHintMode,
         ];
 
         for action in non_movement_actions {
@@ -404,11 +411,37 @@ mod tests {
             Action::NavigateForward,
             Action::Disable,
             Action::ShowHelp,
+            Action::UiHintMode,
         ];
 
         for action in one_shot_actions {
             assert!(!action.is_continuous(), "{action:?}");
         }
+    }
+
+    #[test]
+    fn ui_hint_mode_parses() {
+        assert_eq!(Action::from_string("ui_hint_mode"), Some(Action::UiHintMode));
+    }
+
+    #[test]
+    fn ui_hints_parses() {
+        assert_eq!(Action::from_string("ui_hints"), Some(Action::UiHintMode));
+    }
+
+    #[test]
+    fn show_ui_hints_parses() {
+        assert_eq!(Action::from_string("show_ui_hints"), Some(Action::UiHintMode));
+    }
+
+    #[test]
+    fn hint_mode_parses() {
+        assert_eq!(Action::from_string("hint_mode"), Some(Action::UiHintMode));
+    }
+
+    #[test]
+    fn ui_hint_mode_is_not_continuous() {
+        assert!(!Action::UiHintMode.is_continuous());
     }
 }
 

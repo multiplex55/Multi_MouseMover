@@ -72,8 +72,24 @@ key_bindings = [
 
     ["RightAlt+R", "reload_config"],
     ["RightAlt+Escape", "panic_reset"],
-    ["/", "show_help"]
+    ["/", "show_help"],
+    ["RightAlt+H", "ui_hint_mode"]
 ]
+
+[ui_hints]
+enabled = true
+selection_keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+label_length = 2
+overflow_behavior = "increase_length"
+max_hints = 400
+min_hint_spacing_px = 32
+include_thread_windows = true
+include_owned_popups = true
+target_point = "clickable_point"
+after_select = "move"
+
+[ui_hints.overlay]
+font_scale = 1.0
 
 # These bindings remain available in both active and idle mode.
 [system_bindings]

@@ -327,7 +327,8 @@ impl<B: MouseBackend> MouseMaster<B> {
             | Action::GridMode
             | Action::NavigateBack
             | Action::NavigateForward
-            | Action::ShowHelp => {}
+            | Action::ShowHelp
+            | Action::UiHintMode => {}
             Action::Disable => self.set_active_mode(false),
             Action::PanicReset => {
                 self.hard_reset_runtime();
