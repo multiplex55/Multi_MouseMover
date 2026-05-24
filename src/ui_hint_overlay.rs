@@ -211,7 +211,7 @@ impl UiHintOverlay {
         unsafe {
             let _ = SetWindowPos(
                 hwnd,
-                HWND_TOPMOST,
+                Some(HWND_TOPMOST),
                 screen.left,
                 screen.top,
                 screen.width,
@@ -311,7 +311,7 @@ impl UiHintOverlay {
             let _ = SelectObject(hdc, old);
             let _ = DeleteObject(font.into());
             let _ = ReleaseDC(Some(hwnd), hdc);
-            let _ = InvalidateRect(hwnd, None, false);
+            let _ = InvalidateRect(Some(hwnd), None, false);
             let _ = UpdateWindow(hwnd);
         }
     }
