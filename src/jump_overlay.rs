@@ -861,10 +861,10 @@ impl JumpOverlay {
                         self.draw_grid_direction_labels(
                             hdc,
                             grid_rect,
-                            grid.up_label,
-                            grid.left_label,
-                            grid.down_label,
-                            grid.right_label,
+                            &grid.up_label,
+                            &grid.left_label,
+                            &grid.down_label,
+                            &grid.right_label,
                         );
                     }
                 }
