@@ -78,6 +78,8 @@ key_bindings = [
 
 [ui_hints]
 enabled = true
+debug = false
+debug_fake_targets = false
 selection_keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 label_length = 2
 overflow_behavior = "increase_length"

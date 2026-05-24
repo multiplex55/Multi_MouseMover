@@ -415,6 +415,8 @@ impl Default for TooltipOverlayEvents {
 #[serde(default)]
 pub struct TooltipOverlayConfig {
     pub enabled: bool,
+    pub debug: bool,
+    pub debug_fake_targets: bool,
     pub show_temporary_tooltips: bool,
     pub show_help: bool,
     pub positioning: TooltipOverlayPositioning,
@@ -464,6 +466,8 @@ impl Default for UiHintsOverlayConfig {
 #[serde(default)]
 pub struct UiHintsConfig {
     pub enabled: bool,
+    pub debug: bool,
+    pub debug_fake_targets: bool,
     pub selection_keys: String,
     pub label_length: i32,
     pub overflow_behavior: UiHintOverflowBehavior,
@@ -480,6 +484,8 @@ impl Default for UiHintsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            debug: false,
+            debug_fake_targets: false,
             selection_keys: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string(),
             label_length: 2,
             overflow_behavior: UiHintOverflowBehavior::IncreaseLength,
@@ -2191,6 +2197,13 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
                 routing_action_label(&event, action.clone())
             );
         }
+        if matches!(action, Some(Action::UiHintMode)) && ui_hints_debug_enabled() {
+            eprintln!(
+                "[ui-hints] key binding routed: key={:?} state={}",
+                event.key,
+                if event.is_down { "down" } else { "up" }
+            );
+        }
 
         APP_STATE.write().unwrap().route_key_event(event, action);
         diagnostics.queued_key_events_processed += 1;
@@ -2242,6 +2255,14 @@ fn process_ui_hint_query_results() {
         }
     };
     APP_STATE.write().unwrap().enqueue_command(command);
+}
+
+fn ui_hints_debug_enabled() -> bool {
+    ACTION_HANDLER
+        .read()
+        .ok()
+        .map(|handler| handler.mouse_master.config.ui_hints.debug)
+        .unwrap_or(false)
 }
 
 fn sync_jump_overlay(resolution: JumpOverlayResolution) {
@@ -2793,6 +2814,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if !config.enabled {
                 return;
             }
+            if config.debug {
+                eprintln!("[ui-hints] enter request: activation_key={activation_key:?}");
+            }
             let tooltip_cfg = ACTION_HANDLER
                 .read()
                 .unwrap()
@@ -2800,10 +2824,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .config
                 .tooltip_overlay;
             clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
-            APP_STATE
-                .write()
-                .unwrap()
-                .enter_ui_hint_querying(activation_key);
+            APP_STATE.write().unwrap().enter_ui_hint_querying(activation_key, 0, 0);
             *UI_HINT_SESSION.lock().unwrap() = None;
             if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_start) {
                 help_overlay::show_temporary_tooltip(
@@ -2813,6 +2834,17 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 );
             }
             let query_id = UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1;
+            let foreground_hwnd =
+                windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().map(|h| h.0 as isize).unwrap_or_default();
+            APP_STATE
+                .write()
+                .unwrap()
+                .enter_ui_hint_querying(activation_key, query_id, foreground_hwnd);
+            if config.debug {
+                eprintln!(
+                    "[ui-hints] query start: query_id={query_id} foreground_hwnd={foreground_hwnd}"
+                );
+            }
             let maybe_tx = UI_HINT_QUERY_TX.lock().unwrap().as_ref().cloned();
             if let Some(tx) = maybe_tx {
                 std::thread::spawn(move || {
@@ -2969,10 +3001,25 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             };
             match session.handle_key(event.key) {
                 UiHintInputUpdate::Cancelled => {
+                    if ui_hints_debug_enabled() {
+                        eprintln!("[ui-hints] completion/cancel: cancelled");
+                    }
                     *session_guard = None;
                     APP_STATE.write().unwrap().exit_ui_hint_mode();
                 }
                 UiHintInputUpdate::PrefixChanged => {
+                    if ui_hints_debug_enabled() {
+                        let prefix = session.input();
+                        let matches = session
+                            .visible_hints()
+                            .iter()
+                            .filter(|hint| hint.label.starts_with(prefix))
+                            .count();
+                        eprintln!(
+                            "[ui-hints] input progression: typed={:?} prefix={} matches={matches}",
+                            event.key, prefix
+                        );
+                    }
                     let config = ACTION_HANDLER
                         .read()
                         .unwrap()
@@ -2996,6 +3043,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     });
                 }
                 UiHintInputUpdate::Completed { target } => {
+                    if ui_hints_debug_enabled() {
+                        eprintln!("[ui-hints] completion/cancel: completed");
+                    }
                     let after_select = ACTION_HANDLER
                         .read()
                         .unwrap()
@@ -3016,8 +3066,22 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::UiHintQueryCompleted { query_id, elements } => {
+            {
+                let app_state = APP_STATE.read().unwrap();
+                if !app_state.is_ui_hint_querying()
+                    || app_state.current_ui_hint_query_id() != Some(query_id)
+                {
+                    return;
+                }
+            }
             if query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
                 return;
+            }
+            if ui_hints_debug_enabled() {
+                eprintln!(
+                    "[ui-hints] query complete: query_id={query_id} raw_elements={}",
+                    elements.len()
+                );
             }
             let config = ACTION_HANDLER
                 .read()
@@ -3049,6 +3113,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .collect();
             let target_count = build_ui_hint_targets(raw_elements, &hint_config);
             let targets = target_count;
+            if ui_hints_debug_enabled() {
+                eprintln!(
+                    "[ui-hints] target build complete: query_id={query_id} targets={}",
+                    targets.len()
+                );
+            }
             let tooltip_cfg = ACTION_HANDLER
                 .read()
                 .unwrap()
@@ -3097,12 +3167,21 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 true,
             );
             *UI_HINT_SESSION.lock().unwrap() = Some(session);
-            APP_STATE.write().unwrap().activate_ui_hint_if_querying();
+            APP_STATE
+                .write()
+                .unwrap()
+                .activate_ui_hint_if_querying(query_id);
             UI_HINT_OVERLAY.with(|overlay| {
                 let mut overlay = overlay.borrow_mut();
                 overlay.ensure_window();
                 overlay.render(&view);
             });
+            if ui_hints_debug_enabled() {
+                eprintln!(
+                    "[ui-hints] overlay shown: query_id={query_id} hints={}",
+                    view.hints.len()
+                );
+            }
         }
         AppCommand::UiHintQueryFailed { query_id } => {
             if query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
@@ -5701,5 +5780,7 @@ mod tests {
     fn ui_hints_defaults_when_section_missing() {
         let config = Config::from_toml("").unwrap();
         assert_eq!(config.ui_hints, UiHintsConfig::default());
+        assert!(!config.ui_hints.debug);
+        assert!(!config.ui_hints.debug_fake_targets);
     }
 }

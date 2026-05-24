@@ -91,8 +91,8 @@ pub struct AppState {
 #[derive(Debug)]
 pub enum UiHintState {
     Inactive,
-    Querying { activation_key: VirtualKey },
-    Active { activation_key: VirtualKey },
+    Querying { activation_key: VirtualKey, query_id: u64, foreground_hwnd: isize },
+    Active { activation_key: VirtualKey, query_id: u64, foreground_hwnd: isize },
 }
 
 #[derive(Debug)]
@@ -295,16 +295,36 @@ impl AppState {
     pub fn exit_ui_hint_mode(&mut self) {
         self.ui_hints = UiHintState::Inactive;
     }
-    pub fn enter_ui_hint_querying(&mut self, activation_key: VirtualKey) {
+    pub fn enter_ui_hint_querying(
+        &mut self,
+        activation_key: VirtualKey,
+        query_id: u64,
+        foreground_hwnd: isize,
+    ) {
         self.exit_jump_mode();
         self.exit_grid_mode();
-        self.ui_hints = UiHintState::Querying { activation_key };
+        self.ui_hints = UiHintState::Querying { activation_key, query_id, foreground_hwnd };
     }
 
-    pub fn activate_ui_hint_if_querying(&mut self) {
-        if let UiHintState::Querying { activation_key } = self.ui_hints {
-            self.ui_hints = UiHintState::Active { activation_key };
+    pub fn activate_ui_hint_if_querying(&mut self, query_id: u64) -> bool {
+        if let UiHintState::Querying { activation_key, query_id: active_query_id, foreground_hwnd } = self.ui_hints {
+            if active_query_id == query_id {
+                self.ui_hints = UiHintState::Active { activation_key, query_id, foreground_hwnd };
+                return true;
+            }
         }
+        false
+    }
+
+    pub fn current_ui_hint_query_id(&self) -> Option<u64> {
+        match self.ui_hints {
+            UiHintState::Querying { query_id, .. } | UiHintState::Active { query_id, .. } => Some(query_id),
+            UiHintState::Inactive => None,
+        }
+    }
+
+    pub fn is_ui_hint_active_or_querying(&self) -> bool {
+        self.is_ui_hint_active() || self.is_ui_hint_querying()
     }
 
     pub fn is_exclusive_mode_active(&self) -> bool {
@@ -1036,7 +1056,7 @@ mod tests {
     }
 
     fn enter_ui_hint_mode(state: &mut AppState, activation_key: VirtualKey) {
-        state.ui_hints = UiHintState::Active { activation_key };
+        state.ui_hints = UiHintState::Active { activation_key, query_id: 1, foreground_hwnd: 0 };
     }
 
     fn final_adjust_config(enabled: bool) -> Config {
@@ -1444,6 +1464,8 @@ mod tests {
         let mut state = AppState::default();
         state.ui_hints = UiHintState::Querying {
             activation_key: VirtualKey::U,
+            query_id: 1,
+            foreground_hwnd: 0,
         };
         let event = KeyEvent::new(VirtualKey::Escape, true);
 
@@ -1492,6 +1514,27 @@ mod tests {
         enter_ui_hint_mode(&mut panic_state, VirtualKey::U);
         panic_state.route_key_event(KeyEvent::new(VirtualKey::P, true), Some(Action::PanicReset));
         assert!(!panic_state.is_ui_hint_active());
+    }
+
+    #[test]
+    fn ui_hint_querying_to_active_and_stale_rejection() {
+        let mut state = AppState::default();
+        state.enter_ui_hint_querying(VirtualKey::U, 7, 123);
+        assert_eq!(state.current_ui_hint_query_id(), Some(7));
+        assert!(!state.activate_ui_hint_if_querying(8));
+        assert!(state.is_ui_hint_querying());
+        assert!(state.activate_ui_hint_if_querying(7));
+        assert!(state.is_ui_hint_active());
+    }
+
+    #[test]
+    fn ui_hint_querying_to_inactive() {
+        let mut state = AppState::default();
+        state.enter_ui_hint_querying(VirtualKey::U, 2, 0);
+        assert!(state.is_ui_hint_active_or_querying());
+        state.exit_ui_hint_mode();
+        assert!(!state.is_ui_hint_active_or_querying());
+        assert_eq!(state.current_ui_hint_query_id(), None);
     }
 
     #[test]
