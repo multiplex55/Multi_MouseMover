@@ -108,6 +108,11 @@ fn screen_to_client(screen_x: i32, screen_y: i32, virtual_screen: VirtualScreen)
     (screen_x - virtual_screen.left, screen_y - virtual_screen.top)
 }
 
+#[allow(non_snake_case)]
+fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
+    COLORREF(((b as u32) << 16) | ((g as u32) << 8) | (r as u32))
+}
+
 pub struct UiHintOverlay {
     hwnd: Option<HWND>,
     virtual_screen: VirtualScreen,
@@ -152,7 +157,7 @@ impl UiHintOverlay {
                 virtual_screen.height,
                 None,
                 None,
-                hinstance,
+                Some(HINSTANCE(hinstance.0)),
                 Some(ptr::null_mut()),
             );
 
@@ -169,7 +174,7 @@ impl UiHintOverlay {
             return;
         };
         unsafe {
-            let hdc = GetDC(hwnd);
+            let hdc = GetDC(Some(hwnd));
             if hdc.is_invalid() {
                 return;
             }
@@ -178,7 +183,7 @@ impl UiHintOverlay {
             let _ = GetClientRect(hwnd, &mut rect);
             let brush = CreateSolidBrush(RGB(0, 0, 0));
             let _ = FillRect(hdc, &rect, brush);
-            let _ = DeleteObject(brush);
+            let _ = DeleteObject(brush.into());
 
             let font_px = (18.0 * view.font_scale.max(0.2)).round() as i32;
             let font = CreateFontW(
@@ -194,10 +199,10 @@ impl UiHintOverlay {
                 OUT_DEFAULT_PRECIS,
                 CLIP_DEFAULT_PRECIS,
                 CLEARTYPE_QUALITY,
-                DEFAULT_PITCH | FF_DONTCARE,
+                DEFAULT_PITCH.0 as u32 | FF_DONTCARE.0 as u32,
                 w!("Segoe UI"),
             );
-            let old = SelectObject(hdc, font);
+            let old = SelectObject(hdc, font.into());
             let _ = SetBkMode(hdc, TRANSPARENT);
 
             for target in &view.targets {
@@ -216,16 +221,16 @@ impl UiHintOverlay {
                 if view.show_background {
                     let bg = CreateSolidBrush(RGB(20, 20, 20));
                     let _ = FillRect(hdc, &text_rect, bg);
-                    let _ = DeleteObject(bg);
+                    let _ = DeleteObject(bg.into());
                 }
                 if view.show_border {
                     let border = CreatePen(PS_SOLID, 1, RGB(120, 120, 120));
-                    let old_pen = SelectObject(hdc, border);
+                    let old_pen = SelectObject(hdc, border.into());
                     let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
                     let _ = Rectangle(hdc, text_rect.left, text_rect.top, text_rect.right, text_rect.bottom);
                     let _ = SelectObject(hdc, old_pen);
                     let _ = SelectObject(hdc, old_brush);
-                    let _ = DeleteObject(border);
+                    let _ = DeleteObject(border.into());
                 }
 
                 let color = if target.exact_match {
@@ -238,18 +243,12 @@ impl UiHintOverlay {
                     RGB(255, 255, 0)
                 };
                 let _ = SetTextColor(hdc, color);
-                let _ = DrawTextW(
-                    hdc,
-                    PWSTR(text.as_ptr() as *mut _),
-                    -1,
-                    &mut text_rect,
-                    DT_LEFT | DT_VCENTER | DT_SINGLELINE,
-                );
+                let _ = TextOutW(hdc, text_rect.left + 4, text_rect.top + 2, &text[..text.len().saturating_sub(1)]);
             }
 
             let _ = SelectObject(hdc, old);
-            let _ = DeleteObject(font);
-            let _ = ReleaseDC(hwnd, hdc);
+            let _ = DeleteObject(font.into());
+            let _ = ReleaseDC(Some(hwnd), hdc);
         }
     }
 }
