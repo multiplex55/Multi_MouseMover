@@ -119,6 +119,7 @@ fn RGB(r: u8, g: u8, b: u8) -> COLORREF {
 pub struct UiHintOverlay {
     hwnd: Option<HWND>,
     virtual_screen: VirtualScreen,
+    visible: bool,
 }
 
 impl UiHintOverlay {
@@ -126,6 +127,7 @@ impl UiHintOverlay {
         Self {
             hwnd: None,
             virtual_screen: VirtualScreen::current(),
+            visible: false,
         }
     }
 
@@ -168,15 +170,56 @@ impl UiHintOverlay {
                 let _ = SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 255, LWA_COLORKEY);
                 self.hwnd = Some(hwnd);
                 self.virtual_screen = virtual_screen;
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                self.visible = false;
             }
         }
     }
 
-    pub fn render(&self, view: &UiHintOverlayView) {
+    pub fn show(&mut self) {
+        self.ensure_window();
         let Some(hwnd) = self.hwnd else {
             return;
         };
         unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
+        self.visible = true;
+    }
+
+    pub fn hide(&mut self) -> bool {
+        let Some(hwnd) = self.hwnd else {
+            self.visible = false;
+            return true;
+        };
+        let hidden = unsafe { ShowWindow(hwnd, SW_HIDE).as_bool() };
+        self.visible = false;
+        hidden
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    pub fn render(&mut self, view: &UiHintOverlayView) {
+        self.ensure_window();
+        let Some(hwnd) = self.hwnd else {
+            return;
+        };
+        let screen = VirtualScreen::current();
+        self.virtual_screen = screen;
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                screen.left,
+                screen.top,
+                screen.width,
+                screen.height,
+                SWP_NOACTIVATE,
+            );
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            self.visible = true;
             let hdc = GetDC(Some(hwnd));
             if hdc.is_invalid() {
                 return;
@@ -268,14 +311,9 @@ impl UiHintOverlay {
             let _ = SelectObject(hdc, old);
             let _ = DeleteObject(font.into());
             let _ = ReleaseDC(Some(hwnd), hdc);
+            let _ = InvalidateRect(hwnd, None, false);
+            let _ = UpdateWindow(hwnd);
         }
-    }
-
-    pub fn hide(&self) -> bool {
-        let Some(hwnd) = self.hwnd else {
-            return true;
-        };
-        unsafe { ShowWindow(hwnd, SW_HIDE).as_bool() }
     }
 }
 
@@ -345,6 +383,16 @@ mod tests {
             height: 2160,
         };
         assert_eq!(screen_to_client(-1900, -100, virtual_screen), (20, 100));
+    }
+
+    #[test]
+    fn overlay_visibility_state_machine_transitions() {
+        let mut overlay = UiHintOverlay::new();
+        assert!(!overlay.is_visible());
+        overlay.show();
+        assert!(overlay.is_visible() || overlay.hwnd.is_none());
+        overlay.hide();
+        assert!(!overlay.is_visible());
     }
 
     fn target(id: u64, label: &str, x: i32, y: i32) -> UiHintTarget {

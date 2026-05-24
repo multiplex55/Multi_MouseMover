@@ -70,12 +70,38 @@ fn exit_ui_hint_mode(reason: UiHintExitReason) {
     }
     *UI_HINT_SESSION.lock().unwrap() = None;
     UI_HINT_OVERLAY.with(|overlay| {
-        let _ = overlay.borrow().hide();
+        let _ = overlay.borrow_mut().hide();
     });
     UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed);
     let mut action_handler = ACTION_HANDLER.write().unwrap();
     action_handler.clear_active_keys();
     APP_STATE.write().unwrap().exit_ui_hint_mode();
+}
+
+trait UiHintOverlayFacade {
+    fn show(&mut self);
+    fn hide(&mut self);
+    fn is_visible(&self) -> bool;
+}
+
+impl UiHintOverlayFacade for UiHintOverlay {
+    fn show(&mut self) {
+        UiHintOverlay::show(self);
+    }
+    fn hide(&mut self) {
+        let _ = UiHintOverlay::hide(self);
+    }
+    fn is_visible(&self) -> bool {
+        UiHintOverlay::is_visible(self)
+    }
+}
+
+fn sync_ui_hint_overlay_visibility(overlay: &mut dyn UiHintOverlayFacade, has_targets: bool) {
+    if has_targets {
+        overlay.show();
+    } else {
+        overlay.hide();
+    }
 }
 
 struct UiHintQueryResult {
@@ -3077,6 +3103,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         let mut overlay = overlay.borrow_mut();
                         overlay.ensure_window();
                         overlay.render(&view);
+                        sync_ui_hint_overlay_visibility(&mut *overlay, !view.targets.is_empty());
                     });
                 }
                 UiHintInputUpdate::Completed { target } => {
@@ -3210,6 +3237,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 let mut overlay = overlay.borrow_mut();
                 overlay.ensure_window();
                 overlay.render(&view);
+                sync_ui_hint_overlay_visibility(&mut *overlay, !view.targets.is_empty());
             });
             if ui_hints_debug_enabled() {
                 eprintln!(
@@ -5856,5 +5884,42 @@ mod tests {
             assert!(matches!(APP_STATE.read().unwrap().current_ui_hint_query_id(), None));
             assert!(UI_HINT_SESSION.lock().unwrap().is_none());
         }
+    }
+
+    #[derive(Default)]
+    struct MockUiHintOverlayFacade {
+        visible: bool,
+    }
+
+    impl UiHintOverlayFacade for MockUiHintOverlayFacade {
+        fn show(&mut self) {
+            self.visible = true;
+        }
+        fn hide(&mut self) {
+            self.visible = false;
+        }
+        fn is_visible(&self) -> bool {
+            self.visible
+        }
+    }
+
+    #[test]
+    fn render_with_targets_sets_visible_flag() {
+        let mut overlay = MockUiHintOverlayFacade::default();
+        sync_ui_hint_overlay_visibility(&mut overlay, true);
+        assert!(overlay.is_visible());
+    }
+
+    #[test]
+    fn hide_on_empty_targets_and_cancel_via_overlay_facade() {
+        let mut overlay = MockUiHintOverlayFacade::default();
+        sync_ui_hint_overlay_visibility(&mut overlay, true);
+        assert!(overlay.is_visible());
+        sync_ui_hint_overlay_visibility(&mut overlay, false);
+        assert!(!overlay.is_visible());
+        overlay.show();
+        assert!(overlay.is_visible());
+        overlay.hide();
+        assert!(!overlay.is_visible());
     }
 }
