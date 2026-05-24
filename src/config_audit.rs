@@ -45,6 +45,7 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
     for path in &paths {
         audit_explicit_path(path, &path_set, &mut report);
     }
+    audit_key_binding_aliases(&value, &mut report);
 
     for path in &paths {
         if is_explicitly_audited_path(path, &path_set) || is_known_active_path(path) {
@@ -62,6 +63,28 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
     }
 
     report
+}
+
+fn audit_key_binding_aliases(value: &toml::Value, report: &mut ConfigAuditReport) {
+    let Some(bindings) = value.get("key_bindings").and_then(toml::Value::as_array) else {
+        return;
+    };
+    for (index, binding) in bindings.iter().enumerate() {
+        let Some(items) = binding.as_array() else {
+            continue;
+        };
+        let Some(action) = items.get(1).and_then(toml::Value::as_str) else {
+            continue;
+        };
+        if action.eq_ignore_ascii_case("hints") {
+            report.warnings.push(replacement_warning(
+                &format!("key_bindings[{index}][1]"),
+                ConfigAuditSeverity::Info,
+                "\"hints\" maps to the help overlay action.",
+                "Use \"ui_hint_mode\" for UI hint mode bindings.",
+            ));
+        }
+    }
 }
 
 fn flatten_paths(value: &toml::Value, prefix: &str, paths: &mut Vec<String>) {
@@ -288,6 +311,17 @@ fn is_known_active_path(path: &str) -> bool {
         "tooltip_overlay.events.drag",
         "tooltip_overlay.events.reload",
         "tooltip_overlay.events.panic",
+        "ui_hints.enabled",
+        "ui_hints.selection_keys",
+        "ui_hints.label_length",
+        "ui_hints.overflow_behavior",
+        "ui_hints.max_hints",
+        "ui_hints.min_hint_spacing_px",
+        "ui_hints.include_thread_windows",
+        "ui_hints.include_owned_popups",
+        "ui_hints.target_point",
+        "ui_hints.after_select",
+        "ui_hints.overlay.font_scale",
         "jump.mode",
         "jump.cursor_between_stages",
         "jump.start_region",
