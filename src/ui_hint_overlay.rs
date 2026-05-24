@@ -270,6 +270,13 @@ impl UiHintOverlay {
             let _ = ReleaseDC(Some(hwnd), hdc);
         }
     }
+
+    pub fn hide(&self) -> bool {
+        let Some(hwnd) = self.hwnd else {
+            return true;
+        };
+        unsafe { ShowWindow(hwnd, SW_HIDE).as_bool() }
+    }
 }
 
 extern "system" fn ui_hint_overlay_proc(

@@ -53,6 +53,33 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 #[derive(Debug)]
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiHintExitReason {
+    Cancelled,
+    Completed,
+    QueryFailed,
+    Empty,
+    Disabled,
+    Reload,
+    PanicReset,
+    Exit,
+}
+
+fn exit_ui_hint_mode(reason: UiHintExitReason) {
+    if ui_hints_debug_enabled() {
+        eprintln!("[ui-hints] exit: reason={reason:?}");
+    }
+    *UI_HINT_SESSION.lock().unwrap() = None;
+    UI_HINT_OVERLAY.with(|overlay| {
+        let _ = overlay.borrow().hide();
+    });
+    UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed);
+    let mut action_handler = ACTION_HANDLER.write().unwrap();
+    action_handler.clear_active_keys();
+    APP_STATE.write().unwrap().exit_ui_hint_mode();
+}
+
 struct UiHintQueryResult {
     query_id: u64,
     result: Result<Vec<windows_uia::RawUiElement>, windows_uia::UiHintQueryError>,
@@ -2680,9 +2707,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::Exit => {
+            exit_ui_hint_mode(UiHintExitReason::Exit);
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
         }
         AppCommand::ReloadConfig => {
+            exit_ui_hint_mode(UiHintExitReason::Reload);
             if let Err(err) = reload_config() {
                 eprintln!("[reload] keeping existing config: {err}");
             } else {
@@ -2691,6 +2720,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::PanicReset => {
+            exit_ui_hint_mode(UiHintExitReason::PanicReset);
             let resolution = panic_reset();
             sync_jump_overlay(resolution);
             clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
@@ -2810,6 +2840,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .ui_hints
                 .clone();
             if !config.enabled {
+                let tooltip_cfg = ACTION_HANDLER.read().unwrap().mouse_master.config.tooltip_overlay;
+                if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_fail) {
+                    help_overlay::show_temporary_tooltip("UI Hints", "UI hints are disabled", Duration::from_millis(700));
+                }
+                exit_ui_hint_mode(UiHintExitReason::Disabled);
                 return;
             }
             if config.debug {
@@ -2823,11 +2858,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .tooltip_overlay;
             clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
             APP_STATE.write().unwrap().enter_ui_hint_querying(activation_key, 0, 0);
-            *UI_HINT_SESSION.lock().unwrap() = None;
             if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_start) {
                 help_overlay::show_temporary_tooltip(
                     "UI Hints",
-                    "Querying visible controls…",
+                    "Finding controls...",
                     Duration::from_millis(500),
                 );
             }
@@ -2994,19 +3028,25 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if !event.is_down {
                 return;
             }
-            let mut session_guard = UI_HINT_SESSION.lock().unwrap();
-            let Some(session) = session_guard.as_mut() else {
-                return;
+            let update = {
+                let mut session_guard = UI_HINT_SESSION.lock().unwrap();
+                let Some(session) = session_guard.as_mut() else {
+                    return;
+                };
+                session.handle_key(event.key)
             };
-            match session.handle_key(event.key) {
+            match update {
                 UiHintInputUpdate::Cancelled => {
                     if ui_hints_debug_enabled() {
                         eprintln!("[ui-hints] completion/cancel: cancelled");
                     }
-                    *session_guard = None;
-                    APP_STATE.write().unwrap().exit_ui_hint_mode();
+                    exit_ui_hint_mode(UiHintExitReason::Cancelled);
                 }
                 UiHintInputUpdate::PrefixChanged => {
+                    let session_guard = UI_HINT_SESSION.lock().unwrap();
+                    let Some(session) = session_guard.as_ref() else {
+                        return;
+                    };
                     if ui_hints_debug_enabled() {
                         let prefix = session.input.as_str();
                         let matches = session
@@ -3058,8 +3098,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         .unwrap()
                         .mouse_master
                         .move_mouse_to(target.target_x, target.target_y);
-                    *session_guard = None;
-                    APP_STATE.write().unwrap().exit_ui_hint_mode();
+                    exit_ui_hint_mode(UiHintExitReason::Completed);
                 }
                 UiHintInputUpdate::Consumed | UiHintInputUpdate::Invalid => {}
             }
@@ -3146,8 +3185,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         Duration::from_millis(900),
                     );
                 }
-                APP_STATE.write().unwrap().exit_ui_hint_mode();
-                *UI_HINT_SESSION.lock().unwrap() = None;
+                exit_ui_hint_mode(UiHintExitReason::Empty);
                 return;
             }
             let Some(session) =
@@ -3199,8 +3237,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     Duration::from_millis(700),
                 );
             }
-            APP_STATE.write().unwrap().exit_ui_hint_mode();
-            *UI_HINT_SESSION.lock().unwrap() = None;
+            exit_ui_hint_mode(UiHintExitReason::QueryFailed);
         }
     }
 }
@@ -5781,5 +5818,42 @@ mod tests {
         assert_eq!(config.ui_hints, UiHintsConfig::default());
         assert!(!config.ui_hints.debug);
         assert!(!config.ui_hints.debug_fake_targets);
+    }
+
+    #[test]
+    fn ui_hint_cleanup_is_idempotent() {
+        APP_STATE
+            .write()
+            .unwrap()
+            .enter_ui_hint_querying(VirtualKey::U, 7, 1);
+        *UI_HINT_SESSION.lock().unwrap() = None;
+        exit_ui_hint_mode(UiHintExitReason::Cancelled);
+        exit_ui_hint_mode(UiHintExitReason::Cancelled);
+        assert!(matches!(APP_STATE.read().unwrap().current_ui_hint_query_id(), None));
+        assert!(UI_HINT_SESSION.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn all_ui_hint_exit_reasons_leave_inactive_and_clear_session() {
+        let reasons = [
+            UiHintExitReason::Cancelled,
+            UiHintExitReason::Completed,
+            UiHintExitReason::QueryFailed,
+            UiHintExitReason::Empty,
+            UiHintExitReason::Disabled,
+            UiHintExitReason::Reload,
+            UiHintExitReason::PanicReset,
+            UiHintExitReason::Exit,
+        ];
+        for reason in reasons {
+            APP_STATE
+                .write()
+                .unwrap()
+                .enter_ui_hint_querying(VirtualKey::U, 9, 1);
+            *UI_HINT_SESSION.lock().unwrap() = None;
+            exit_ui_hint_mode(reason);
+            assert!(matches!(APP_STATE.read().unwrap().current_ui_hint_query_id(), None));
+            assert!(UI_HINT_SESSION.lock().unwrap().is_none());
+        }
     }
 }
