@@ -853,7 +853,7 @@ impl JumpOverlay {
                 if branches.active_grid_outline {
                     self.draw_active_grid_outline(hdc, grid_rect);
                 }
-                if let Some(grid) = view.grid {
+                if let Some(grid) = &view.grid {
                     if grid.line_visible {
                         self.draw_grid_midlines(hdc, grid_rect);
                     }
