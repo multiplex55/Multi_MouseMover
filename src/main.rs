@@ -3679,6 +3679,21 @@ mod tests {
         );
 
         assert_eq!(
+            app_state.handle_grid_input(
+                KeyEvent::new(VirtualKey::F, true),
+                Some(Action::MoveRight)
+            ),
+            Some(GridInputUpdate::Updated {
+                region: JumpRegion {
+                    left: 50,
+                    top: 0,
+                    width: 50,
+                    height: 100,
+                },
+                move_cursor: true,
+            })
+        );
+        assert_eq!(
             app_state.handle_grid_input(KeyEvent::new(VirtualKey::Backspace, true), None),
             Some(GridInputUpdate::Updated {
                 region: JumpRegion {
