@@ -1994,7 +1994,7 @@ mod tests {
             (VirtualKey::Escape, None),
         ] {
             let event = KeyEvent::new(key, true);
-            state.route_key_event(event, action);
+            state.route_key_event(event, action.clone());
             assert_eq!(
                 state.pop_command(),
                 Some(AppCommand::GridInput(event, action)),
@@ -2015,7 +2015,7 @@ mod tests {
             (VirtualKey::D, Some(Action::MoveRight)),
         ] {
             let event = KeyEvent::new(key, true);
-            state.route_key_event(event, action);
+            state.route_key_event(event, action.clone());
             assert_eq!(state.pop_command(), Some(AppCommand::GridInput(event, action)));
         }
     }
@@ -2062,9 +2062,6 @@ mod tests {
 
     #[test]
     fn grid_movement_uses_action_mapping_for_all_directions() {
-        let mut state = AppState::default();
-        enter_grid_mode(&mut state, VirtualKey::G);
-
         let cases = [
             (
                 VirtualKey::F,
@@ -2109,8 +2106,9 @@ mod tests {
         ];
 
         for (key, action, expected_region) in cases {
-            let mut case_state = state.clone();
-            let update = case_state.handle_grid_input(KeyEvent::new(key, true), Some(action));
+            let mut state = AppState::default();
+            enter_grid_mode(&mut state, VirtualKey::G);
+            let update = state.handle_grid_input(KeyEvent::new(key, true), Some(action));
             assert_eq!(
                 update,
                 Some(GridInputUpdate::Updated {
