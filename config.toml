@@ -384,6 +384,10 @@ profile = true
 drag = true
 reload = true
 panic = true
+ui_hints_query_start = false
+ui_hints_query_fail = true
+ui_hints_query_empty = true
+ui_hints_query_capped_count = false
 
 # ---------------------------------------------------------------------------
 # Safety

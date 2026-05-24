@@ -815,7 +815,7 @@ fn format_action(action: &Action) -> String {
         Action::NavigateForward => "Navigate forward".to_string(),
         Action::Disable => "Disable".to_string(),
         Action::ShowHelp => "Hints / Help".to_string(),
-        Action::UiHintMode => "UI hint mode".to_string(),
+        Action::UiHintMode => "UI Hints".to_string(),
     }
 }
 
@@ -861,13 +861,13 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::GridMode
         | Action::ScreenSelect
         | Action::NavigateBack
-        | Action::NavigateForward => HelpBindingCategory::Jump,
+        | Action::NavigateForward
+        | Action::UiHintMode => HelpBindingCategory::Jump,
         Action::Exit
         | Action::ReloadConfig
         | Action::PanicReset
         | Action::Disable
-        | Action::ShowHelp
-        | Action::UiHintMode => HelpBindingCategory::System,
+        | Action::ShowHelp => HelpBindingCategory::System,
     }
 }
 
@@ -1035,7 +1035,9 @@ mod tests {
             lines.contains("Movement profile: fast | Speed: 7 (default 5, range 2..12, step 2)")
         );
         assert!(lines.contains("Wheel profile: precise | Speed: 4 (default 3, range 1..9, step 1)"));
-        assert!(lines.contains("Slow: fixed | Speed: 1 (range 1..2) | Acceleration: 0 every 1 tick(s)"));
+        assert!(
+            lines.contains("Slow: fixed | Speed: 1 (range 1..2) | Acceleration: 0 every 1 tick(s)")
+        );
         assert!(lines.contains(
             "Acceleration: 3 every 2 tick(s) | Top speed: 15 | Polling: 8ms | Wheel tick: 12ms"
         ));

@@ -175,3 +175,17 @@ Exiting
     stream that keeps `messages` high.
   - If `hook_seen` and `hook_decoded` increment but `queue` stays at `0`, inspect
     the queue handoff in `keyboard_hook` and `AppState::enqueue_key_event`.
+
+
+## Manual Smoke Checklist: UI Hints
+
+- [ ] File Explorer: open navigation pane + file list, enter UI Hints mode, verify labels appear and a selected label repositions cursor to the expected target.
+- [ ] Notepad: test edit area, menu bar, and Save/Open dialogs. Verify behavior in both base window and modal dialogs.
+- [ ] Browser (Chrome/Edge/Firefox): test toolbar, tab strip, page body links/buttons, and right-click context menu.
+- [ ] IDE (VS Code/JetBrains/Visual Studio): test editor, sidebar tree, tab headers, command palette/dropdowns.
+- [ ] Multi-monitor: activate windows on each monitor, run UI Hints, and verify labels/selection are anchored on the active monitor/window context.
+- [ ] DPI scaling: validate at 100% and >=150% display scale (or mixed DPI across monitors) for readable, correctly aligned labels.
+- [ ] Dropdown/context menus: open combobox/dropdowns/context menus and verify discoverability with `include_owned_popups` enabled.
+- [ ] Disable-mode behavior: switch app to idle/disabled mode, verify action bindings are gated as expected and UI Hints only runs when configured action routing allows it.
+- [ ] Escape/Backspace swallowing: while UI Hints is active, verify `Escape` cancels mode and `Backspace` edits prefix without leaking unexpected keystrokes into the underlying app.
+- [ ] Empty/fail/capped runs: verify behavior and optional tooltips for no-target, query failure, and capped-count cases when enabled in `[tooltip_overlay.events]`.
