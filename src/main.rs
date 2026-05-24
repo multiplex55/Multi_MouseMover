@@ -4226,43 +4226,99 @@ mod tests {
     }
 
     #[test]
-    fn slow_mouse_defaults_when_section_missing() {
+    fn slow_mouse_defaults_are_precision_focused() {
         let config = parse_config("");
-        assert_eq!(config.slow_mouse, SlowMouseConfig::default());
+
+        assert_eq!(config.slow_mouse.strategy, SlowMouseStrategy::Fixed);
+        assert_eq!(config.slow_mouse.fixed_speed, 1);
+        assert_eq!(config.slow_mouse.multiplier, 0.25);
+        assert_eq!(config.slow_mouse.subtract_speed, 4);
+        assert_eq!(config.slow_mouse.min_speed, 1);
+        assert_eq!(config.slow_mouse.max_speed, 2);
+        assert_eq!(config.slow_mouse.acceleration, 0);
+        assert_eq!(config.slow_mouse.acceleration_rate, 1);
     }
 
     #[test]
-    fn slow_mouse_config_parses_and_normalizes_bounds() {
+    fn slow_mouse_config_parses_from_toml() {
+        let fixed = parse_config(
+            r#"
+            [slow_mouse]
+            strategy = "fixed"
+            fixed_speed = 2
+            "#,
+        );
+        assert_eq!(fixed.slow_mouse.strategy, SlowMouseStrategy::Fixed);
+        assert_eq!(fixed.slow_mouse.fixed_speed, 2);
+
+        let multiplier = parse_config(
+            r#"
+            [slow_mouse]
+            strategy = "multiplier"
+            multiplier = 0.5
+            "#,
+        );
+        assert_eq!(multiplier.slow_mouse.strategy, SlowMouseStrategy::Multiplier);
+        assert_eq!(multiplier.slow_mouse.multiplier, 0.5);
+
+        let subtract = parse_config(
+            r#"
+            [slow_mouse]
+            strategy = "subtract"
+            subtract_speed = 3
+            "#,
+        );
+        assert_eq!(subtract.slow_mouse.strategy, SlowMouseStrategy::Subtract);
+        assert_eq!(subtract.slow_mouse.subtract_speed, 3);
+    }
+
+    #[test]
+    fn slow_mouse_out_of_range_values_normalize() {
         let _ = take_config_warnings();
         let config = parse_config(
             r#"
             [slow_mouse]
-            strategy = "subtract"
-            fixed_speed = 99
-            multiplier = 2.0
+            fixed_speed = -5
+            multiplier = 0.0
             subtract_speed = -2
             min_speed = 0
-            max_speed = 0
+            max_speed = -1
             acceleration = -1
             acceleration_rate = 0
             "#,
         );
         let warnings = take_config_warnings();
 
-        assert_eq!(config.slow_mouse.strategy, SlowMouseStrategy::Subtract);
+        assert_eq!(config.slow_mouse.strategy, SlowMouseStrategy::Fixed);
         assert_eq!(config.slow_mouse.min_speed, 1);
         assert_eq!(config.slow_mouse.max_speed, 1);
         assert_eq!(config.slow_mouse.fixed_speed, 1);
-        assert_eq!(config.slow_mouse.multiplier, 1.0);
+        assert_eq!(config.slow_mouse.multiplier, 0.25);
         assert_eq!(config.slow_mouse.subtract_speed, 0);
         assert_eq!(config.slow_mouse.acceleration, 0);
         assert_eq!(config.slow_mouse.acceleration_rate, 1);
+
         assert!(warnings
             .iter()
             .any(|warning| warning.contains("slow_mouse.min_speed is below 1")));
+        assert!(warnings.iter().any(|warning| {
+            warning.contains("slow_mouse.max_speed is below slow_mouse.min_speed")
+        }));
+        assert!(warnings.iter().any(|warning| {
+            warning.contains("slow_mouse.fixed_speed is outside slow_mouse min/max range")
+        }));
         assert!(warnings
             .iter()
-            .any(|warning| warning.contains("slow_mouse.multiplier is above 1.0")));
+            .any(|warning| warning.contains("slow_mouse.multiplier is <= 0.0")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("slow_mouse.subtract_speed is below 0")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("slow_mouse.acceleration is below 0")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("slow_mouse.acceleration_rate is 0")));
     }
 
     #[test]
