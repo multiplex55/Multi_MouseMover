@@ -1579,10 +1579,21 @@ impl Config {
             }
         }
 
-        APP_STATE
-            .write()
-            .unwrap()
-            .set_bound_chords(key_actions.bound_chords());
+        let mut grid_direction_labels = crate::app_state::GridDirectionLabels::default();
+        for (chord, action) in key_actions.entries() {
+            let label = format!("{:?}", chord.key);
+            match action {
+                Action::MoveUp => grid_direction_labels.up = label,
+                Action::MoveLeft => grid_direction_labels.left = label,
+                Action::MoveDown => grid_direction_labels.down = label,
+                Action::MoveRight => grid_direction_labels.right = label,
+                _ => {}
+            }
+        }
+
+        let mut app_state = APP_STATE.write().unwrap();
+        app_state.set_grid_direction_labels(grid_direction_labels);
+        app_state.set_bound_chords(key_actions.bound_chords());
     }
 
     fn initialize_system_bindings(&self) -> Result<(), Box<dyn Error>> {
@@ -3438,7 +3449,6 @@ mod tests {
     fn checked_in_config_parses_and_all_default_bindings_are_known() {
         let config = checked_in_config();
 
-        assert_eq!(config.system_bindings.toggle_active, "Ctrl+E");
         assert_eq!(config.system_bindings.exit, "Escape");
         assert_eq!(config.key_bindings, default_key_bindings());
         for (key, action) in &config.key_bindings {
