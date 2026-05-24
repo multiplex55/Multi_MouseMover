@@ -27,7 +27,7 @@ System bindings are always available, even while the app is idle:
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+E` | Toggle active/idle mode |
+| `Ctrl+E` / `Ctrl+Q` | Toggle active/idle mode (depends on checked-in config) |
 | `Escape` | Exit |
 
 Action bindings run only while active mode is enabled:
@@ -63,9 +63,9 @@ Action bindings run only while active mode is enabled:
 
 ## Active And Idle
 
-The app starts active. Press `Ctrl+E` to switch between active and idle mode. In active mode, configured action bindings are swallowed and translated into mouse commands. In idle mode, normal action bindings are ignored so the same keys can pass through to Windows and other apps.
+The app starts active. Press `Ctrl+E` (or `Ctrl+Q` in configs that set that as `system_bindings.toggle_active`) to switch between active and idle mode. In active mode, configured action bindings are swallowed and translated into mouse commands. In idle mode, normal action bindings are ignored so the same keys can pass through to Windows and other apps.
 
-System bindings bypass the active-mode gate. `Ctrl+E` can always reactivate control, and `Escape` remains the configured exit key.
+System bindings bypass the active-mode gate. The configured toggle-active chord (commonly `Ctrl+E` or `Ctrl+Q`) can always reactivate control, and `Escape` remains the configured exit key.
 
 ## Drag Behavior
 

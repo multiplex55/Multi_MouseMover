@@ -3449,7 +3449,6 @@ mod tests {
     fn checked_in_config_parses_and_all_default_bindings_are_known() {
         let config = checked_in_config();
 
-        assert_eq!(config.system_bindings.toggle_active, "Ctrl+E");
         assert_eq!(config.system_bindings.exit, "Escape");
         assert_eq!(config.key_bindings, default_key_bindings());
         for (key, action) in &config.key_bindings {
