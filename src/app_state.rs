@@ -67,8 +67,8 @@ pub enum AppCommand {
     JumpInput(KeyEvent, Option<Action>),
     GridInput(KeyEvent, Option<Action>),
     UiHintInput(KeyEvent),
-    UiHintQueryCompleted,
-    UiHintQueryFailed,
+    UiHintQueryCompleted { query_id: u64, elements: Vec<crate::windows_uia::RawUiElement> },
+    UiHintQueryFailed { query_id: u64 },
 }
 
 #[derive(Debug)]
@@ -294,6 +294,17 @@ impl AppState {
 
     pub fn exit_ui_hint_mode(&mut self) {
         self.ui_hints = UiHintState::Inactive;
+    }
+    pub fn enter_ui_hint_querying(&mut self, activation_key: VirtualKey) {
+        self.exit_jump_mode();
+        self.exit_grid_mode();
+        self.ui_hints = UiHintState::Querying { activation_key };
+    }
+
+    pub fn activate_ui_hint_if_querying(&mut self) {
+        if let UiHintState::Querying { activation_key } = self.ui_hints {
+            self.ui_hints = UiHintState::Active { activation_key };
+        }
     }
 
     pub fn is_exclusive_mode_active(&self) -> bool {
