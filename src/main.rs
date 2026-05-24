@@ -16,6 +16,7 @@ mod overlay;
 mod screen_capture;
 mod ui_hints;
 mod ui_hint_overlay;
+mod windows_uia;
 
 use action::*;
 use action_handler::*;
@@ -40,6 +41,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::{env, error::Error, fs, io};
@@ -47,6 +49,12 @@ use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
+
+#[derive(Debug)]
+struct UiHintQueryResult {
+    query_id: u64,
+    result: Result<Vec<windows_uia::RawUiElement>, windows_uia::UiHintQueryError>,
+}
 
 const DEFAULT_POLLING_RATE_MS: u64 = 8;
 const DEFAULT_WHEEL_SPEED_INDICATOR_MS: u64 = 700;
@@ -79,6 +87,7 @@ const APP_DISPLAY_NAME: &str = "Multi MouseMover";
 static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_DECODED: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_SWALLOWED: AtomicU64 = AtomicU64::new(0);
+static UI_HINT_QUERY_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct LoopDiagnostics {
@@ -177,6 +186,8 @@ lazy_static! {
     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
     static ref APP_STATE: RwLock<AppState> = RwLock::new(AppState::default());
     static ref CONFIG_WARNINGS: Mutex<Vec<StoredConfigWarning>> = Mutex::new(Vec::new());
+    static ref UI_HINT_QUERY_TX: Mutex<Option<Sender<UiHintQueryResult>>> = Mutex::new(None);
+    static ref UI_HINT_QUERY_RX: Mutex<Option<Receiver<UiHintQueryResult>>> = Mutex::new(None);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2182,6 +2193,36 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
     diagnostics
 }
 
+
+fn process_ui_hint_query_results() {
+    let next = {
+        let guard = UI_HINT_QUERY_RX.lock().unwrap();
+        let Some(rx) = guard.as_ref() else { return; };
+        match rx.try_recv() {
+            Ok(msg) => Some(msg),
+            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => None,
+        }
+    };
+
+    let Some(message) = next else { return; };
+    if message.query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let command = match message.result {
+        Ok(elements) if elements.is_empty() => {
+            help_overlay::show_temporary_tooltip("UI hints", "No targets found", Duration::from_millis(700));
+            AppCommand::UiHintQueryFailed
+        }
+        Ok(_elements) => AppCommand::UiHintQueryCompleted,
+        Err(err) => {
+            eprintln!("[ui-hints] query failed: {err:?}");
+            AppCommand::UiHintQueryFailed
+        }
+    };
+    APP_STATE.write().unwrap().enqueue_command(command);
+}
+
 fn sync_jump_overlay(resolution: JumpOverlayResolution) {
     match resolution {
         JumpOverlayResolution::Hidden => hide_jump_overlay(),
@@ -2712,7 +2753,17 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 show_jump_overlay(view);
             }
         }
-        AppCommand::EnterUiHintMode { .. } => {}
+        AppCommand::EnterUiHintMode { .. } => {
+            let query_id = UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1;
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.clone();
+            let maybe_tx = UI_HINT_QUERY_TX.lock().unwrap().as_ref().cloned();
+            if let Some(tx) = maybe_tx {
+                std::thread::spawn(move || {
+                    let result = windows_uia::find_ui_hint_targets(&config);
+                    let _ = tx.send(UiHintQueryResult { query_id, result });
+                });
+            }
+        }
         AppCommand::KeyAction { action, is_down } => {
             let resolution = {
                 let mut action_handler = ACTION_HANDLER.write().unwrap();
@@ -2861,8 +2912,22 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 sync_jump_overlay(resolution);
             }
         }
-        AppCommand::UiHintQueryCompleted => {}
-        AppCommand::UiHintQueryFailed => {}
+        AppCommand::UiHintQueryCompleted => {
+            let resolution = {
+                let app_state = APP_STATE.write().unwrap();
+                app_state.resolve_jump_overlay()
+            };
+            sync_jump_overlay(resolution);
+        }
+        AppCommand::UiHintQueryFailed => {
+            help_overlay::show_temporary_tooltip("UI hints", "Query failed", Duration::from_millis(700));
+            let resolution = {
+                let mut app_state = APP_STATE.write().unwrap();
+                app_state.exit_ui_hint_mode();
+                app_state.resolve_jump_overlay()
+            };
+            sync_jump_overlay(resolution);
+        }
     }
 }
 
@@ -3058,6 +3123,9 @@ fn main() {
     let debug_diagnostics = debug_heartbeat_enabled();
     let mut heartbeat = HeartbeatDiagnostics::default();
     let mut last_heartbeat_sample = Instant::now();
+    let (ui_query_tx, ui_query_rx) = mpsc::channel::<UiHintQueryResult>();
+    *UI_HINT_QUERY_TX.lock().unwrap() = Some(ui_query_tx);
+    *UI_HINT_QUERY_RX.lock().unwrap() = Some(ui_query_rx);
 
     loop {
         let mut loop_diagnostics = LoopDiagnostics {
@@ -3066,6 +3134,7 @@ fn main() {
             ..LoopDiagnostics::default()
         };
 
+        process_ui_hint_query_results();
         loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
         {
             let mut action_handler = ACTION_HANDLER.write().unwrap();
