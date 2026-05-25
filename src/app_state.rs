@@ -3054,11 +3054,11 @@ mod tests {
         assert_eq!(collect_commands(&mut state), vec![AppCommand::EnterBookmarkMode { activation_key: VirtualKey::B }]);
 
         state.enter_bookmark_mode(VirtualKey::B);
-        state.route_key_event(KeyEvent::new(VirtualKey::Key1, true), Some(Action::BookmarkSlot(1)));
+        state.route_key_event(KeyEvent::new(VirtualKey::Num1, true), Some(Action::BookmarkSlot(1)));
         assert_eq!(collect_commands(&mut state), vec![AppCommand::SetBookmarkSlot(1)]);
 
         state.route_key_event(KeyEvent::new(VirtualKey::Backspace, true), None);
-        state.route_key_event(KeyEvent::new(VirtualKey::Key1, true), Some(Action::BookmarkSlot(1)));
+        state.route_key_event(KeyEvent::new(VirtualKey::Num1, true), Some(Action::BookmarkSlot(1)));
         assert_eq!(collect_commands(&mut state), vec![AppCommand::ClearBookmarkSlot(1)]);
     }
 
