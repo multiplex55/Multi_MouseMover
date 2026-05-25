@@ -1286,15 +1286,9 @@ mod tests {
     fn bookmark_entries_appear_in_help_bindings() {
         let view = help_view_from_bindings(
             [
-                (
-                    KeyChord::new(false, false, false, true, VirtualKey::B),
-                    Action::BookmarkMode,
-                ),
-                (KeyChord::from_key(VirtualKey::Key1), Action::BookmarkSlot(1)),
-                (
-                    KeyChord::new(false, false, false, false, VirtualKey::Backspace),
-                    Action::ClearBookmarkSlot(1),
-                ),
+                (KeyChord::parse("Shift+B").unwrap(), Action::BookmarkMode),
+                (KeyChord::from_key(VirtualKey::Num1), Action::BookmarkSlot(1)),
+                (KeyChord::from_key(VirtualKey::Backspace), Action::ClearBookmarkSlot(1)),
                 (KeyChord::from_key(VirtualKey::Escape), Action::Disable),
             ],
             ModeContext::Active,
