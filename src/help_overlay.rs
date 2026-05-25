@@ -818,6 +818,7 @@ fn format_action(action: &Action) -> String {
         Action::PanicReset => "Panic reset".to_string(),
         Action::SlowMouse => "Slow mouse".to_string(),
         Action::SurgicalMode => "Surgical mode".to_string(),
+        Action::ScrollModifier => "Scroll modifier".to_string(),
         Action::JumpMode => "Jump".to_string(),
         Action::JumpModeProfile(profile) => format!("Jump mode profile: {profile}"),
         Action::GridMode => "Grid".to_string(),
@@ -864,6 +865,7 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::MovementProfileSelect(_)
         | Action::SlowMouse
         | Action::SurgicalMode
+        | Action::ScrollModifier
         | Action::StepMove { .. } => HelpBindingCategory::Movement,
         Action::LeftClick
         | Action::RightClick

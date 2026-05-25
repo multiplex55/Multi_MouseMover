@@ -561,7 +561,7 @@ impl Default for TooltipOverlayEvents {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct TooltipOverlayConfig {
     pub enabled: bool,
@@ -988,7 +988,7 @@ pub struct WheelProfileConfig {
 }
 
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct ScrollModeConfig {
     enabled: bool,
