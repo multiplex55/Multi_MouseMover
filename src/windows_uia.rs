@@ -9,7 +9,13 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
-    IUIAutomationElementArray, TreeScope_Children, TreeScope_Descendants,
+    IUIAutomationElementArray, TreeScope_Children, TreeScope_Descendants, UIA_ButtonControlTypeId,
+    UIA_CheckBoxControlTypeId, UIA_ComboBoxControlTypeId, UIA_ControlTypePropertyId,
+    UIA_EditControlTypeId, UIA_HyperlinkControlTypeId, UIA_InvokePatternId,
+    UIA_IsContentElementPropertyId, UIA_IsControlElementPropertyId, UIA_IsEnabledPropertyId,
+    UIA_IsKeyboardFocusablePropertyId, UIA_IsOffscreenPropertyId, UIA_ListItemControlTypeId,
+    UIA_MenuItemControlTypeId, UIA_RadioButtonControlTypeId, UIA_SelectionItemPatternId,
+    UIA_TabItemControlTypeId, UIA_TreeItemControlTypeId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
@@ -85,9 +91,134 @@ fn build_interactive_condition(
     automation: &IUIAutomation,
 ) -> Result<IUIAutomationCondition, UiHintQueryError> {
     unsafe {
+        let enabled = automation
+            .CreatePropertyCondition(UIA_IsEnabledPropertyId, true.into())
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let visible = automation
+            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, false.into())
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let focusable = automation
+            .CreatePropertyCondition(UIA_IsKeyboardFocusablePropertyId, true.into())
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let is_control = automation
+            .CreatePropertyCondition(UIA_IsControlElementPropertyId, true.into())
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let is_content = automation
+            .CreatePropertyCondition(UIA_IsContentElementPropertyId, true.into())
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+
+        let interactive_pattern = or_conditions(
+            automation,
+            &[
+                automation.CreatePropertyCondition(UIA_InvokePatternId, true.into()),
+                automation.CreatePropertyCondition(UIA_SelectionItemPatternId, true.into()),
+                automation.CreatePropertyCondition(UIA_ValuePatternId, true.into()),
+            ],
+        )?;
+
+        let interactive_control_type = or_conditions(
+            automation,
+            &[
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_ButtonControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_HyperlinkControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_EditControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_ComboBoxControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_ListItemControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_MenuItemControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_CheckBoxControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_RadioButtonControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_TabItemControlTypeId.0.into(),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_ControlTypePropertyId,
+                    UIA_TreeItemControlTypeId.0.into(),
+                ),
+            ],
+        )?;
+
+        let interactive = automation
+            .CreateOrCondition(&interactive_pattern, &interactive_control_type)
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let control_or_content = automation
+            .CreateOrCondition(&is_control, &is_content)
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+
+        let base = automation
+            .CreateAndCondition(&enabled, &visible)
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let base = automation
+            .CreateAndCondition(&base, &control_or_content)
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let focusable_or_interactive = automation
+            .CreateOrCondition(&focusable, &interactive)
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         automation
-            .CreateTrueCondition()
+            .CreateAndCondition(&base, &focusable_or_interactive)
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)
+    }
+}
+
+fn or_conditions(
+    automation: &IUIAutomation,
+    conditions: &[windows::core::Result<IUIAutomationCondition>],
+) -> Result<IUIAutomationCondition, UiHintQueryError> {
+    let mut iter = conditions.iter();
+    let first = iter
+        .next()
+        .ok_or(UiHintQueryError::UiAutomationQueryFailed)?
+        .as_ref()
+        .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?
+        .clone();
+    let mut acc = first;
+    for next in iter {
+        let next = next
+            .as_ref()
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        acc = unsafe {
+            automation
+                .CreateOrCondition(&acc, next)
+                .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?
+        };
+    }
+    Ok(acc)
+}
+
+fn choose_query_scope(strategy: crate::UiHintQueryStrategy, should_fallback: bool) -> i32 {
+    match strategy {
+        crate::UiHintQueryStrategy::Descendants => TreeScope_Descendants.0,
+        crate::UiHintQueryStrategy::ChildrenThenDescendants => {
+            if should_fallback {
+                TreeScope_Descendants.0
+            } else {
+                TreeScope_Children.0
+            }
+        }
     }
 }
 
@@ -340,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn strategy_fallback_threshold_behavior() {
+    fn strategy_selection_prefers_children_until_fallback_threshold() {
         assert!(should_fallback_to_descendants(
             crate::UiHintQueryStrategy::ChildrenThenDescendants,
             2,
@@ -356,5 +487,17 @@ mod tests {
             0,
             3
         ));
+        assert_eq!(
+            choose_query_scope(crate::UiHintQueryStrategy::ChildrenThenDescendants, false),
+            TreeScope_Children.0
+        );
+        assert_eq!(
+            choose_query_scope(crate::UiHintQueryStrategy::ChildrenThenDescendants, true),
+            TreeScope_Descendants.0
+        );
+        assert_eq!(
+            choose_query_scope(crate::UiHintQueryStrategy::Descendants, false),
+            TreeScope_Descendants.0
+        );
     }
 }

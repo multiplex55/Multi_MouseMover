@@ -405,6 +405,9 @@ fn is_known_active_path(path: &str) -> bool {
         "ui_hints.min_hint_spacing_px",
         "ui_hints.include_thread_windows",
         "ui_hints.include_owned_popups",
+        "ui_hints.query_strategy",
+        "ui_hints.min_targets_before_fallback",
+        "ui_hints.query_timeout_ms",
         "ui_hints.target_point",
         "ui_hints.after_select",
         "ui_hints.left_click_modifier.ctrl",
@@ -916,6 +919,26 @@ mod tests {
         assert!(warning.message.contains("Unknown config path"));
     }
 
+    #[test]
+    fn audit_accepts_ui_hints_query_keys() {
+        let report = audit_config_toml(
+            r#"
+            [ui_hints]
+            query_strategy = "children_then_descendants"
+            min_targets_before_fallback = 12
+            query_timeout_ms = 900
+            "#,
+        );
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| w.path.starts_with("ui_hints.query_")
+                    || w.path == "ui_hints.min_targets_before_fallback"),
+            "unexpected warnings: {:?}",
+            report.warnings
+        );
+    }
     #[test]
     fn audit_parses_invalid_toml_gracefully() {
         let report = audit_config_toml("[jump\nmode = \"precision\"");

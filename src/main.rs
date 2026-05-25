@@ -77,6 +77,7 @@ fn exit_ui_hint_mode(reason: UiHintExitReason) {
         let _ = overlay.borrow_mut().hide();
     });
     UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed);
+    *UI_HINT_QUERY_DEADLINE.lock().unwrap() = None;
     let mut action_handler = ACTION_HANDLER.write().unwrap();
     action_handler.clear_active_keys();
     APP_STATE.write().unwrap().exit_ui_hint_mode();
@@ -169,8 +170,10 @@ static UI_HINT_QUERY_ID: AtomicU64 = AtomicU64::new(0);
 lazy_static! {
     static ref LAST_UI_HINT_COMPLETION: Mutex<Option<UiHintCompletionState>> = Mutex::new(None);
     static ref LAST_SURGICAL_TOOLTIP_ACTIVE: Mutex<bool> = Mutex::new(false);
-    static ref POSITION_HISTORY_STORE: Mutex<PositionHistory> =
-        Mutex::new(PositionHistory::new(PositionHistoryConfig::default().max_positions));
+    static ref POSITION_HISTORY_STORE: Mutex<PositionHistory> = Mutex::new(PositionHistory::new(
+        PositionHistoryConfig::default().max_positions
+    ));
+    static ref UI_HINT_QUERY_DEADLINE: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2649,6 +2652,31 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
     diagnostics
 }
 
+fn process_ui_hint_query_timeout() {
+    let expired_query_id = {
+        let guard = UI_HINT_QUERY_DEADLINE.lock().unwrap();
+        guard.and_then(|(query_id, deadline)| (Instant::now() >= deadline).then_some(query_id))
+    };
+    let Some(query_id) = expired_query_id else {
+        return;
+    };
+    {
+        let app_state = APP_STATE.read().unwrap();
+        if !app_state.is_ui_hint_querying()
+            || app_state.current_ui_hint_query_id() != Some(query_id)
+        {
+            return;
+        }
+    }
+    if query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
+        return;
+    }
+    if ui_hints_debug_enabled() {
+        eprintln!("[ui-hints] query timeout: query_id={query_id}");
+    }
+    exit_ui_hint_mode(UiHintExitReason::QueryFailed);
+}
+
 fn process_ui_hint_query_results() {
     let next = {
         let guard = UI_HINT_QUERY_RX.lock().unwrap();
@@ -3384,6 +3412,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 query_request.query_id,
                 query_request.foreground_hwnd,
             );
+            *UI_HINT_QUERY_DEADLINE.lock().unwrap() = Some((
+                query_request.query_id,
+                Instant::now() + Duration::from_millis(config.query_timeout_ms),
+            ));
             if config.debug {
                 eprintln!(
                     "[ui-hints] query start: query_id={} captured_hwnd={}",
@@ -3786,6 +3818,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
                 return;
             }
+            *UI_HINT_QUERY_DEADLINE.lock().unwrap() = None;
             if ui_hints_debug_enabled() {
                 let state_hwnd = APP_STATE.read().unwrap().current_ui_hint_foreground_hwnd();
                 eprintln!(
@@ -3911,6 +3944,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if query_id != UI_HINT_QUERY_ID.load(Ordering::Relaxed) {
                 return;
             }
+            *UI_HINT_QUERY_DEADLINE.lock().unwrap() = None;
             let tooltip_cfg = ACTION_HANDLER
                 .read()
                 .unwrap()
@@ -4219,6 +4253,7 @@ fn main() {
             ..LoopDiagnostics::default()
         };
 
+        process_ui_hint_query_timeout();
         process_ui_hint_query_results();
         loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
         {
@@ -6859,6 +6894,34 @@ enabled = true"#,
     }
 
     #[test]
+    fn ui_hint_query_timeout_exits_mode_and_stale_result_is_ignored() {
+        UI_HINT_QUERY_ID.store(900, Ordering::Relaxed);
+        APP_STATE
+            .write()
+            .unwrap()
+            .enter_ui_hint_querying(VirtualKey::U, 900, 0x9999);
+        *UI_HINT_QUERY_DEADLINE.lock().unwrap() =
+            Some((900, Instant::now() - Duration::from_millis(1)));
+
+        process_ui_hint_query_timeout();
+
+        assert!(matches!(
+            APP_STATE.read().unwrap().current_ui_hint_query_id(),
+            None
+        ));
+
+        let stale = UiHintQueryResult {
+            query_id: 900,
+            foreground_hwnd: 0x9999,
+            result: Ok(Vec::new()),
+        };
+        let (tx, rx) = mpsc::channel::<UiHintQueryResult>();
+        *UI_HINT_QUERY_RX.lock().unwrap() = Some(rx);
+        let _ = tx.send(stale);
+        process_ui_hint_query_results();
+        assert!(APP_STATE.write().unwrap().pop_command().is_none());
+    }
+
     fn ui_hint_cleanup_is_idempotent() {
         APP_STATE
             .write()
