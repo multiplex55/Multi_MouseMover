@@ -176,6 +176,7 @@ pub enum ModeContext {
     UiHintQuerying,
     UiHintActive,
     PositionHistory,
+    Bookmark,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -434,7 +435,6 @@ impl AppState {
             || self.is_bookmark_mode_active()
     }
 
-
     pub fn is_bookmark_mode_active(&self) -> bool {
         matches!(self.bookmark_mode, BookmarkModeState::Active { .. })
     }
@@ -482,6 +482,9 @@ impl AppState {
         }
         if self.is_position_history_active() {
             return ModeContext::PositionHistory;
+        }
+        if self.is_bookmark_mode_active() {
+            return ModeContext::Bookmark;
         }
 
         if self.is_jump_active() {
@@ -861,7 +864,7 @@ impl AppState {
         if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
             self.exit_ui_hint_mode();
             self.exit_position_history_mode();
-        self.exit_bookmark_mode();
+            self.exit_bookmark_mode();
             self.enqueue_command(AppCommand::SetActiveMode { active: false });
             return;
         }
@@ -879,7 +882,7 @@ impl AppState {
             {
                 self.exit_ui_hint_mode();
                 self.exit_position_history_mode();
-        self.exit_bookmark_mode();
+                self.exit_bookmark_mode();
             }
             self.enqueue_command(AppCommand::UiHintInput(event));
             return;
@@ -895,8 +898,14 @@ impl AppState {
 
         if self.is_bookmark_mode_active() {
             if !event.is_down {
-                if let BookmarkModeState::Active { clear_modifier_held, .. } = &mut self.bookmark_mode {
-                    if event.key == VirtualKey::Backspace { *clear_modifier_held = false; }
+                if let BookmarkModeState::Active {
+                    clear_modifier_held,
+                    ..
+                } = &mut self.bookmark_mode
+                {
+                    if event.key == VirtualKey::Backspace {
+                        *clear_modifier_held = false;
+                    }
                 }
                 return;
             }
@@ -905,14 +914,26 @@ impl AppState {
                 self.enqueue_command(AppCommand::CancelBookmarkMode);
                 return;
             }
-            if let BookmarkModeState::Active { clear_modifier_held, .. } = &mut self.bookmark_mode {
-                if event.key == VirtualKey::Backspace { *clear_modifier_held = true; return; }
+            if let BookmarkModeState::Active {
+                clear_modifier_held,
+                ..
+            } = &mut self.bookmark_mode
+            {
+                if event.key == VirtualKey::Backspace {
+                    *clear_modifier_held = true;
+                    return;
+                }
                 match action {
                     Some(Action::BookmarkSlot(slot)) => {
-                        if *clear_modifier_held { self.enqueue_command(AppCommand::ClearBookmarkSlot(slot)); }
-                        else { self.enqueue_command(AppCommand::SetBookmarkSlot(slot)); }
+                        if *clear_modifier_held {
+                            self.enqueue_command(AppCommand::ClearBookmarkSlot(slot));
+                        } else {
+                            self.enqueue_command(AppCommand::SetBookmarkSlot(slot));
+                        }
                     }
-                    Some(Action::ClearAllBookmarks) => self.enqueue_command(AppCommand::ClearAllBookmarks),
+                    Some(Action::ClearAllBookmarks) => {
+                        self.enqueue_command(AppCommand::ClearAllBookmarks)
+                    }
                     _ => {}
                 }
             }
@@ -967,7 +988,7 @@ impl AppState {
         if event.is_down && matches!(action.as_ref(), Some(Action::ReloadConfig)) {
             self.exit_ui_hint_mode();
             self.exit_position_history_mode();
-        self.exit_bookmark_mode();
+            self.exit_bookmark_mode();
             self.enqueue_command(AppCommand::ReloadConfig);
             return;
         }
@@ -975,7 +996,7 @@ impl AppState {
         if event.is_down && matches!(action.as_ref(), Some(Action::PanicReset)) {
             self.exit_ui_hint_mode();
             self.exit_position_history_mode();
-        self.exit_bookmark_mode();
+            self.exit_bookmark_mode();
             self.enqueue_command(AppCommand::PanicReset);
             return;
         }
@@ -1022,7 +1043,9 @@ impl AppState {
         }
 
         if event.is_down && matches!(action.as_ref(), Some(Action::BookmarkMode)) {
-            self.enqueue_command(AppCommand::EnterBookmarkMode { activation_key: event.key });
+            self.enqueue_command(AppCommand::EnterBookmarkMode {
+                activation_key: event.key,
+            });
             return;
         }
 
@@ -3047,19 +3070,44 @@ mod tests {
     #[test]
     fn bookmark_mode_routes_recall_and_set_and_clear() {
         let mut state = AppState::default();
-        state.route_key_event(KeyEvent::new(VirtualKey::B, true), Some(Action::BookmarkSlot(1)));
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::RecallBookmarkSlot(1)]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::B, true),
+            Some(Action::BookmarkSlot(1)),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::RecallBookmarkSlot(1)]
+        );
 
-        state.route_key_event(KeyEvent::new(VirtualKey::B, true), Some(Action::BookmarkMode));
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::EnterBookmarkMode { activation_key: VirtualKey::B }]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::B, true),
+            Some(Action::BookmarkMode),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::EnterBookmarkMode {
+                activation_key: VirtualKey::B
+            }]
+        );
 
         state.enter_bookmark_mode(VirtualKey::B);
-        state.route_key_event(KeyEvent::new(VirtualKey::Num1, true), Some(Action::BookmarkSlot(1)));
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::SetBookmarkSlot(1)]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Num1, true),
+            Some(Action::BookmarkSlot(1)),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::SetBookmarkSlot(1)]
+        );
 
         state.route_key_event(KeyEvent::new(VirtualKey::Backspace, true), None);
-        state.route_key_event(KeyEvent::new(VirtualKey::Num1, true), Some(Action::BookmarkSlot(1)));
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::ClearBookmarkSlot(1)]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Num1, true),
+            Some(Action::BookmarkSlot(1)),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ClearBookmarkSlot(1)]
+        );
     }
-
 }

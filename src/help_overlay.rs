@@ -78,6 +78,7 @@ pub enum HelpSection {
     Jump,
     Grid,
     UiHints,
+    Bookmarks,
     Disabled,
 }
 
@@ -88,6 +89,7 @@ pub fn resolve_help_section(mode: ModeContext) -> HelpSection {
         ModeContext::Grid => HelpSection::Grid,
         ModeContext::UiHintQuerying | ModeContext::UiHintActive => HelpSection::UiHints,
         ModeContext::PositionHistory => HelpSection::UiHints,
+        ModeContext::Bookmark => HelpSection::Bookmarks,
         ModeContext::Active => HelpSection::General,
     }
 }
@@ -952,9 +954,10 @@ fn action_section(action: &Action) -> HelpBindingSection {
         | Action::SaveMousePosition
         | Action::ClearMousePositions
         | Action::PositionHistoryMode => HelpBindingSection::JumpGrid,
-        Action::BookmarkMode | Action::BookmarkSlot(_) | Action::ClearBookmarkSlot(_) | Action::ClearAllBookmarks => {
-            HelpBindingSection::Bookmarks
-        }
+        Action::BookmarkMode
+        | Action::BookmarkSlot(_)
+        | Action::ClearBookmarkSlot(_)
+        | Action::ClearAllBookmarks => HelpBindingSection::Bookmarks,
         Action::Exit
         | Action::ReloadConfig
         | Action::PanicReset
@@ -968,11 +971,30 @@ fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
         ModeContext::Inactive | ModeContext::Active => true,
         ModeContext::Jump | ModeContext::Grid => matches!(
             action,
-            Action::NavigateBack | Action::Disable | Action::ShowHelp | Action::JumpMode | Action::GridMode
+            Action::NavigateBack
+                | Action::Disable
+                | Action::ShowHelp
+                | Action::JumpMode
+                | Action::GridMode
         ),
-        ModeContext::UiHintQuerying | ModeContext::UiHintActive | ModeContext::PositionHistory => matches!(
+        ModeContext::UiHintQuerying | ModeContext::UiHintActive | ModeContext::PositionHistory => {
+            matches!(
+                action,
+                Action::NavigateBack
+                    | Action::Disable
+                    | Action::ShowHelp
+                    | Action::UiHintMode
+                    | Action::PositionHistoryMode
+            )
+        }
+        ModeContext::Bookmark => matches!(
             action,
-            Action::NavigateBack | Action::Disable | Action::ShowHelp | Action::UiHintMode | Action::PositionHistoryMode
+            Action::BookmarkMode
+                | Action::BookmarkSlot(_)
+                | Action::ClearBookmarkSlot(_)
+                | Action::ClearAllBookmarks
+                | Action::Disable
+                | Action::ShowHelp
         ),
     }
 }
@@ -1046,10 +1068,13 @@ mod tests {
 
     #[test]
     fn help_contents_are_generated_from_keybindings() {
-        let view = help_view_from_bindings([
-            (KeyChord::from_key(VirtualKey::F), Action::JumpMode),
-            (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
-        ], ModeContext::Active);
+        let view = help_view_from_bindings(
+            [
+                (KeyChord::from_key(VirtualKey::F), Action::JumpMode),
+                (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
+            ],
+            ModeContext::Active,
+        );
 
         assert!(view
             .bindings
@@ -1086,12 +1111,15 @@ mod tests {
 
     #[test]
     fn help_lines_include_formatted_action_labels() {
-        let view = help_view_from_bindings([
-            (KeyChord::from_key(VirtualKey::F), Action::JumpMode),
-            (KeyChord::from_key(VirtualKey::G), Action::GridMode),
-            (KeyChord::from_key(VirtualKey::S), Action::ScreenSelect),
-            (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
-        ], ModeContext::Active);
+        let view = help_view_from_bindings(
+            [
+                (KeyChord::from_key(VirtualKey::F), Action::JumpMode),
+                (KeyChord::from_key(VirtualKey::G), Action::GridMode),
+                (KeyChord::from_key(VirtualKey::S), Action::ScreenSelect),
+                (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
+            ],
+            ModeContext::Active,
+        );
 
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
 
@@ -1231,12 +1259,15 @@ mod tests {
     fn format_help_lines_truncates_bindings_deterministically() {
         let mut config = TooltipOverlayConfig::default();
         config.help_max_bindings = 2;
-        let view = help_view_from_bindings([
-            (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
-            (KeyChord::from_key(VirtualKey::W), Action::MoveUp),
-            (KeyChord::from_key(VirtualKey::A), Action::MoveLeft),
-            (KeyChord::from_key(VirtualKey::D), Action::MoveRight),
-        ], ModeContext::Active);
+        let view = help_view_from_bindings(
+            [
+                (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
+                (KeyChord::from_key(VirtualKey::W), Action::MoveUp),
+                (KeyChord::from_key(VirtualKey::A), Action::MoveLeft),
+                (KeyChord::from_key(VirtualKey::D), Action::MoveRight),
+            ],
+            ModeContext::Active,
+        );
 
         let lines = format_help_lines(&view, config).join("\n");
 
@@ -1286,8 +1317,14 @@ mod tests {
         let view = help_view_from_bindings(
             [
                 (KeyChord::parse("Shift+B").unwrap(), Action::BookmarkMode),
-                (KeyChord::from_key(VirtualKey::Num1), Action::BookmarkSlot(1)),
-                (KeyChord::from_key(VirtualKey::Backspace), Action::ClearBookmarkSlot(1)),
+                (
+                    KeyChord::from_key(VirtualKey::Num1),
+                    Action::BookmarkSlot(1),
+                ),
+                (
+                    KeyChord::from_key(VirtualKey::Backspace),
+                    Action::ClearBookmarkSlot(1),
+                ),
                 (KeyChord::from_key(VirtualKey::Escape), Action::Disable),
             ],
             ModeContext::Active,

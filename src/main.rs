@@ -592,6 +592,7 @@ pub struct TooltipOverlayEvents {
     pub ui_hints_query_fail: bool,
     pub ui_hints_query_empty: bool,
     pub ui_hints_query_capped_count: bool,
+    pub bookmarks: bool,
 }
 
 impl Default for TooltipOverlayEvents {
@@ -608,6 +609,7 @@ impl Default for TooltipOverlayEvents {
             ui_hints_query_fail: true,
             ui_hints_query_empty: true,
             ui_hints_query_capped_count: false,
+            bookmarks: true,
         }
     }
 }
@@ -3265,7 +3267,7 @@ fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32
 }
 
 fn show_bookmark_tooltip(config: &Config, body: String) {
-    if config.bookmarks.show_tooltips {
+    if config.bookmarks.show_tooltips && config.tooltip_overlay.events.bookmarks {
         help_overlay::show_temporary_tooltip("Bookmarks", &body, Duration::from_millis(900));
     }
 }
@@ -3855,8 +3857,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     }
                 }
                 "focus_anchor_window" => {
-                    let (ok, warn) =
-                        evaluate_focus_attempt(virtual_desktop::focus_anchor_window(record.anchor_hwnd));
+                    let (ok, warn) = evaluate_focus_attempt(virtual_desktop::focus_anchor_window(
+                        record.anchor_hwnd,
+                    ));
                     if !ok {
                         desktop_ok = false;
                         desktop_warn = warn;
@@ -4359,6 +4362,8 @@ struct StartupFeatureBindingSummary {
     position_history_save: usize,
     position_history_clear: usize,
     position_history_mode: usize,
+    bookmark_mode: usize,
+    bookmark_slots: Vec<u8>,
 }
 
 impl StartupFeatureBindingSummary {
@@ -4385,9 +4390,12 @@ fn startup_feature_binding_summary(config: &Config) -> StartupFeatureBindingSumm
             Action::SaveMousePosition => summary.position_history_save += 1,
             Action::ClearMousePositions => summary.position_history_clear += 1,
             Action::PositionHistoryMode => summary.position_history_mode += 1,
+            Action::BookmarkMode => summary.bookmark_mode += 1,
+            Action::BookmarkSlot(slot) => summary.bookmark_slots.push(slot),
             _ => {}
         }
     }
+    summary.bookmark_slots.sort_unstable();
     summary
 }
 
@@ -4410,13 +4418,40 @@ fn emit_startup_feature_binding_warnings(config: &Config) {
     if config.position_history.enabled && bindings.position_history_total() == 0 {
         warn_config_normalized("position_history.enabled=true but no position history bindings were found. Add one or more of save_mouse_position, clear_mouse_positions, or position_history_mode to key_bindings, or disable [position_history].enabled.");
     }
+    if config.bookmarks.enabled {
+        if bindings.bookmark_mode == 0 {
+            warn_config_normalized(
+                "bookmarks.enabled=true but no bookmark_mode binding was found.",
+            );
+        }
+        if bindings.bookmark_slots.is_empty() {
+            warn_config_normalized(
+                "bookmarks.enabled=true but no bookmark slot bindings were found.",
+            );
+        }
+        let mut dedup = bindings.bookmark_slots.clone();
+        dedup.sort_unstable();
+        let before = dedup.len();
+        dedup.dedup();
+        if dedup.len() != before {
+            warn_config_normalized(
+                "bookmarks slot bindings include duplicates for one or more slots.",
+            );
+        }
+        if (config.bookmarks.slot_count as usize) > dedup.len() {
+            warn_config_normalized("bookmarks.slot_count exceeds number of bound bookmark slots.");
+        }
+        if config.bookmarks.desktop_behavior == "switch_desktop" {
+            warn_config_normalized("bookmarks.desktop_behavior=switch_desktop is configured, but desktop switching backend availability is not guaranteed.");
+        }
+    }
 }
 
 fn startup_summary_line() -> String {
     format!("{APP_DISPLAY_NAME} ({APP_CRATE_ID}) Program Start!")
 }
 
-fn startup_validation_summary(config: &Config, warnings: &[String]) -> String {
+fn startup_validation_summary(config: &Config, config_path: &Path, warnings: &[String]) -> String {
     let mut lines = vec![
         format!("polling_rate={}ms", config.polling_rate),
         format!(
@@ -4478,6 +4513,15 @@ fn startup_validation_summary(config: &Config, warnings: &[String]) -> String {
         feature_bindings.position_history_mode,
         feature_bindings.position_history_total()
     ));
+    let bookmark_path = resolve_bookmarks_path(config_path, Path::new(&config.bookmarks.file));
+    lines.push(format!(
+        "  bookmarks: enabled={} file={} mode_bindings={} slots={:?} desktop_behavior={}",
+        config.bookmarks.enabled,
+        bookmark_path.display(),
+        feature_bindings.bookmark_mode,
+        feature_bindings.bookmark_slots,
+        config.bookmarks.desktop_behavior
+    ));
 
     if warnings.is_empty() {
         lines.push("warnings=0".to_string());
@@ -4489,10 +4533,10 @@ fn startup_validation_summary(config: &Config, warnings: &[String]) -> String {
     lines.join("\n")
 }
 
-fn print_startup_validation_summary(config: &Config) {
+fn print_startup_validation_summary(config: &Config, config_path: &Path) {
     println!(
         "[startup validation]\n{}",
-        startup_validation_summary(config, &take_config_warnings())
+        startup_validation_summary(config, config_path, &take_config_warnings())
     );
 }
 
@@ -4550,7 +4594,7 @@ fn main() {
     };
     let config = loaded.config.clone();
     println!("✅ Config Loaded");
-    print_startup_validation_summary(&config);
+    print_startup_validation_summary(&config, &loaded.path);
 
     config.initialize_bindings();
     println!("✅ Key Bindings Initialized");
@@ -6421,7 +6465,11 @@ enabled = true"#,
             },
         );
 
-        let summary = startup_validation_summary(&config, &["wheel.min_speed clamped".to_string()]);
+        let summary = startup_validation_summary(
+            &config,
+            Path::new("/tmp/config.toml"),
+            &["wheel.min_speed clamped".to_string()],
+        );
 
         assert!(summary.contains("polling_rate=8ms"));
         assert!(summary.contains("mouse_speed default=1 range=1..12 step=1 profiles=1"));

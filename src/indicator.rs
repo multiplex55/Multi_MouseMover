@@ -38,6 +38,7 @@ pub struct IndicatorSnapshot {
     pub default_wheel_speed: i32,
     pub flash_reason: IndicatorFlashReason,
     pub final_adjust_active: bool,
+    pub bookmark_mode_active: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,6 +65,7 @@ pub struct IndicatorInput<'a> {
     pub mouse: MouseIndicatorInput,
     pub wheel: WheelIndicatorInput,
     pub left_button_held: bool,
+    pub bookmark_mode_active: bool,
 }
 
 pub fn resolve_indicator_snapshot(input: IndicatorInput<'_>) -> IndicatorSnapshot {
@@ -97,6 +99,7 @@ pub fn resolve_indicator_snapshot(input: IndicatorInput<'_>) -> IndicatorSnapsho
         default_wheel_speed: input.wheel.default_speed,
         flash_reason,
         final_adjust_active: input.final_adjust_active,
+        bookmark_mode_active: input.bookmark_mode_active,
     }
 }
 
@@ -258,6 +261,7 @@ mod tests {
                 default_speed: 3,
             },
             left_button_held: true,
+            bookmark_mode_active: false,
         });
 
         assert_eq!(snapshot.state, IndicatorState::JumpMode);
@@ -285,6 +289,7 @@ mod tests {
                 default_speed: 1,
             },
             left_button_held: false,
+            bookmark_mode_active: false,
         });
         assert!(snapshot.surgical);
     }
