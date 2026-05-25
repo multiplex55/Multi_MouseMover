@@ -62,6 +62,12 @@ Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 | `wheel_profiles.*.speed_indicator_ms` | integer milliseconds | none | Yes | Active | Optional named wheel profile override. |
 | `wheel_profiles.*.vertical_multiplier` | integer | none | Yes | Active | Optional named wheel profile override. |
 | `wheel_profiles.*.horizontal_multiplier` | integer | none | Yes | Active | Optional named wheel profile override. |
+| `scroll_mode.enabled` | boolean | `false` | Yes | Active | Enables movement-to-wheel remapping while modifier is held. |
+| `scroll_mode.modifier_action` | action string | `"scroll_modifier"` | Yes | Active | Continuous action that activates scroll mode. |
+| `scroll_mode.exit_on_click` | boolean | `true` | Yes | Active | Releasing scroll modifier on click for deterministic exit behavior. |
+| `scroll_mode.exclusive_with_jump_mode` | boolean | `true` | Yes | Active | Reserved exclusivity toggle for jump mode transitions. |
+| `scroll_mode.exclusive_with_grid_mode` | boolean | `true` | Yes | Active | Reserved exclusivity toggle for grid mode transitions. |
+| `scroll_mode.exclusive_with_ui_hint_mode` | boolean | `true` | Yes | Active | Reserved exclusivity toggle for UI hint mode transitions. |
 | `jump.mode` | enum string | `"precision"` | Yes | Active | `single` uses coarse only; `precision` can use coarse, fine, and precise stages. |
 | `jump.cursor_between_stages` | enum string | `"none"` | Yes | Active | One of `none`, `move_to_region_center`, `preview_only`, `warp_and_continue`. |
 | `jump.start_region` | enum string | `"current_monitor"` | Yes | Active | One of `virtual_screen`, `current_monitor`, `active_window_monitor`, `active_window_bounds`. |

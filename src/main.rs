@@ -420,6 +420,7 @@ struct Config {
     movement_profiles: HashMap<String, MouseSpeedConfig>,
     wheel: WheelConfig,
     wheel_profiles: HashMap<String, WheelProfileConfig>,
+    scroll_mode: ScrollModeConfig,
     edge_jump: EdgeJumpConfig,
     window_jump: WindowJumpConfig,
     // Legacy compatibility alias for the movement baseline. New configs should use
@@ -451,6 +452,7 @@ impl Default for Config {
             movement_profiles: HashMap::new(),
             wheel: WheelConfig::default(),
             wheel_profiles: HashMap::new(),
+            scroll_mode: ScrollModeConfig::default(),
             edge_jump: EdgeJumpConfig::default(),
             window_jump: WindowJumpConfig::default(),
             starting_speed: 1,
@@ -527,7 +529,7 @@ pub enum TooltipOverlayPositioning {
     BottomRight,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct TooltipOverlayEvents {
     pub mouse: bool,
@@ -983,6 +985,31 @@ pub struct WheelProfileConfig {
     speed_indicator_ms: Option<u64>,
     vertical_multiplier: Option<i32>,
     horizontal_multiplier: Option<i32>,
+}
+
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct ScrollModeConfig {
+    enabled: bool,
+    modifier_action: String,
+    exit_on_click: bool,
+    exclusive_with_jump_mode: bool,
+    exclusive_with_grid_mode: bool,
+    exclusive_with_ui_hint_mode: bool,
+}
+
+impl Default for ScrollModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            modifier_action: "scroll_modifier".to_string(),
+            exit_on_click: true,
+            exclusive_with_jump_mode: true,
+            exclusive_with_grid_mode: true,
+            exclusive_with_ui_hint_mode: true,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1483,6 +1510,7 @@ impl Config {
         self.normalize_slow_mouse_config();
         self.normalize_surgical_mode_config();
         self.normalize_wheel_config();
+        self.normalize_scroll_mode_config();
         self.normalize_runtime_profiles();
         self.normalize_edge_jump_config();
         self.normalize_window_jump_config();
@@ -1774,6 +1802,16 @@ impl Config {
         if self.wheel.horizontal_multiplier < 1 {
             warn_config_normalized("wheel.horizontal_multiplier is below 1; clamping to 1");
             self.wheel.horizontal_multiplier = 1;
+        }
+    }
+
+    fn normalize_scroll_mode_config(&mut self) {
+        let parsed = Action::from_string(&self.scroll_mode.modifier_action);
+        if !matches!(parsed, Some(action) if action.is_continuous()) {
+            warn_config_normalized(
+                "scroll_mode.modifier_action must parse to a continuous action; using scroll_modifier",
+            );
+            self.scroll_mode.modifier_action = "scroll_modifier".to_string();
         }
     }
 
@@ -2820,6 +2858,16 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
     if action.is_continuous() {
         action_handler.process_active_keys(action, is_down);
         return None;
+    }
+
+    if is_down
+        && action_handler.mouse_master.config.scroll_mode.enabled
+        && action_handler.mouse_master.config.scroll_mode.exit_on_click
+        && matches!(action, Action::LeftClick | Action::RightClick | Action::MiddleClick)
+    {
+        if let Some(modifier) = Action::from_string(&action_handler.mouse_master.config.scroll_mode.modifier_action) {
+            action_handler.process_active_keys(modifier, false);
+        }
     }
 
     if action == Action::ClickThenDisable {

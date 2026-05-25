@@ -63,6 +63,7 @@ pub enum Action {
     PanicReset,
     SlowMouse,
     SurgicalMode,
+    ScrollModifier,
     JumpMode,
     JumpModeProfile(String),
     GridMode,
@@ -192,6 +193,7 @@ impl Action {
             "panic_reset" => Some(Self::PanicReset),
             "slow_mouse" => Some(Self::SlowMouse),
             "surgical_mode" => Some(Self::SurgicalMode),
+            "scroll_modifier" => Some(Self::ScrollModifier),
             "jump_mode" => Some(Self::JumpMode),
             "grid_mode" | "grid" => Some(Self::GridMode),
             "screen_select" | "select_screen" => Some(Self::ScreenSelect),
@@ -272,6 +274,7 @@ impl Action {
         self.is_movement()
             || self == &Self::SlowMouse
             || self == &Self::SurgicalMode
+            || self == &Self::ScrollModifier
             || self.is_wheel_direction()
     }
 }
@@ -301,6 +304,7 @@ mod tests {
             ("reload_config", Action::ReloadConfig),
             ("panic_reset", Action::PanicReset),
             ("surgical_mode", Action::SurgicalMode),
+            ("scroll_modifier", Action::ScrollModifier),
             ("center_current_monitor", Action::CenterCurrentMonitor),
             ("click_then_disable", Action::ClickThenDisable),
             ("toggle_drag_mode", Action::ToggleDragMode),
@@ -466,6 +470,7 @@ mod tests {
             Action::PanicReset,
             Action::SlowMouse,
             Action::SurgicalMode,
+            Action::ScrollModifier,
             Action::JumpMode,
             Action::GridMode,
             Action::ScreenSelect,
@@ -497,6 +502,7 @@ mod tests {
             Action::MoveDownRight,
             Action::MoveDownLeft,
             Action::SlowMouse,
+            Action::ScrollModifier,
             Action::WheelUp,
             Action::WheelDown,
             Action::WheelLeft,
