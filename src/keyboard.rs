@@ -783,9 +783,10 @@ impl KeyBindings {
             if chord.shift {
                 owned.insert(VirtualKey::Shift);
             }
-            if chord.win {
-                owned.insert(VirtualKey::Win);
-            }
+            // There is currently no generic Win virtual key variant in `VirtualKey`.
+            // We still track Win in chord matching via the event's `win_down` flag,
+            // but owned-modifier swallowing only applies to representable key events.
+            let _ = chord.win;
         }
         owned
     }
