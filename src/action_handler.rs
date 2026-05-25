@@ -2598,6 +2598,33 @@ mod tests {
             Some(FinalAdjustControl::Back)
         );
     }
+
+    #[test]
+    fn effective_actions_remap_all_movement_directions_when_scroll_modifier_active() {
+        let mut cfg = test_config();
+        cfg.scroll_mode.enabled = true;
+        cfg.scroll_mode.modifier_action = "scroll_modifier".to_string();
+        let mouse = MouseMaster::new_with_backend(cfg, FakeBackend::default());
+
+        let actions = HashSet::from([
+            Action::MoveUp,
+            Action::MoveDown,
+            Action::MoveLeft,
+            Action::MoveRight,
+            Action::ScrollModifier,
+        ]);
+        let effective = mouse.effective_actions_for_tick(&actions);
+
+        assert!(!effective.contains(&Action::MoveUp));
+        assert!(!effective.contains(&Action::MoveDown));
+        assert!(!effective.contains(&Action::MoveLeft));
+        assert!(!effective.contains(&Action::MoveRight));
+        assert!(effective.contains(&Action::WheelUp));
+        assert!(effective.contains(&Action::WheelDown));
+        assert!(effective.contains(&Action::WheelLeft));
+        assert!(effective.contains(&Action::WheelRight));
+    }
+
     #[test]
     fn movement_with_modifier_yields_wheel_and_no_move_event() {
         let mut backend = FakeBackend::default();

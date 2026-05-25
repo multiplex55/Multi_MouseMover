@@ -19,6 +19,33 @@ key_bindings = [
 ]
 ```
 
+### Scroll mode behavior mapping
+
+When `scroll_mode.enabled = true` and the configured `scroll_mode.modifier_action` is held, movement actions are remapped to wheel actions for that tick:
+
+- `move_up` -> `wheel_up` (vertical wheel negative delta; typical content moves up).
+- `move_down` -> `wheel_down` (vertical wheel positive delta; typical content moves down).
+- `move_left` -> `wheel_left` (horizontal wheel negative delta; typical content moves left).
+- `move_right` -> `wheel_right` (horizontal wheel positive delta; typical content moves right).
+
+Example with held modifier (`LeftAlt` bound to `scroll_modifier`):
+
+```toml
+key_bindings = [
+  ["E", "move_up"],
+  ["S", "move_left"],
+  ["D", "move_down"],
+  ["F", "move_right"],
+  ["LeftAlt", "scroll_modifier"],
+]
+
+[scroll_mode]
+enabled = true
+modifier_action = "scroll_modifier"
+```
+
+Holding `LeftAlt+E` emits `wheel_up` instead of moving the cursor; releasing `LeftAlt` restores normal movement.
+
 ## Config Paths
 
 | Config path | Type | Default | Connected? | Status | Notes |
@@ -80,8 +107,8 @@ key_bindings = [
 | `scroll_mode.enabled` | boolean | `false` | Yes | Active | Enables movement-to-wheel remapping while modifier is held. |
 | `scroll_mode.modifier_action` | action string | `"scroll_modifier"` | Yes | Active | Continuous action that activates scroll mode. |
 | `scroll_mode.exit_on_click` | boolean | `true` | Yes | Active | Releasing scroll modifier on click for deterministic exit behavior. |
-| `scroll_mode.exclusive_with_jump_mode` | boolean | `true` | Yes | Active | Reserved exclusivity toggle for jump mode transitions. |
-| `scroll_mode.exclusive_with_grid_mode` | boolean | `true` | Yes | Active | Reserved exclusivity toggle for grid mode transitions. |
+| `scroll_mode.exclusive_with_jump_mode` | boolean | `true` | Yes | Active | Reserved/experimental parse-only toggle; not currently enforced in runtime mode arbitration. |
+| `scroll_mode.exclusive_with_grid_mode` | boolean | `true` | Yes | Active | Reserved/experimental parse-only toggle; not currently enforced in runtime mode arbitration. |
 | `scroll_mode.exclusive_with_ui_hint_mode` | boolean | `true` | Yes | Active | Reserved exclusivity toggle for UI hint mode transitions. |
 | `jump.mode` | enum string | `"precision"` | Yes | Active | `single` uses coarse only; `precision` can use coarse, fine, and precise stages. |
 | `jump.cursor_between_stages` | enum string | `"none"` | Yes | Active | One of `none`, `move_to_region_center`, `preview_only`, `warp_and_continue`. |

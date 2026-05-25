@@ -30,6 +30,7 @@ key_bindings = [
     ["D", "move_down"],
     ["F", "move_right"],
     ["LeftShift", "slow_mouse"],
+    ["LeftAlt", "scroll_modifier"],
     ["B", "surgical_mode"],
 
     ["J", "left_click"],
@@ -192,6 +193,21 @@ min_speed = 1
 max_speed = 10
 speed_step = 1
 flash_indicator_ms = 700
+
+
+# ---------------------------------------------------------------------------
+# Scroll mode
+# ---------------------------------------------------------------------------
+[scroll_mode]
+# Hold the modifier action to remap movement keys into wheel directions.
+enabled = false
+modifier_action = "scroll_modifier"
+# If true, click actions release the modifier for predictable one-shot scrolling.
+exit_on_click = true
+# Reserved/experimental toggles (parsed but currently not enforced at runtime).
+exclusive_with_jump_mode = true
+exclusive_with_grid_mode = true
+exclusive_with_ui_hint_mode = true
 
 # ---------------------------------------------------------------------------
 # Grid mode
