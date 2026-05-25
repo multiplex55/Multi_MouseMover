@@ -18,6 +18,7 @@ mod position_history;
 mod screen_capture;
 mod ui_hint_overlay;
 mod ui_hints;
+mod virtual_desktop;
 mod window_geometry;
 mod windows_uia;
 mod zoom_overlay;
@@ -25,7 +26,10 @@ mod zoom_overlay;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, GridInputUpdate, JumpOverlayResolution, KeyEvent};
-use bookmarks::{resolve_bookmarks_path, BookmarkStore};
+use bookmarks::{
+    resolve_bookmarks_path, BookmarkRecord, BookmarkStore, MonitorRect as BookmarkMonitorRect,
+    SetOutcome,
+};
 use config_audit::{audit_config_toml, ConfigAuditSeverity, ConfigAuditWarning};
 #[cfg(test)]
 use indicator::IndicatorState;
@@ -54,6 +58,7 @@ use std::time::{Duration, Instant};
 use std::{env, error::Error, fs};
 use ui_hint_overlay::{build_ui_hint_loading_view, build_ui_hint_overlay_view, UiHintOverlay};
 use ui_hints::{build_ui_hint_targets, UiHintInputUpdate, UiHintSession};
+use virtual_desktop::DesktopMetadata;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
@@ -3233,6 +3238,37 @@ fn help_stats_from_snapshot(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RecallResolution {
+    Empty { tooltip: String },
+    Jump { x: i32, y: i32, tooltip: String },
+    Blocked { tooltip: String },
+}
+
+fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32, i32) {
+    let (mut x, mut y) = (record.x, record.y);
+    match cfg.coordinate_policy.as_str() {
+        "exact" => {}
+        "clamp_to_nearest_monitor" => {
+            let mr = &record.monitor_rect;
+            x = x.clamp(mr.left, mr.right.saturating_sub(1));
+            y = y.clamp(mr.top, mr.bottom.saturating_sub(1));
+        }
+        _ => {
+            let vr = virtual_screen_region();
+            x = x.clamp(vr.left, (vr.left + vr.width).saturating_sub(1));
+            y = y.clamp(vr.top, (vr.top + vr.height).saturating_sub(1));
+        }
+    }
+    (x, y)
+}
+
+fn show_bookmark_tooltip(config: &Config, body: String) {
+    if config.bookmarks.show_tooltips {
+        help_overlay::show_temporary_tooltip("Bookmarks", &body, Duration::from_millis(900));
+    }
+}
+
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
     if debug_diagnostics {
         match &command {
@@ -3289,9 +3325,13 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             AppCommand::EnterBookmarkMode { activation_key } => {
                 println!("[command] EnterBookmarkMode key={activation_key:?}")
             }
-            AppCommand::RecallBookmarkSlot(slot) => println!("[command] RecallBookmarkSlot slot={slot}"),
+            AppCommand::RecallBookmarkSlot(slot) => {
+                println!("[command] RecallBookmarkSlot slot={slot}")
+            }
             AppCommand::SetBookmarkSlot(slot) => println!("[command] SetBookmarkSlot slot={slot}"),
-            AppCommand::ClearBookmarkSlot(slot) => println!("[command] ClearBookmarkSlot slot={slot}"),
+            AppCommand::ClearBookmarkSlot(slot) => {
+                println!("[command] ClearBookmarkSlot slot={slot}")
+            }
             AppCommand::ClearAllBookmarks => println!("[command] ClearAllBookmarks"),
             AppCommand::CancelBookmarkMode => println!("[command] CancelBookmarkMode"),
             AppCommand::PositionHistoryInput(event) => {
@@ -3762,10 +3802,165 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             *UI_HINT_SESSION.lock().unwrap() = Some(session);
         }
         AppCommand::EnterBookmarkMode { activation_key } => {
-            APP_STATE.write().unwrap().enter_bookmark_mode(activation_key);
+            APP_STATE
+                .write()
+                .unwrap()
+                .enter_bookmark_mode(activation_key);
         }
-        AppCommand::RecallBookmarkSlot(_slot) => {}
-        AppCommand::SetBookmarkSlot(_slot) => {}
+        AppCommand::RecallBookmarkSlot(slot) => {
+            let cfg = ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .config
+                .bookmarks
+                .clone();
+            if !cfg.enabled {
+                return;
+            }
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+            let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            let Some(record) = runtime.store.get_slot(slot).cloned() else {
+                show_bookmark_tooltip(&config, format!("Bookmark {slot} is empty"));
+                APP_STATE.write().unwrap().exit_bookmark_mode();
+                return;
+            };
+
+            let mut desktop_ok = true;
+            let mut desktop_warn: Option<String> = None;
+            match cfg.desktop_behavior.as_str() {
+                "current_only" => {
+                    let current = virtual_desktop::current_virtual_desktop_id();
+                    if current != record.virtual_desktop_id {
+                        desktop_ok = false;
+                        desktop_warn = Some("Desktop mismatch".to_string());
+                    }
+                }
+                "focus_anchor_window" => {
+                    if let Err(e) = virtual_desktop::focus_anchor_window(record.anchor_hwnd) {
+                        desktop_ok = false;
+                        desktop_warn = Some(e);
+                    }
+                }
+                "switch_desktop" => {
+                    if let Err(e) =
+                        virtual_desktop::switch_to_desktop(record.virtual_desktop_id.as_deref())
+                    {
+                        desktop_ok = false;
+                        desktop_warn = Some(e);
+                    }
+                }
+                _ => {}
+            }
+            if cfg.desktop_switch_wait_ms > 0 {
+                sleep(Duration::from_millis(cfg.desktop_switch_wait_ms));
+            }
+            if !desktop_ok && cfg.require_desktop_switch_success {
+                show_bookmark_tooltip(
+                    &config,
+                    format!(
+                        "Bookmark {slot} blocked: {}",
+                        desktop_warn.unwrap_or_else(|| "desktop step failed".to_string())
+                    ),
+                );
+                APP_STATE.write().unwrap().exit_bookmark_mode();
+                return;
+            }
+            let (x, y) = resolve_recall_target(&record, &cfg);
+            ACTION_HANDLER
+                .write()
+                .unwrap()
+                .mouse_master
+                .move_mouse_to(x, y);
+            let suffix = desktop_warn
+                .map(|w| format!(" (warning: {w})"))
+                .unwrap_or_default();
+            show_bookmark_tooltip(
+                &config,
+                format!("Recalled bookmark {slot} -> ({x}, {y}){suffix}"),
+            );
+            APP_STATE.write().unwrap().exit_bookmark_mode();
+        }
+        AppCommand::SetBookmarkSlot(slot) => {
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+            if !config.bookmarks.enabled {
+                return;
+            }
+            let (x, y) = match ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .backend
+                .location()
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    show_bookmark_tooltip(&config, format!("Bookmark {slot} failed: {e}"));
+                    return;
+                }
+            };
+            let monitor =
+                monitor::current_monitor_rect_for_cursor(false).unwrap_or(monitor::MonitorRect {
+                    left: x,
+                    top: y,
+                    right: x + 1,
+                    bottom: y + 1,
+                });
+            let DesktopMetadata {
+                virtual_desktop_id,
+                anchor_hwnd,
+                anchor_process_id,
+                anchor_window_title,
+            } = virtual_desktop::capture_foreground_desktop_metadata();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            let created = runtime
+                .store
+                .get_slot(slot)
+                .map(|r| r.created_at_unix_ms)
+                .unwrap_or(now);
+            let record = BookmarkRecord {
+                slot,
+                x,
+                y,
+                monitor_device_name: "current".to_string(),
+                monitor_rect: BookmarkMonitorRect {
+                    left: monitor.left,
+                    top: monitor.top,
+                    right: monitor.right,
+                    bottom: monitor.bottom,
+                },
+                virtual_desktop_id,
+                anchor_hwnd,
+                anchor_process_id,
+                anchor_window_title,
+                created_at_unix_ms: created,
+                updated_at_unix_ms: now,
+            };
+            let outcome = runtime.store.set_slot(slot, record);
+            match runtime.store.save(&runtime.bookmark_path) {
+                Ok(()) => {
+                    let msg = match outcome {
+                        SetOutcome::Saved => format!("Saved bookmark {slot}"),
+                        SetOutcome::Overwritten => format!("Overwritten bookmark {slot}"),
+                    };
+                    show_bookmark_tooltip(&config, msg);
+                }
+                Err(e) => {
+                    show_bookmark_tooltip(&config, format!("Bookmark {slot} save failed: {e}"))
+                }
+            }
+            APP_STATE.write().unwrap().exit_bookmark_mode();
+        }
         AppCommand::ClearBookmarkSlot(_slot) => {}
         AppCommand::ClearAllBookmarks => {}
         AppCommand::CancelBookmarkMode => {
@@ -7241,5 +7436,76 @@ file = "data/bookmarks.json"
             runtime.bookmark_path,
             PathBuf::from("/tmp/multi_mouse/data/bookmarks.json")
         );
+    }
+}
+
+#[cfg(test)]
+mod bookmark_runtime_logic_tests {
+    use super::*;
+
+    fn cfg(policy: &str) -> BookmarksConfig {
+        let mut c = BookmarksConfig::default();
+        c.coordinate_policy = policy.to_string();
+        c
+    }
+
+    fn rec(x: i32, y: i32) -> BookmarkRecord {
+        BookmarkRecord {
+            slot: 1,
+            x,
+            y,
+            monitor_device_name: "m".into(),
+            monitor_rect: BookmarkMonitorRect {
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 100,
+            },
+            virtual_desktop_id: Some("d1".into()),
+            anchor_hwnd: None,
+            anchor_process_id: None,
+            anchor_window_title: None,
+            created_at_unix_ms: 0,
+            updated_at_unix_ms: 0,
+        }
+    }
+
+    #[test]
+    fn exact_policy_preserves_coordinate() {
+        assert_eq!(
+            resolve_recall_target(&rec(5000, -2000), &cfg("exact")),
+            (5000, -2000)
+        );
+    }
+
+    #[test]
+    fn clamp_to_nearest_monitor_clamps_out_of_bounds_target() {
+        assert_eq!(
+            resolve_recall_target(&rec(5000, -2000), &cfg("clamp_to_nearest_monitor")),
+            (99, 0)
+        );
+    }
+
+    #[test]
+    fn overwrite_save_emits_overwritten_outcome() {
+        let mut store = BookmarkStore::new(9);
+        let first = store.set_slot(1, rec(1, 1));
+        let second = store.set_slot(1, rec(2, 2));
+        assert_eq!(first, SetOutcome::Saved);
+        assert_eq!(second, SetOutcome::Overwritten);
+    }
+
+    #[test]
+    fn move_without_switch_allows_move_attempt() {
+        let mut c = BookmarksConfig::default();
+        c.desktop_behavior = "move_without_switch".into();
+        let r = rec(5, 6);
+        assert_eq!(resolve_recall_target(&r, &c), (5, 6));
+    }
+
+    #[test]
+    fn empty_slot_returns_none() {
+        let store = BookmarkStore::new(9);
+        assert!(store.get_slot(1).is_none());
     }
 }
