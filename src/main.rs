@@ -5824,7 +5824,7 @@ enabled = true",
                 config_toml: r#"key_bindings = []
 
 [window_jump]
-enabled = true",
+enabled = true"#,
                 expected_substring:
                     "window_jump.enabled=true but no window-jump action bindings were found",
             },
