@@ -68,6 +68,12 @@ key_bindings = [
     ["RightAlt+A", "move_to_left_edge"],
     ["RightAlt+S", "move_to_bottom_edge"],
     ["RightAlt+D", "move_to_right_edge"],
+    ["RightAlt+Ctrl+W", "move_to_window_top_edge"],
+    ["RightAlt+Ctrl+A", "move_to_window_left_edge"],
+    ["RightAlt+Ctrl+S", "move_to_window_bottom_edge"],
+    ["RightAlt+Ctrl+D", "move_to_window_right_edge"],
+    ["RightAlt+Ctrl+Q", "move_to_window_center"],
+    ["RightAlt+Ctrl+E", "move_to_window_titlebar"],
 
     ["RightAlt+R", "reload_config"],
     ["RightAlt+Escape", "panic_reset"],
