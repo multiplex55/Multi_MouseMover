@@ -541,6 +541,22 @@ mod tests {
     fn ui_hint_mode_is_not_continuous() {
         assert!(!Action::UiHintMode.is_continuous());
     }
+
+    #[test]
+    fn parses_position_history_actions() {
+        assert_eq!(
+            Action::from_string("save_mouse_position"),
+            Some(Action::SaveMousePosition)
+        );
+        assert_eq!(
+            Action::from_string("clear_mouse_positions"),
+            Some(Action::ClearMousePositions)
+        );
+        assert_eq!(
+            Action::from_string("position_history_mode"),
+            Some(Action::PositionHistoryMode)
+        );
+    }
 }
 
 /// Manages actions associated with key presses
@@ -596,12 +612,6 @@ impl<B: crate::action_handler::MouseBackend> ActionHandler<B> {
     pub fn tick_movement(&mut self) -> MovementTick {
         self.mouse_master
             .tick_movement(&self.active_keys, Duration::from_millis(0))
-    }
-    #[test]
-    fn parses_position_history_actions() {
-        assert_eq!(Action::from_string("save_mouse_position"), Some(Action::SaveMousePosition));
-        assert_eq!(Action::from_string("clear_mouse_positions"), Some(Action::ClearMousePositions));
-        assert_eq!(Action::from_string("position_history_mode"), Some(Action::PositionHistoryMode));
     }
 
 }

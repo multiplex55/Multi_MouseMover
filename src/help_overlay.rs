@@ -820,6 +820,9 @@ fn format_action(action: &Action) -> String {
         Action::Disable => "Disable".to_string(),
         Action::ShowHelp => "Hints / Help".to_string(),
         Action::UiHintMode => "UI Hints".to_string(),
+        Action::SaveMousePosition => "Save mouse position".to_string(),
+        Action::ClearMousePositions => "Clear saved mouse positions".to_string(),
+        Action::PositionHistoryMode => "Position history mode".to_string(),
         Action::StepMove { direction, tier } => {
             let direction = match direction {
                 Direction2D::Up => "up",
@@ -880,7 +883,10 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::ScreenSelect
         | Action::NavigateBack
         | Action::NavigateForward
-        | Action::UiHintMode => HelpBindingCategory::Jump,
+        | Action::UiHintMode
+        | Action::SaveMousePosition
+        | Action::ClearMousePositions
+        | Action::PositionHistoryMode => HelpBindingCategory::Jump,
         Action::Exit
         | Action::ReloadConfig
         | Action::PanicReset
