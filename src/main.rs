@@ -59,6 +59,7 @@ use std::{env, error::Error, fs};
 use ui_hint_overlay::{build_ui_hint_loading_view, build_ui_hint_overlay_view, UiHintOverlay};
 use ui_hints::{build_ui_hint_targets, UiHintInputUpdate, UiHintSession};
 use virtual_desktop::DesktopMetadata;
+use virtual_desktop::{FocusAnchorFailureReason, FocusAnchorResult};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
@@ -3269,6 +3270,20 @@ fn show_bookmark_tooltip(config: &Config, body: String) {
     }
 }
 
+fn evaluate_focus_attempt(result: FocusAnchorResult) -> (bool, Option<String>) {
+    if result.success {
+        return (true, None);
+    }
+    let reason = match result.reason {
+        Some(FocusAnchorFailureReason::AnchorMissing) => "anchor missing",
+        Some(FocusAnchorFailureReason::HwndNotFound) => "anchor window not found",
+        Some(FocusAnchorFailureReason::RestoreFailed) => "anchor restore failed",
+        Some(FocusAnchorFailureReason::ForegroundDenied) => "anchor focus denied",
+        None => "anchor focus failed",
+    };
+    (false, Some(reason.to_string()))
+}
+
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
     if debug_diagnostics {
         match &command {
@@ -3840,9 +3855,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     }
                 }
                 "focus_anchor_window" => {
-                    if let Err(e) = virtual_desktop::focus_anchor_window(record.anchor_hwnd) {
+                    let (ok, warn) =
+                        evaluate_focus_attempt(virtual_desktop::focus_anchor_window(record.anchor_hwnd));
+                    if !ok {
                         desktop_ok = false;
-                        desktop_warn = Some(e);
+                        desktop_warn = warn;
                     }
                 }
                 "switch_desktop" => {
@@ -7507,5 +7524,31 @@ mod bookmark_runtime_logic_tests {
     fn empty_slot_returns_none() {
         let store = BookmarkStore::new(9);
         assert!(store.get_slot(1).is_none());
+    }
+
+    #[test]
+    fn focus_attempt_failure_returns_policy_reason() {
+        let (ok, reason) = evaluate_focus_attempt(FocusAnchorResult {
+            success: false,
+            reason: Some(FocusAnchorFailureReason::HwndNotFound),
+        });
+        assert!(!ok);
+        assert_eq!(reason.as_deref(), Some("anchor window not found"));
+    }
+
+    #[test]
+    fn unavailable_metadata_path_does_not_panic_and_recall_target_still_resolves() {
+        let record = BookmarkRecord {
+            virtual_desktop_id: None,
+            anchor_hwnd: None,
+            anchor_process_id: None,
+            anchor_window_title: None,
+            ..rec(42, 24)
+        };
+        let mut c = BookmarksConfig::default();
+        c.require_desktop_switch_success = false;
+        c.desktop_behavior = "focus_anchor_window".into();
+        let (x, y) = resolve_recall_target(&record, &c);
+        assert_eq!((x, y), (42, 24));
     }
 }

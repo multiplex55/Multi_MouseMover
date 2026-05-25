@@ -331,4 +331,20 @@ mod tests {
         let file: BookmarkFile = serde_json::from_str(&raw).unwrap();
         assert_eq!(file.slots.get(&3).map(|r| r.x), Some(10));
     }
+
+    #[test]
+    fn bookmark_record_serializes_optional_anchor_fields() {
+        let mut record = fixture_record(3);
+        record.virtual_desktop_id = None;
+        record.anchor_hwnd = None;
+        record.anchor_process_id = None;
+        record.anchor_window_title = None;
+
+        let json = serde_json::to_string(&record).unwrap();
+        let round_trip: BookmarkRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(round_trip.virtual_desktop_id, None);
+        assert_eq!(round_trip.anchor_hwnd, None);
+        assert_eq!(round_trip.anchor_process_id, None);
+        assert_eq!(round_trip.anchor_window_title, None);
+    }
 }
