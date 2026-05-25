@@ -4367,7 +4367,7 @@ struct StartupFeatureBindingSummary {
 }
 
 impl StartupFeatureBindingSummary {
-    fn position_history_total(self) -> usize {
+    fn position_history_total(&self) -> usize {
         self.position_history_save + self.position_history_clear + self.position_history_mode
     }
 }
