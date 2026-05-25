@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use crate::key_chord::KeyChord;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -46,6 +47,7 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
         audit_explicit_path(path, &path_set, &mut report);
     }
     audit_key_binding_aliases(&value, &mut report);
+    audit_key_binding_duplicates(&value, &mut report);
 
     for path in &paths {
         if is_explicitly_audited_path(path, &path_set) || is_known_active_path(path) {
@@ -84,6 +86,55 @@ fn audit_key_binding_aliases(value: &toml::Value, report: &mut ConfigAuditReport
                 "Use \"ui_hint_mode\" for UI hint mode bindings.",
             ));
         }
+    }
+}
+
+fn audit_key_binding_duplicates(value: &toml::Value, report: &mut ConfigAuditReport) {
+    let Some(bindings) = value.get("key_bindings").and_then(toml::Value::as_array) else {
+        return;
+    };
+
+    let mut chord_indexes: HashMap<KeyChord, Vec<usize>> = HashMap::new();
+    for (index, binding) in bindings.iter().enumerate() {
+        let Some(items) = binding.as_array() else {
+            continue;
+        };
+        let Some(chord_str) = items.first().and_then(toml::Value::as_str) else {
+            continue;
+        };
+        let Ok(chord) = KeyChord::parse(chord_str) else {
+            continue;
+        };
+        chord_indexes.entry(chord).or_default().push(index);
+    }
+
+    let mut duplicates: Vec<(String, Vec<usize>)> = chord_indexes
+        .into_iter()
+        .filter_map(|(chord, indexes)| {
+            if indexes.len() > 1 {
+                Some((chord.to_string(), indexes))
+            } else {
+                None
+            }
+        })
+        .collect();
+    duplicates.sort_by(|left, right| left.0.cmp(&right.0));
+
+    for (chord, indexes) in duplicates {
+        let binding_refs = indexes
+            .iter()
+            .map(|index| format!("key_bindings[{index}]"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        report.warnings.push(ConfigAuditWarning {
+            path: "key_bindings".to_string(),
+            severity: ConfigAuditSeverity::Warning,
+            message: format!(
+                "Duplicate key chord '{chord}' appears in multiple bindings ({binding_refs}); later entry wins."
+            ),
+            suggestion: "Use unique chords in key_bindings to avoid unintentional overrides."
+                .to_string(),
+        });
     }
 }
 
@@ -627,6 +678,66 @@ mod tests {
                 .any(|warning| warning.message.contains("Unknown config path")),
             "unexpected unknown-path warnings: {:?}",
             report.warnings
+        );
+    }
+
+    #[test]
+    fn audit_warns_on_duplicate_key_chords() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+                ["I", "wheel_left"],
+                ["I", "wheel_speed_down"],
+                ["O", "wheel_right"],
+            ]
+            "#,
+        );
+
+        let duplicate_warning = report
+            .warnings
+            .iter()
+            .find(|warning| warning.path == "key_bindings" && warning.message.contains("Duplicate key chord"))
+            .expect("expected duplicate key chord warning");
+        assert!(duplicate_warning.message.contains("later entry wins"));
+        assert!(duplicate_warning.message.contains("key_bindings[0]"));
+        assert!(duplicate_warning.message.contains("key_bindings[1]"));
+    }
+
+    #[test]
+    fn audit_does_not_warn_for_unique_key_chords() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+                ["I", "wheel_left"],
+                ["B", "wheel_speed_down"],
+                ["O", "wheel_right"],
+            ]
+            "#,
+        );
+
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|warning| warning.path == "key_bindings"
+                    && warning.message.contains("Duplicate key chord")),
+            "unexpected duplicate warning: {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn audit_duplicate_key_chord_warning_text_is_stable_for_regression_fixture() {
+        let report = audit_config_toml(include_str!("../tests/fixtures/config_duplicate_wheel_chord.toml"));
+
+        let warning = report
+            .warnings
+            .iter()
+            .find(|warning| warning.path == "key_bindings")
+            .expect("expected duplicate warning for regression fixture");
+        assert_eq!(
+            warning.message,
+            "Duplicate key chord 'I' appears in multiple bindings (key_bindings[0], key_bindings[1]); later entry wins."
         );
     }
 

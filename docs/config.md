@@ -4,6 +4,21 @@ This is the canonical reference for `config.toml`. Paths marked Active are read 
 
 Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 
+## Key Binding Example (Wheel + Wheel Speed)
+
+Example layout using vertical wheel + wheel-speed controls (with horizontal wheel bindings intentionally disabled):
+
+```toml
+key_bindings = [
+  ["W", "wheel_up"],
+  ["R", "wheel_down"],
+  # ["I", "wheel_left"],
+  # ["O", "wheel_right"],
+  ["U", "wheel_speed_up"],
+  ["I", "wheel_speed_down"],
+]
+```
+
 ## Config Paths
 
 | Config path | Type | Default | Connected? | Status | Notes |

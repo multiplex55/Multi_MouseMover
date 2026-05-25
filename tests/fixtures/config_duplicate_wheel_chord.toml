@@ -1,0 +1,4 @@
+key_bindings = [
+  ["I", "wheel_left"],
+  ["I", "wheel_speed_down"],
+]
