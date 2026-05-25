@@ -348,6 +348,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::SlowMouse => {
                 // println!("[DEBUG] SlowMouse triggered - No acceleration");
             }
+            Action::SurgicalMode => {}
             Action::ReloadConfig => self.push_config_reload_notification(),
             Action::JumpMode
             | Action::JumpModeProfile(_)
@@ -2135,24 +2136,24 @@ mod tests {
 
     #[test]
     fn surgical_mode_precedence_over_slow_and_normal() {
-        let mut config = config_with_speed_defaults();
+        let mut config = test_config();
         config.surgical_mode.enabled = true;
         config.surgical_mode.speed_px = 2;
         config.slow_mouse.strategy = crate::SlowMouseStrategy::Fixed;
         config.slow_mouse.fixed_speed = 5;
-        let mut mouse = MouseMaster::new_with_backend(config, MockMouseBackend::default());
-        let actions = actions([Action::MoveRight, Action::SlowMouse, Action::SurgicalMode]);
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let actions = actions(&[Action::MoveRight, Action::SlowMouse, Action::SurgicalMode]);
         let tick = mouse.tick_movement(&actions, Duration::from_millis(8));
         assert_eq!(tick.speed, 2);
     }
 
     #[test]
     fn surgical_mode_fixed_speed_invariant() {
-        let mut config = config_with_speed_defaults();
+        let mut config = test_config();
         config.surgical_mode.enabled = true;
         config.surgical_mode.speed_px = 3;
-        let mut mouse = MouseMaster::new_with_backend(config, MockMouseBackend::default());
-        let actions = actions([Action::MoveRight, Action::SurgicalMode]);
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let actions = actions(&[Action::MoveRight, Action::SurgicalMode]);
         let a = mouse.tick_movement(&actions, Duration::from_millis(8));
         let b = mouse.tick_movement(&actions, Duration::from_millis(8));
         assert_eq!(a.speed, 3);
@@ -2162,14 +2163,14 @@ mod tests {
 
     #[test]
     fn surgical_mode_resets_acceleration_state() {
-        let mut config = config_with_speed_defaults();
+        let mut config = test_config();
         config.surgical_mode.enabled = true;
         config.surgical_mode.speed_px = 2;
-        let mut mouse = MouseMaster::new_with_backend(config, MockMouseBackend::default());
-        let normal = actions([Action::MoveRight]);
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let normal = actions(&[Action::MoveRight]);
         mouse.tick_movement(&normal, Duration::from_millis(8));
         assert!(mouse.acceleration_counter > 0);
-        let surgical = actions([Action::MoveRight, Action::SurgicalMode]);
+        let surgical = actions(&[Action::MoveRight, Action::SurgicalMode]);
         mouse.tick_movement(&surgical, Duration::from_millis(8));
         assert_eq!(mouse.acceleration_counter, 0);
     }
