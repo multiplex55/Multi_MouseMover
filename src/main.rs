@@ -5821,7 +5821,9 @@ enabled = true",
             },
             Case {
                 name: "window_jump",
-                config_toml: "[window_jump]
+                config_toml: r#"key_bindings = []
+
+[window_jump]
 enabled = true",
                 expected_substring:
                     "window_jump.enabled=true but no window-jump action bindings were found",
@@ -5926,7 +5928,7 @@ enabled = true",
         assert!(summary.contains("features: [enabled, bindings]"));
         assert!(summary.contains("surgical_mode: enabled=false bindings=0"));
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
-        assert!(summary.contains("window_jump: enabled=true bindings=0"));
+        assert!(summary.contains("window_jump: enabled=true bindings=6"));
         assert!(summary
             .contains("position_history: enabled=true bindings=save:0 clear:0 mode:0 total:0"));
         assert!(summary.contains("warnings=1"));
