@@ -51,7 +51,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Mutex, RwLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use std::{env, error::Error, fs, io};
+use std::{env, error::Error, fs};
 use ui_hint_overlay::{build_ui_hint_loading_view, build_ui_hint_overlay_view, UiHintOverlay};
 use ui_hints::{build_ui_hint_targets, UiHintInputUpdate, UiHintSession};
 use windows::Win32::Foundation::*;
@@ -2279,7 +2279,13 @@ fn load_bookmark_runtime(
     config_path: &Path,
 ) -> Result<BookmarkRuntime, Box<dyn Error>> {
     let bookmark_path = resolve_bookmarks_path(config_path, Path::new(&config.bookmarks.file));
-    let (store, warning) = BookmarkStore::load(&bookmark_path, config.bookmarks.slot_count)?;
+    let slot_count = u8::try_from(config.bookmarks.slot_count).map_err(|_| {
+        format!(
+            "bookmarks.slot_count out of range: {}",
+            config.bookmarks.slot_count
+        )
+    })?;
+    let (store, warning) = BookmarkStore::load(&bookmark_path, slot_count)?;
     if let Some(w) = warning {
         eprintln!("[bookmarks] {}", w.message);
     }
