@@ -4923,7 +4923,12 @@ mod tests {
                 let _ = app_state.enter_jump_mode(
                     &JumpConfig::default(),
                     FinalAdjustConfig::default(),
-                    JumpRegion::new(0, 0, 100, 100),
+                    JumpRegion {
+                        left: 0,
+                        top: 0,
+                        width: 100,
+                        height: 100,
+                    },
                     activation_key,
                 );
             }
