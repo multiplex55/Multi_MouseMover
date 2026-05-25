@@ -7,15 +7,17 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
     COINIT_APARTMENTTHREADED,
 };
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
     IUIAutomationElementArray, TreeScope_Children, TreeScope_Descendants, UIA_ButtonControlTypeId,
     UIA_CheckBoxControlTypeId, UIA_ComboBoxControlTypeId, UIA_ControlTypePropertyId,
-    UIA_EditControlTypeId, UIA_HyperlinkControlTypeId, UIA_InvokePatternId,
-    UIA_IsContentElementPropertyId, UIA_IsControlElementPropertyId, UIA_IsEnabledPropertyId,
-    UIA_IsKeyboardFocusablePropertyId, UIA_IsOffscreenPropertyId, UIA_ListItemControlTypeId,
-    UIA_MenuItemControlTypeId, UIA_RadioButtonControlTypeId, UIA_SelectionItemPatternId,
-    UIA_TabItemControlTypeId, UIA_TreeItemControlTypeId, UIA_ValuePatternId,
+    UIA_EditControlTypeId, UIA_HyperlinkControlTypeId, UIA_IsContentElementPropertyId,
+    UIA_IsControlElementPropertyId, UIA_IsEnabledPropertyId,
+    UIA_IsInvokePatternAvailablePropertyId, UIA_IsKeyboardFocusablePropertyId,
+    UIA_IsOffscreenPropertyId, UIA_IsSelectionItemPatternAvailablePropertyId,
+    UIA_IsValuePatternAvailablePropertyId, UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId,
+    UIA_RadioButtonControlTypeId, UIA_TabItemControlTypeId, UIA_TreeItemControlTypeId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
@@ -87,32 +89,49 @@ impl Drop for ComGuard {
     }
 }
 
+fn bool_variant(value: bool) -> VARIANT {
+    VARIANT::from(value)
+}
+
+fn i32_variant(value: i32) -> VARIANT {
+    VARIANT::from(value)
+}
+
 fn build_interactive_condition(
     automation: &IUIAutomation,
 ) -> Result<IUIAutomationCondition, UiHintQueryError> {
     unsafe {
         let enabled = automation
-            .CreatePropertyCondition(UIA_IsEnabledPropertyId, true.into())
+            .CreatePropertyCondition(UIA_IsEnabledPropertyId, &bool_variant(true))
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let visible = automation
-            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, false.into())
+            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, &bool_variant(false))
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let focusable = automation
-            .CreatePropertyCondition(UIA_IsKeyboardFocusablePropertyId, true.into())
+            .CreatePropertyCondition(UIA_IsKeyboardFocusablePropertyId, &bool_variant(true))
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let is_control = automation
-            .CreatePropertyCondition(UIA_IsControlElementPropertyId, true.into())
+            .CreatePropertyCondition(UIA_IsControlElementPropertyId, &bool_variant(true))
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let is_content = automation
-            .CreatePropertyCondition(UIA_IsContentElementPropertyId, true.into())
+            .CreatePropertyCondition(UIA_IsContentElementPropertyId, &bool_variant(true))
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
 
         let interactive_pattern = or_conditions(
             automation,
             &[
-                automation.CreatePropertyCondition(UIA_InvokePatternId, true.into()),
-                automation.CreatePropertyCondition(UIA_SelectionItemPatternId, true.into()),
-                automation.CreatePropertyCondition(UIA_ValuePatternId, true.into()),
+                automation.CreatePropertyCondition(
+                    UIA_IsInvokePatternAvailablePropertyId,
+                    &bool_variant(true),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_IsSelectionItemPatternAvailablePropertyId,
+                    &bool_variant(true),
+                ),
+                automation.CreatePropertyCondition(
+                    UIA_IsValuePatternAvailablePropertyId,
+                    &bool_variant(true),
+                ),
             ],
         )?;
 
@@ -121,43 +140,43 @@ fn build_interactive_condition(
             &[
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_ButtonControlTypeId.0.into(),
+                    &i32_variant(UIA_ButtonControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_HyperlinkControlTypeId.0.into(),
+                    &i32_variant(UIA_HyperlinkControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_EditControlTypeId.0.into(),
+                    &i32_variant(UIA_EditControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_ComboBoxControlTypeId.0.into(),
+                    &i32_variant(UIA_ComboBoxControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_ListItemControlTypeId.0.into(),
+                    &i32_variant(UIA_ListItemControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_MenuItemControlTypeId.0.into(),
+                    &i32_variant(UIA_MenuItemControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_CheckBoxControlTypeId.0.into(),
+                    &i32_variant(UIA_CheckBoxControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_RadioButtonControlTypeId.0.into(),
+                    &i32_variant(UIA_RadioButtonControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_TabItemControlTypeId.0.into(),
+                    &i32_variant(UIA_TabItemControlTypeId.0),
                 ),
                 automation.CreatePropertyCondition(
                     UIA_ControlTypePropertyId,
-                    UIA_TreeItemControlTypeId.0.into(),
+                    &i32_variant(UIA_TreeItemControlTypeId.0),
                 ),
             ],
         )?;
