@@ -94,7 +94,7 @@ fn audit_key_binding_duplicates(value: &toml::Value, report: &mut ConfigAuditRep
         return;
     };
 
-    let mut chord_indexes: HashMap<KeyChord, Vec<usize>> = HashMap::new();
+    let mut chord_indexes: HashMap<KeyChord, (String, Vec<usize>)> = HashMap::new();
     for (index, binding) in bindings.iter().enumerate() {
         let Some(items) = binding.as_array() else {
             continue;
@@ -105,14 +105,17 @@ fn audit_key_binding_duplicates(value: &toml::Value, report: &mut ConfigAuditRep
         let Ok(chord) = KeyChord::parse(chord_str) else {
             continue;
         };
-        chord_indexes.entry(chord).or_default().push(index);
+        chord_indexes
+            .entry(chord)
+            .and_modify(|(_, indexes)| indexes.push(index))
+            .or_insert_with(|| (chord_str.to_string(), vec![index]));
     }
 
     let mut duplicates: Vec<(String, Vec<usize>)> = chord_indexes
         .into_iter()
-        .filter_map(|(chord, indexes)| {
+        .filter_map(|(_, (chord_display, indexes))| {
             if indexes.len() > 1 {
-                Some((chord.to_string(), indexes))
+                Some((chord_display, indexes))
             } else {
                 None
             }
