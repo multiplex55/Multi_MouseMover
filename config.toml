@@ -20,11 +20,6 @@ acceleration = 2
 acceleration_rate = 1
 top_speed = 6
 
-# Deprecated compatibility fallback for older configs. grid_size is used only
-# when [jump.coarse] is missing or has width/height set to 0x0. Prefer
-# [jump.coarse].width and [jump.coarse].height in new configs.
-grid_size = { width = 10, height = 10 }
-
 # ---------------------------------------------------------------------------
 # Key and system bindings
 # ---------------------------------------------------------------------------

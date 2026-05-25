@@ -504,11 +504,13 @@ pub struct TooltipOverlayConfig {
 pub enum UiHintOverflowBehavior {
     #[default]
     IncreaseLength,
+    Cap,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UiHintTargetPoint {
+    Center,
     #[default]
     ClickablePoint,
 }
@@ -518,17 +520,30 @@ pub enum UiHintTargetPoint {
 pub enum UiHintAfterSelect {
     #[default]
     Move,
+    MoveAndLeftClick,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(default)]
 pub struct UiHintsOverlayConfig {
     pub font_scale: f32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub dim_non_matching: bool,
+    pub show_background: bool,
+    pub show_border: bool,
 }
 
 impl Default for UiHintsOverlayConfig {
     fn default() -> Self {
-        Self { font_scale: 1.0 }
+        Self {
+            font_scale: 1.0,
+            offset_x: 0,
+            offset_y: 0,
+            dim_non_matching: true,
+            show_background: true,
+            show_border: true,
+        }
     }
 }
 
@@ -3158,11 +3173,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     let view = build_ui_hint_overlay_view(
                         session,
                         config.font_scale,
-                        0,
-                        0,
-                        true,
-                        true,
-                        true,
+                        config.offset_x,
+                        config.offset_y,
+                        config.dim_non_matching,
+                        config.show_background,
+                        config.show_border,
                     );
                     UI_HINT_OVERLAY.with(|overlay| {
                         let mut overlay = overlay.borrow_mut();
@@ -3182,12 +3197,17 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         .config
                         .ui_hints
                         .after_select;
-                    let _ = after_select;
-                    ACTION_HANDLER
-                        .write()
-                        .unwrap()
-                        .mouse_master
-                        .move_mouse_to(target.target_x, target.target_y);
+                    {
+                        let mut handler = ACTION_HANDLER.write().unwrap();
+                        handler
+                            .mouse_master
+                            .move_mouse_to(target.target_x, target.target_y);
+                        if matches!(after_select, UiHintAfterSelect::MoveAndLeftClick)
+                            && !handler.mouse_master.left_button_held()
+                        {
+                            handler.mouse_master.handle_action(Action::LeftClick);
+                        }
+                    }
                     exit_ui_hint_mode(UiHintExitReason::Completed);
                 }
                 UiHintInputUpdate::Consumed | UiHintInputUpdate::Invalid => {}
@@ -3222,10 +3242,18 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             let hint_config = ui_hints::UiHintConfig {
                 selection_keys: config.selection_keys.chars().collect(),
                 label_length: config.label_length.max(1) as usize,
-                overflow_behavior: ui_hints::UiHintOverflowBehavior::IncreaseLength,
+                overflow_behavior: match config.overflow_behavior {
+                    UiHintOverflowBehavior::IncreaseLength => {
+                        ui_hints::UiHintOverflowBehavior::IncreaseLength
+                    }
+                    UiHintOverflowBehavior::Cap => ui_hints::UiHintOverflowBehavior::Cap,
+                },
                 max_hints: Some(config.max_hints.max(1) as usize),
                 min_hint_spacing_px: config.min_hint_spacing_px,
-                target_point: ui_hints::UiHintTargetPoint::ClickablePoint,
+                target_point: match config.target_point {
+                    UiHintTargetPoint::Center => ui_hints::UiHintTargetPoint::Center,
+                    UiHintTargetPoint::ClickablePoint => ui_hints::UiHintTargetPoint::ClickablePoint,
+                },
             };
             let discovered_count = elements.len();
             let raw_elements: Vec<ui_hints::RawUiElement> = elements
@@ -3291,11 +3319,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             let view = build_ui_hint_overlay_view(
                 &session,
                 overlay_cfg.font_scale,
-                0,
-                0,
-                true,
-                true,
-                true,
+                overlay_cfg.offset_x,
+                overlay_cfg.offset_y,
+                overlay_cfg.dim_non_matching,
+                overlay_cfg.show_background,
+                overlay_cfg.show_border,
             );
             *UI_HINT_SESSION.lock().unwrap() = Some(session);
             APP_STATE
@@ -5897,9 +5925,17 @@ mod tests {
             label_length = 99
             max_hints = 5000
             min_hint_spacing_px = -10
+            overflow_behavior = "cap"
+            target_point = "center"
+            after_select = "move_and_left_click"
 
             [ui_hints.overlay]
             font_scale = 10.0
+            offset_x = 7
+            offset_y = -9
+            dim_non_matching = false
+            show_background = false
+            show_border = false
             "#,
         );
 
@@ -5907,7 +5943,18 @@ mod tests {
         assert_eq!(config.ui_hints.label_length, 5);
         assert_eq!(config.ui_hints.max_hints, 2000);
         assert_eq!(config.ui_hints.min_hint_spacing_px, 0);
+        assert_eq!(config.ui_hints.overflow_behavior, UiHintOverflowBehavior::Cap);
+        assert_eq!(config.ui_hints.target_point, UiHintTargetPoint::Center);
+        assert_eq!(
+            config.ui_hints.after_select,
+            UiHintAfterSelect::MoveAndLeftClick
+        );
         assert_eq!(config.ui_hints.overlay.font_scale, 4.0);
+        assert_eq!(config.ui_hints.overlay.offset_x, 7);
+        assert_eq!(config.ui_hints.overlay.offset_y, -9);
+        assert!(!config.ui_hints.overlay.dim_non_matching);
+        assert!(!config.ui_hints.overlay.show_background);
+        assert!(!config.ui_hints.overlay.show_border);
     }
 
     #[test]

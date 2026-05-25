@@ -731,6 +731,11 @@ impl AppState {
             return;
         }
 
+        if self.is_toggle_active_key_down_event(&event) {
+            self.enqueue_command(AppCommand::ToggleActiveMode);
+            return;
+        }
+
         if self.is_ui_hint_active() || self.is_ui_hint_querying() {
             if matches!(
                 action.as_ref(),
@@ -758,11 +763,6 @@ impl AppState {
             }
 
             self.enqueue_command(AppCommand::GridInput(event, action));
-            return;
-        }
-
-        if self.is_toggle_active_key_down_event(&event) {
-            self.enqueue_command(AppCommand::ToggleActiveMode);
             return;
         }
 
