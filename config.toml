@@ -90,7 +90,12 @@ key_bindings = [
     ["Alt+Shift+D", "step_move_large_down"],
     ["Alt+Shift+F", "step_move_large_right"],
     ["/", "show_help"],
-    ["0", "ui_hint_mode"]
+    ["0", "ui_hint_mode"],
+
+    # Position history (chosen to avoid overlap with existing bindings).
+    ["RightAlt+F13", "save_mouse_position"],
+    ["RightAlt+F14", "clear_mouse_positions"],
+    ["RightAlt+F15", "position_history_mode"]
 ]
 
 [ui_hints]
