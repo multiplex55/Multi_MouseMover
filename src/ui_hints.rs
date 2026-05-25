@@ -1,4 +1,8 @@
 use crate::{jump_grid::index_to_code_with_keys, keyboard::VirtualKey};
+#[cfg(not(test))]
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiHintOverflowBehavior {
@@ -80,7 +84,7 @@ impl UiHintSession {
             _ => {}
         }
 
-        let Some(ch) = alpha_key_to_char(key) else {
+        let Some(ch) = hint_key_to_char(key) else {
             return UiHintInputUpdate::Consumed;
         };
 
@@ -157,19 +161,23 @@ pub fn build_ui_hint_targets(
     let mut elements: Vec<RawUiElement> = raw_elements
         .into_iter()
         .filter(|e| e.width > 0 && e.height > 0)
+        .filter(|e| point_in_virtual_screen(center_of(e)))
         .collect();
-
-    elements.sort_by_key(|e| (e.top, e.left, e.width * e.height, e.width, e.height));
+    elements.sort_by_key(|e| (e.top, e.left, e.width * e.height, e.width, e.height, e.id));
 
     let mut deduped = Vec::new();
     for element in elements {
         let center = center_of(&element);
+        let duplicate_bounds = deduped.iter().any(|existing: &RawUiElement| {
+            (existing.left, existing.top, existing.width, existing.height)
+                == (element.left, element.top, element.width, element.height)
+        });
         let too_close = deduped.iter().any(|existing: &RawUiElement| {
             let other_center = center_of(existing);
             squared_distance(center, other_center)
                 < (config.min_hint_spacing_px * config.min_hint_spacing_px) as i64
         });
-        if !too_close {
+        if !too_close && !duplicate_bounds {
             deduped.push(element);
         }
     }
@@ -257,7 +265,7 @@ fn squared_distance(a: (i32, i32), b: (i32, i32)) -> i64 {
     dx * dx + dy * dy
 }
 
-fn alpha_key_to_char(key: VirtualKey) -> Option<char> {
+fn hint_key_to_char(key: VirtualKey) -> Option<char> {
     match key {
         VirtualKey::A => Some('A'),
         VirtualKey::B => Some('B'),
@@ -285,8 +293,51 @@ fn alpha_key_to_char(key: VirtualKey) -> Option<char> {
         VirtualKey::X => Some('X'),
         VirtualKey::Y => Some('Y'),
         VirtualKey::Z => Some('Z'),
+        VirtualKey::Num0 => Some('0'),
+        VirtualKey::Num1 => Some('1'),
+        VirtualKey::Num2 => Some('2'),
+        VirtualKey::Num3 => Some('3'),
+        VirtualKey::Num4 => Some('4'),
+        VirtualKey::Num5 => Some('5'),
+        VirtualKey::Num6 => Some('6'),
+        VirtualKey::Num7 => Some('7'),
+        VirtualKey::Num8 => Some('8'),
+        VirtualKey::Num9 => Some('9'),
+        VirtualKey::Oem1 => Some(';'),
+        VirtualKey::OemPlus => Some('='),
+        VirtualKey::OemComma => Some(','),
+        VirtualKey::OemMinus => Some('-'),
+        VirtualKey::OemPeriod => Some('.'),
+        VirtualKey::Oem2 => Some('/'),
+        VirtualKey::Oem3 => Some('`'),
+        VirtualKey::Oem4 => Some('['),
+        VirtualKey::Oem5 => Some('\\'),
+        VirtualKey::Oem6 => Some(']'),
+        VirtualKey::Oem7 => Some('\''),
         _ => None,
     }
+}
+
+fn point_in_virtual_screen(point: (i32, i32)) -> bool {
+    let (left, top, width, height) = virtual_screen_bounds();
+    point.0 >= left && point.1 >= top && point.0 < left + width && point.1 < top + height
+}
+
+#[cfg(not(test))]
+fn virtual_screen_bounds() -> (i32, i32, i32, i32) {
+    unsafe {
+        (
+            GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        )
+    }
+}
+
+#[cfg(test)]
+fn virtual_screen_bounds() -> (i32, i32, i32, i32) {
+    (-10_000, -10_000, 20_000, 20_000)
 }
 
 #[cfg(test)]
@@ -392,6 +443,41 @@ mod tests {
             UiHintInputUpdate::Consumed
         );
         assert_eq!(session.input, "");
+    }
+
+    #[test]
+    fn supports_custom_symbol_keyset_input() {
+        let mut session = UiHintSession::new(vec![target(1, "A;")], vec!['A', ';']).unwrap();
+        assert_eq!(session.handle_key(VirtualKey::A), UiHintInputUpdate::PrefixChanged);
+        assert_eq!(
+            session.handle_key(VirtualKey::Oem1),
+            UiHintInputUpdate::Completed {
+                target: session.targets[0].clone()
+            }
+        );
+    }
+
+    #[test]
+    fn supports_digit_keyset_input() {
+        let mut session = UiHintSession::new(vec![target(1, "12")], vec!['1', '2']).unwrap();
+        assert_eq!(session.handle_key(VirtualKey::Num1), UiHintInputUpdate::PrefixChanged);
+        assert_eq!(
+            session.handle_key(VirtualKey::Num2),
+            UiHintInputUpdate::Completed {
+                target: session.targets[0].clone()
+            }
+        );
+    }
+
+    #[test]
+    fn collapses_duplicate_bounds_and_sorts_deterministically() {
+        let config = sample_config();
+        let targets = build_ui_hint_targets(
+            vec![raw(5, 10, 10, 10, 10, None), raw(2, 10, 10, 10, 10, None), raw(3, 20, 10, 10, 10, None)],
+            &config,
+        );
+        assert_eq!(targets.iter().map(|t| t.id).collect::<Vec<_>>(), vec![5, 3]);
+        assert_eq!(targets.iter().map(|t| t.label.clone()).collect::<Vec<_>>(), vec!["AA", "AB"]);
     }
 
     #[test]
