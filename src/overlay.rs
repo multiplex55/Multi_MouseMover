@@ -115,6 +115,7 @@ pub struct StatusOverlayFields {
     pub wheel_speed: bool,
     pub flash: bool,
     pub final_adjust: bool,
+    pub bookmark_mode: bool,
 }
 
 impl Default for StatusOverlayFields {
@@ -129,6 +130,7 @@ impl Default for StatusOverlayFields {
             wheel_speed: true,
             flash: true,
             final_adjust: true,
+            bookmark_mode: true,
         }
     }
 }
@@ -221,6 +223,9 @@ fn compact_status_text(
     snapshot: &IndicatorSnapshot,
     fields: StatusOverlayFields,
 ) -> Option<String> {
+    if fields.bookmark_mode && snapshot.bookmark_mode_active {
+        return Some("BOOKMARK MODE | Press 1-9 to save | Esc cancel".to_string());
+    }
     let mut parts = Vec::new();
     if fields.active {
         parts.push(
@@ -333,6 +338,7 @@ fn snapshot_from_state(state: IndicatorState) -> IndicatorSnapshot {
         default_wheel_speed: 0,
         flash_reason: IndicatorFlashReason::None,
         final_adjust_active: false,
+        bookmark_mode_active: false,
     }
 }
 
