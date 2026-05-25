@@ -362,7 +362,9 @@ impl<B: MouseBackend> MouseMaster<B> {
             | Action::ClearMousePositions
             | Action::PositionHistoryMode
             | Action::BookmarkMode
-            | Action::BookmarkSlot(_) => {}
+            | Action::BookmarkSlot(_)
+            | Action::ClearBookmarkSlot(_)
+            | Action::ClearAllBookmarks => {}
             Action::Disable => self.set_active_mode(false),
             Action::PanicReset => {
                 self.hard_reset_runtime();

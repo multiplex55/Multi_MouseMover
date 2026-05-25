@@ -78,6 +78,8 @@ pub enum Action {
     PositionHistoryMode,
     BookmarkMode,
     BookmarkSlot(u8),
+    ClearBookmarkSlot(u8),
+    ClearAllBookmarks,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -208,14 +210,33 @@ impl Action {
             "clear_mouse_positions" => Some(Self::ClearMousePositions),
             "position_history_mode" => Some(Self::PositionHistoryMode),
             "bookmark_mode" => Some(Self::BookmarkMode),
+            "clear_all_bookmarks" => Some(Self::ClearAllBookmarks),
             action if action.starts_with("bookmark_slot_") => {
                 action
                     .trim_start_matches("bookmark_slot_")
                     .parse::<u8>()
                     .ok()
-                    .filter(|slot| (1..=99).contains(slot))
+                    .filter(|slot| (1..=9).contains(slot))
                     .map(Self::BookmarkSlot)
             }
+            action if action.starts_with("bookmark_") => action
+                .trim_start_matches("bookmark_")
+                .parse::<u8>()
+                .ok()
+                .filter(|slot| (1..=9).contains(slot))
+                .map(Self::BookmarkSlot),
+            action if action.starts_with("jump_to_bookmark_") => action
+                .trim_start_matches("jump_to_bookmark_")
+                .parse::<u8>()
+                .ok()
+                .filter(|slot| (1..=9).contains(slot))
+                .map(Self::BookmarkSlot),
+            action if action.starts_with("clear_bookmark_") => action
+                .trim_start_matches("clear_bookmark_")
+                .parse::<u8>()
+                .ok()
+                .filter(|slot| (1..=9).contains(slot))
+                .map(Self::ClearBookmarkSlot),
             action
                 if action.starts_with("movement_profile:")
                     || action.starts_with("mouse_profile:")
@@ -389,6 +410,10 @@ mod tests {
             ("ui_hints", Action::UiHintMode),
             ("show_ui_hints", Action::UiHintMode),
             ("hint_mode", Action::UiHintMode),
+            ("bookmark_1", Action::BookmarkSlot(1)),
+            ("jump_to_bookmark_1", Action::BookmarkSlot(1)),
+            ("clear_bookmark_1", Action::ClearBookmarkSlot(1)),
+            ("clear_all_bookmarks", Action::ClearAllBookmarks),
         ];
 
         for (input, expected) in cases {
@@ -604,6 +629,39 @@ mod tests {
             Action::from_string("position_history_mode"),
             Some(Action::PositionHistoryMode)
         );
+    }
+
+    #[test]
+    fn parses_bookmark_actions() {
+        assert_eq!(Action::from_string("bookmark_mode"), Some(Action::BookmarkMode));
+        assert_eq!(
+            Action::from_string("bookmark_slot_1"),
+            Some(Action::BookmarkSlot(1))
+        );
+        assert_eq!(
+            Action::from_string("bookmark_slot_9"),
+            Some(Action::BookmarkSlot(9))
+        );
+        assert_eq!(Action::from_string("bookmark_1"), Some(Action::BookmarkSlot(1)));
+        assert_eq!(
+            Action::from_string("jump_to_bookmark_1"),
+            Some(Action::BookmarkSlot(1))
+        );
+    }
+
+    #[test]
+    fn bookmark_actions_are_one_shot_not_continuous() {
+        let actions = [
+            Action::BookmarkMode,
+            Action::BookmarkSlot(1),
+            Action::ClearBookmarkSlot(1),
+            Action::ClearAllBookmarks,
+        ];
+        for action in actions {
+            assert!(!action.is_continuous(), "{action:?}");
+            assert!(!action.is_movement(), "{action:?}");
+            assert!(!action.is_wheel_direction(), "{action:?}");
+        }
     }
 }
 
