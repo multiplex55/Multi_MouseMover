@@ -48,8 +48,8 @@ key_bindings = [
     ["M", "mouse_speed_down"],
     [",", "mouse_speed_up"],
     # Wheel speed controls.
-    ["U", "wheel_speed_up"],
-    ["I", "wheel_speed_down"],
+    ["U", "wheel_speed_down"],
+    ["I", "wheel_speed_up"],
     ["RightAlt+C", "movement_profile_next"],
     ["RightAlt+X", "movement_profile_previous"],
     ["RightAlt+V", "wheel_profile_next"],
