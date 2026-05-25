@@ -476,7 +476,7 @@ mod tests {
             vec![raw(5, 10, 10, 10, 10, None), raw(2, 10, 10, 10, 10, None), raw(3, 20, 10, 10, 10, None)],
             &config,
         );
-        assert_eq!(targets.iter().map(|t| t.id).collect::<Vec<_>>(), vec![5, 3]);
+        assert_eq!(targets.iter().map(|t| t.id).collect::<Vec<_>>(), vec![2, 3]);
         assert_eq!(targets.iter().map(|t| t.label.clone()).collect::<Vec<_>>(), vec!["AA", "AB"]);
     }
 
@@ -511,7 +511,7 @@ mod tests {
         let targets = generate_debug_fake_targets(&config);
         assert_eq!(
             targets.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
-            vec!["AA", "AB", "AC", "AD", "AE"]
+            vec!["AA", "AB", "AC", "BA", "BB"]
         );
         assert_eq!(targets[0].target_x, 960);
         assert_eq!(targets[0].target_y, 540);
@@ -531,7 +531,7 @@ mod tests {
             UiHintInputUpdate::PrefixChanged
         );
         assert_eq!(
-            session.handle_key(VirtualKey::E),
+            session.handle_key(VirtualKey::B),
             UiHintInputUpdate::Completed {
                 target: session.targets[4].clone()
             }
