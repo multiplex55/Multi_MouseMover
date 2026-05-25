@@ -109,6 +109,7 @@ pub struct StatusOverlayFields {
     pub active: bool,
     pub drag: bool,
     pub slow: bool,
+    pub surgical: bool,
     pub jump: bool,
     pub mouse_speed: bool,
     pub wheel_speed: bool,
@@ -122,6 +123,7 @@ impl Default for StatusOverlayFields {
             active: true,
             drag: true,
             slow: true,
+            surgical: true,
             jump: true,
             mouse_speed: true,
             wheel_speed: true,
@@ -267,6 +269,12 @@ fn compact_status_text(
     if fields.slow {
         parts.push(format!("SLW:{}", if snapshot.slow { "ON" } else { "OFF" }));
     }
+    if fields.surgical {
+        parts.push(format!(
+            "SRG:{}",
+            if snapshot.surgical { "ON" } else { "OFF" }
+        ));
+    }
     if parts.is_empty() {
         None
     } else {
@@ -316,6 +324,7 @@ fn snapshot_from_state(state: IndicatorState) -> IndicatorSnapshot {
         app_active: state != IndicatorState::Hidden,
         dragging_left: state == IndicatorState::DraggingLeft,
         slow: state == IndicatorState::ActiveSlow,
+        surgical: false,
         jump_active: state == IndicatorState::JumpMode,
         jump_stage: None,
         mouse_speed: 0,

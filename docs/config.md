@@ -158,7 +158,7 @@ key_bindings = [
 | `status_overlay.mode` | enum string | `"minimal"` | Yes | Active | Status overlay display mode. |
 | `status_overlay.positioning` | enum string | `"cursor"` | Yes | Active | Status overlay placement. |
 | `status_overlay.flash_duration_ms` | integer milliseconds | `700` | Yes | Active | Status overlay flash duration. |
-| `status_overlay.fields.*` | booleans | `true` | Yes | Active | Toggles individual status fields. |
+| `status_overlay.fields.*` | booleans | `true` | Yes | Active | Toggles individual status fields (including `surgical`). |
 | `tooltip_overlay.enabled` | boolean | `true` | Yes | Active | Enables tooltip/help overlays. |
 | `tooltip_overlay.show_temporary_tooltips` | boolean | `true` | Yes | Active | Enables temporary runtime tooltips. |
 | `tooltip_overlay.show_help` | boolean | `true` | Yes | Active | Enables the help overlay. |
@@ -169,7 +169,7 @@ key_bindings = [
 | `tooltip_overlay.help_positioning` | enum string | `"center"` | Yes | Active | Help overlay placement. |
 | `tooltip_overlay.help_width` | integer pixels | `420` | Yes | Active | Help overlay width before clamping. |
 | `tooltip_overlay.help_max_bindings` | integer | `40` | Yes | Active | Maximum bindings shown in help. |
-| `tooltip_overlay.events.*` | booleans | `true` | Yes | Active | Enables tooltip event categories. |
+| `tooltip_overlay.events.*` | booleans | `true` | Yes | Active | Enables tooltip event categories (including `surgical`). |
 | `ui_hints.enabled` | boolean | `true` | Yes | Active | Enables UI hint mode and query workflow. |
 | `ui_hints.debug` | boolean | `false` | Yes | Active | Enables UI hint debug logging. |
 | `ui_hints.debug_fake_targets` | boolean | `false` | Yes | Active | Uses deterministic fake targets instead of UIA query results. |
@@ -357,8 +357,13 @@ show_numbers = false
 | --- | --- | --- | --- | --- | --- |
 | `surgical_mode.enabled` | boolean | `false` | Yes | Active | Enables fixed-speed surgical movement tier. |
 | `surgical_mode.speed_px` | integer | `1` | Yes | Active | Fixed movement speed used when `surgical_mode` action is held. |
-| `surgical_mode.zoom_enabled` | boolean | `false` | Yes | Active | Enables cursor-follow zoom overlay while surgical mode is active. |
+| `surgical_mode.zoom_enabled` | boolean | `false` | Yes | Active | Experimental: tracks surgical zoom intent; full rendered zoom viewport is not currently shown. |
 | `surgical_mode.zoom_scale` | float | `2.0` | Yes | Active | Zoom factor for surgical overlay. |
 | `surgical_mode.zoom_size_px` | integer | `180` | Yes | Active | Surgical overlay square size in pixels. |
 | `surgical_mode.overlay_offset_x` | integer | `24` | Yes | Active | Overlay horizontal offset from cursor. |
 | `surgical_mode.overlay_offset_y` | integer | `24` | Yes | Active | Overlay vertical offset from cursor. |
+
+
+### Surgical behavior semantics
+
+`SurgicalMode` is a **held precision modifier**: movement requires both the surgical key and a movement key. Holding surgical alone produces no cursor movement. While active, movement runs at fixed `surgical_mode.speed_px` with no acceleration ramp.

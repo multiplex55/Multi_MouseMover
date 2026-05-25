@@ -167,6 +167,7 @@ static HOOK_EVENTS_SWALLOWED: AtomicU64 = AtomicU64::new(0);
 static UI_HINT_QUERY_ID: AtomicU64 = AtomicU64::new(0);
 lazy_static! {
     static ref LAST_UI_HINT_COMPLETION: Mutex<Option<UiHintCompletionState>> = Mutex::new(None);
+    static ref LAST_SURGICAL_TOOLTIP_ACTIVE: Mutex<bool> = Mutex::new(false);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -536,6 +537,7 @@ pub struct TooltipOverlayEvents {
     pub drag: bool,
     pub reload: bool,
     pub panic: bool,
+    pub surgical: bool,
     pub ui_hints_query_start: bool,
     pub ui_hints_query_fail: bool,
     pub ui_hints_query_empty: bool,
@@ -551,6 +553,7 @@ impl Default for TooltipOverlayEvents {
             drag: true,
             reload: true,
             panic: true,
+            surgical: true,
             ui_hints_query_start: false,
             ui_hints_query_fail: true,
             ui_hints_query_empty: true,
@@ -2856,6 +2859,7 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
 
     if action.is_continuous() {
         action_handler.process_active_keys(action, is_down);
+        maybe_emit_surgical_tooltip(action_handler, app_state);
         return None;
     }
 
@@ -2917,6 +2921,26 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
         action_handler.execute_action(&action);
     }
     None
+}
+
+fn maybe_emit_surgical_tooltip<B: MouseBackend>(action_handler: &ActionHandler<B>, app_state: &AppState) {
+    let surgical_active = action_handler.active_keys.contains(&Action::SurgicalMode);
+    let mut previous = LAST_SURGICAL_TOOLTIP_ACTIVE.lock().unwrap();
+    if !*previous
+        && surgical_active
+        && ui_hint_tooltip_event_enabled(
+            &action_handler.mouse_master.config.tooltip_overlay,
+            action_handler.mouse_master.config.tooltip_overlay.events.surgical,
+        )
+        && !app_state.help_visible()
+    {
+        help_overlay::show_temporary_tooltip(
+            "Surgical precision",
+            "Held precision modifier active (requires movement key).",
+            Duration::from_millis(700),
+        );
+    }
+    *previous = surgical_active;
 }
 
 fn apply_loaded_config<B: MouseBackend>(
@@ -4364,6 +4388,7 @@ mod tests {
             drag = false
             reload = false
             panic = false
+            surgical = false
             "#,
         );
 
@@ -4379,6 +4404,7 @@ mod tests {
                 drag: false,
                 reload: false,
                 panic: false,
+                surgical: false,
                 ui_hints_query_start: false,
                 ui_hints_query_fail: true,
                 ui_hints_query_empty: true,

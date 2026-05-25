@@ -30,6 +30,7 @@ key_bindings = [
     ["D", "move_down"],
     ["F", "move_right"],
     ["LeftShift", "slow_mouse"],
+    ["B", "surgical_mode"],
 
     ["J", "left_click"],
     ["K", "right_click"],
@@ -387,6 +388,7 @@ active = true
 drag = true
 slow = true
 jump = true
+surgical = true
 mouse_speed = true
 wheel_speed = true
 flash = true
@@ -413,6 +415,7 @@ profile = true
 drag = true
 reload = true
 panic = true
+surgical = true
 ui_hints_query_start = true
 ui_hints_query_fail = true
 ui_hints_query_empty = true
@@ -503,9 +506,11 @@ label_length = 2
 show_numbers = false
 
 [surgical_mode]
-enabled = false
+enabled = true
 speed_px = 1
-zoom_enabled = false
+zoom_enabled = true
+# Experimental: zoom fields are parsed and tracked, but no full rendered
+# zoom viewport is shown unless a complete overlay implementation is enabled.
 zoom_scale = 2.0
 zoom_size_px = 180
 overlay_offset_x = 24
