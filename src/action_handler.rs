@@ -632,17 +632,24 @@ impl<B: MouseBackend> MouseMaster<B> {
         tick
     }
 
-
     fn effective_actions_for_tick(&self, active_actions: &HashSet<Action>) -> HashSet<Action> {
         let mut effective = active_actions.clone();
         if let Some(modifier) = Action::from_string(&self.config.scroll_mode.modifier_action) {
             if self.config.scroll_mode.enabled && active_actions.contains(&modifier) {
                 for movement in active_actions.iter().filter(|a| a.is_movement()) {
                     match movement {
-                        Action::MoveUp => { effective.insert(Action::WheelUp); }
-                        Action::MoveDown => { effective.insert(Action::WheelDown); }
-                        Action::MoveLeft => { effective.insert(Action::WheelLeft); }
-                        Action::MoveRight => { effective.insert(Action::WheelRight); }
+                        Action::MoveUp => {
+                            effective.insert(Action::WheelUp);
+                        }
+                        Action::MoveDown => {
+                            effective.insert(Action::WheelDown);
+                        }
+                        Action::MoveLeft => {
+                            effective.insert(Action::WheelLeft);
+                        }
+                        Action::MoveRight => {
+                            effective.insert(Action::WheelRight);
+                        }
                         _ => {}
                     }
                     effective.remove(movement);
@@ -2620,5 +2627,4 @@ mod tests {
         assert_eq!(mouse.backend.scrolls.len(), 0);
         assert_eq!(mouse.backend.moves.len(), 1);
     }
-
 }

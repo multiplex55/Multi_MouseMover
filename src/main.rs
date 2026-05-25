@@ -15,11 +15,11 @@ mod monitor;
 mod overlay;
 mod position_history;
 mod screen_capture;
-mod zoom_overlay;
 mod ui_hint_overlay;
 mod ui_hints;
 mod window_geometry;
 mod windows_uia;
+mod zoom_overlay;
 
 use action::*;
 use action_handler::*;
@@ -986,7 +986,6 @@ pub struct WheelProfileConfig {
     vertical_multiplier: Option<i32>,
     horizontal_multiplier: Option<i32>,
 }
-
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
@@ -2863,9 +2862,18 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
     if is_down
         && action_handler.mouse_master.config.scroll_mode.enabled
         && action_handler.mouse_master.config.scroll_mode.exit_on_click
-        && matches!(action, Action::LeftClick | Action::RightClick | Action::MiddleClick)
+        && matches!(
+            action,
+            Action::LeftClick | Action::RightClick | Action::MiddleClick
+        )
     {
-        if let Some(modifier) = Action::from_string(&action_handler.mouse_master.config.scroll_mode.modifier_action) {
+        if let Some(modifier) = Action::from_string(
+            &action_handler
+                .mouse_master
+                .config
+                .scroll_mode
+                .modifier_action,
+        ) {
             action_handler.process_active_keys(modifier, false);
         }
     }
@@ -2967,7 +2975,10 @@ fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
             action_handler.mouse_master.config.tooltip_overlay.clone(),
         )
     };
-    let jump_active = APP_STATE.read().unwrap().is_jump_active();
+    let (jump_active, mode_context) = {
+        let app_state = APP_STATE.read().unwrap();
+        (app_state.is_jump_active(), app_state.mode_context())
+    };
     let mut view = help_overlay::help_view_from_bindings(
         KEY_ACTIONS
             .read()
@@ -2975,7 +2986,7 @@ fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
             .entries()
             .map(|(chord, action)| (chord, action.clone())),
     );
-    view.stats = help_stats_from_snapshot(snapshot, slow_active, jump_active);
+    view.stats = help_stats_from_snapshot(snapshot, slow_active, jump_active, mode_context);
     view.help_max_bindings = help_config.help_max_bindings;
     view.config_warnings = recent_config_warnings_for_overlay();
     view
@@ -2985,6 +2996,7 @@ fn help_stats_from_snapshot(
     snapshot: MouseRuntimeSnapshot,
     slow_active: bool,
     jump_active: bool,
+    mode_context: crate::app_state::ModeContext,
 ) -> help_overlay::HelpRuntimeStats {
     help_overlay::HelpRuntimeStats {
         app_mode: snapshot.mode,
@@ -3024,6 +3036,8 @@ fn help_stats_from_snapshot(
         wheel_tick_interval_ms: snapshot.wheel_tick_interval_ms,
         wheel_vertical_multiplier: snapshot.wheel_vertical_multiplier,
         wheel_horizontal_multiplier: snapshot.wheel_horizontal_multiplier,
+        mode_context: format!("{:?}", help_overlay::resolve_help_section(mode_context))
+            .to_lowercase(),
     }
 }
 
@@ -3288,7 +3302,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 overlay.render(&loading);
                 overlay.show();
             });
-            if ui_hint_tooltip_event_enabled(&tooltip_cfg, tooltip_cfg.events.ui_hints_query_start) {
+            if ui_hint_tooltip_event_enabled(&tooltip_cfg, tooltip_cfg.events.ui_hints_query_start)
+            {
                 help_overlay::show_temporary_tooltip(
                     "UI Hints",
                     "Finding controls...",

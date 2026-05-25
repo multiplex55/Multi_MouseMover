@@ -135,6 +135,16 @@ pub enum GridState {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeContext {
+    Inactive,
+    Active,
+    Jump,
+    Grid,
+    UiHintQuerying,
+    UiHintActive,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridDirectionLabels {
     pub up: String,
@@ -392,6 +402,25 @@ impl AppState {
 
     pub fn help_visible(&self) -> bool {
         self.help_visible
+    }
+
+    pub fn mode_context(&self) -> ModeContext {
+        if !self.active_mode {
+            return ModeContext::Inactive;
+        }
+        if self.is_jump_active() {
+            return ModeContext::Jump;
+        }
+        if self.is_grid_active() {
+            return ModeContext::Grid;
+        }
+        if self.is_ui_hint_querying() {
+            return ModeContext::UiHintQuerying;
+        }
+        if self.is_ui_hint_active() {
+            return ModeContext::UiHintActive;
+        }
+        ModeContext::Active
     }
 
     pub fn toggle_help(&mut self) {
@@ -2536,6 +2565,29 @@ mod tests {
 
         assert!(!state.help_visible());
         assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn mode_context_tracks_state_transitions_for_status_and_help_payloads() {
+        let mut state = AppState::default();
+        assert_eq!(state.mode_context(), ModeContext::Active);
+
+        enter_jump_mode(&mut state, VirtualKey::J);
+        assert_eq!(state.mode_context(), ModeContext::Jump);
+
+        state.exit_jump_mode();
+        enter_grid_mode(&mut state, VirtualKey::G);
+        assert_eq!(state.mode_context(), ModeContext::Grid);
+
+        state.exit_grid_mode();
+        enter_ui_hint_mode(&mut state, VirtualKey::U);
+        assert_eq!(state.mode_context(), ModeContext::UiHintQuerying);
+
+        state.activate_ui_hint_if_querying(1);
+        assert_eq!(state.mode_context(), ModeContext::UiHintActive);
+
+        state.set_active_mode(false);
+        assert_eq!(state.mode_context(), ModeContext::Inactive);
     }
 
     #[test]
