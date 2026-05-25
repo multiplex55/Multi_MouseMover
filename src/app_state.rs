@@ -156,6 +156,7 @@ pub enum ModeContext {
     Grid,
     UiHintQuerying,
     UiHintActive,
+    PositionHistory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -436,7 +437,7 @@ impl AppState {
             return ModeContext::Inactive;
         }
         if self.is_position_history_active() {
-            return ModeContext::UiHintActive;
+            return ModeContext::PositionHistory;
         }
 
         if self.is_jump_active() {
@@ -2656,6 +2657,9 @@ mod tests {
         assert_eq!(state.mode_context(), ModeContext::UiHintQuerying);
         assert!(state.activate_ui_hint_if_querying(1));
         assert_eq!(state.mode_context(), ModeContext::UiHintActive);
+        state.exit_ui_hint_mode();
+        state.enter_position_history_mode(VirtualKey::P);
+        assert_eq!(state.mode_context(), ModeContext::PositionHistory);
 
         state.set_active_mode(false);
         assert_eq!(state.mode_context(), ModeContext::Inactive);

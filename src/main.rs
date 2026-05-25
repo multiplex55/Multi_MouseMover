@@ -3064,6 +3064,7 @@ fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
             .unwrap()
             .entries()
             .map(|(chord, action)| (chord, action.clone())),
+        mode_context,
     );
     view.stats = help_stats_from_snapshot(snapshot, slow_active, jump_active, mode_context);
     view.help_max_bindings = help_config.help_max_bindings;

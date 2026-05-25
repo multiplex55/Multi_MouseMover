@@ -4,7 +4,7 @@ use crate::app_state::ModeContext;
 use crate::key_chord::KeyChord;
 use crate::TooltipOverlayConfig;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::ptr;
 use std::time::{Duration, Instant};
 use windows::core::w;
@@ -31,29 +31,33 @@ const OVERLAY_ALPHA: u8 = 232;
 pub struct HelpBinding {
     pub key: String,
     pub action: String,
-    pub category: HelpBindingCategory,
+    pub section: HelpBindingSection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code)]
-pub enum HelpBindingCategory {
+pub enum HelpBindingSection {
     Movement,
-    Click,
+    ClickDrag,
     Wheel,
-    Jump,
-    System,
-    Custom,
+    JumpGrid,
+    UiHints,
+    StepMove,
+    Surgical,
+    ProfilesRuntime,
 }
 
-impl HelpBindingCategory {
+impl HelpBindingSection {
     fn title(self) -> &'static str {
         match self {
             Self::Movement => "Movement",
-            Self::Click => "Click",
+            Self::ClickDrag => "Click/Drag",
             Self::Wheel => "Wheel",
-            Self::Jump => "Jump",
-            Self::System => "System",
-            Self::Custom => "Custom",
+            Self::JumpGrid => "Jump/Grid",
+            Self::UiHints => "UI Hints",
+            Self::StepMove => "Step Move",
+            Self::Surgical => "Surgical",
+            Self::ProfilesRuntime => "Profiles/Runtime",
         }
     }
 }
@@ -81,6 +85,7 @@ pub fn resolve_help_section(mode: ModeContext) -> HelpSection {
         ModeContext::Jump => HelpSection::Jump,
         ModeContext::Grid => HelpSection::Grid,
         ModeContext::UiHintQuerying | ModeContext::UiHintActive => HelpSection::UiHints,
+        ModeContext::PositionHistory => HelpSection::UiHints,
         ModeContext::Active => HelpSection::General,
     }
 }
@@ -632,13 +637,27 @@ pub fn format_help_lines(view: &HelpOverlayView, config: TooltipOverlayConfig) -
     }
 
     lines.push(String::new());
-    let mut current_category = None;
+    let mut grouped: BTreeMap<HelpBindingSection, Vec<&HelpBinding>> = BTreeMap::new();
     for binding in visible_bindings {
-        if current_category != Some(binding.category) {
-            current_category = Some(binding.category);
-            lines.push(format!("{}:", binding.category.title()));
+        grouped.entry(binding.section).or_default().push(binding);
+    }
+    for section in [
+        HelpBindingSection::Movement,
+        HelpBindingSection::ClickDrag,
+        HelpBindingSection::Wheel,
+        HelpBindingSection::JumpGrid,
+        HelpBindingSection::UiHints,
+        HelpBindingSection::StepMove,
+        HelpBindingSection::Surgical,
+        HelpBindingSection::ProfilesRuntime,
+    ] {
+        let Some(entries) = grouped.get(&section) else {
+            continue;
+        };
+        lines.push(format!("{}:", section.title()));
+        for binding in entries {
+            lines.push(format!("  {}  -  {}", binding.key, binding.action));
         }
-        lines.push(format!("  {}  -  {}", binding.key, binding.action));
     }
 
     if view.bindings.len() > max_bindings {
@@ -661,8 +680,8 @@ fn view_format_config(view: &HelpOverlayView) -> TooltipOverlayConfig {
 fn sorted_bindings(bindings: &[HelpBinding], max_bindings: usize) -> Vec<&HelpBinding> {
     let mut bindings: Vec<_> = bindings.iter().collect();
     bindings.sort_by(|left, right| {
-        left.category
-            .cmp(&right.category)
+        left.section
+            .cmp(&right.section)
             .then(left.action.cmp(&right.action))
             .then(left.key.cmp(&right.key))
     });
@@ -735,21 +754,22 @@ extern "system" fn help_window_proc(
     }
 }
 
-pub fn help_view_from_bindings<I>(bindings: I) -> HelpOverlayView
+pub fn help_view_from_bindings<I>(bindings: I, mode: ModeContext) -> HelpOverlayView
 where
     I: IntoIterator<Item = (KeyChord, Action)>,
 {
     let mut bindings: Vec<HelpBinding> = bindings
         .into_iter()
+        .filter(|(_, action)| mode_includes_action(mode, action))
         .map(|(chord, action)| HelpBinding {
             key: format_key_chord(chord),
             action: format_action(&action),
-            category: action_category(&action),
+            section: action_section(&action),
         })
         .collect();
     bindings.sort_by(|left, right| {
-        left.category
-            .cmp(&right.category)
+        left.section
+            .cmp(&right.section)
             .then(left.action.cmp(&right.action))
             .then(left.key.cmp(&right.key))
     });
@@ -870,7 +890,7 @@ fn format_action(action: &Action) -> String {
     }
 }
 
-fn action_category(action: &Action) -> HelpBindingCategory {
+fn action_section(action: &Action) -> HelpBindingSection {
     match action {
         Action::MoveUp
         | Action::MoveDown
@@ -886,15 +906,14 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::MovementProfileNext
         | Action::MovementProfilePrevious
         | Action::MovementProfileSelect(_)
-        | Action::SlowMouse
-        | Action::SurgicalMode
-        | Action::ScrollModifier
-        | Action::StepMove { .. } => HelpBindingCategory::Movement,
+        | Action::SlowMouse => HelpBindingSection::Movement,
+        Action::SurgicalMode | Action::ScrollModifier => HelpBindingSection::Surgical,
+        Action::StepMove { .. } => HelpBindingSection::StepMove,
         Action::LeftClick
         | Action::RightClick
         | Action::MiddleClick
         | Action::ClickThenDisable
-        | Action::ToggleDragMode => HelpBindingCategory::Click,
+        | Action::ToggleDragMode => HelpBindingSection::ClickDrag,
         Action::WheelUp
         | Action::WheelDown
         | Action::WheelLeft
@@ -904,7 +923,7 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::WheelSpeedReset
         | Action::WheelProfileNext
         | Action::WheelProfilePrevious
-        | Action::WheelProfileSelect(_) => HelpBindingCategory::Wheel,
+        | Action::WheelProfileSelect(_) => HelpBindingSection::Wheel,
         Action::MoveToTopEdge
         | Action::MoveToBottomEdge
         | Action::MoveToLeftEdge
@@ -925,12 +944,26 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::UiHintMode
         | Action::SaveMousePosition
         | Action::ClearMousePositions
-        | Action::PositionHistoryMode => HelpBindingCategory::Jump,
+        | Action::PositionHistoryMode => HelpBindingSection::JumpGrid,
         Action::Exit
         | Action::ReloadConfig
         | Action::PanicReset
         | Action::Disable
-        | Action::ShowHelp => HelpBindingCategory::System,
+        | Action::ShowHelp => HelpBindingSection::ProfilesRuntime,
+    }
+}
+
+fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
+    match mode {
+        ModeContext::Inactive | ModeContext::Active => true,
+        ModeContext::Jump | ModeContext::Grid => matches!(
+            action,
+            Action::NavigateBack | Action::Disable | Action::ShowHelp | Action::JumpMode | Action::GridMode
+        ),
+        ModeContext::UiHintQuerying | ModeContext::UiHintActive | ModeContext::PositionHistory => matches!(
+            action,
+            Action::NavigateBack | Action::Disable | Action::ShowHelp | Action::UiHintMode | Action::PositionHistoryMode
+        ),
     }
 }
 
@@ -965,7 +998,7 @@ mod tests {
             bindings: vec![HelpBinding {
                 key: "H".to_string(),
                 action: "Hints / Help".to_string(),
-                category: HelpBindingCategory::System,
+                section: HelpBindingSection::ProfilesRuntime,
             }],
             config_warnings: Vec::new(),
             help_max_bindings: TooltipOverlayConfig::default().help_max_bindings,
@@ -1006,7 +1039,7 @@ mod tests {
         let view = help_view_from_bindings([
             (KeyChord::from_key(VirtualKey::F), Action::JumpMode),
             (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
-        ]);
+        ], ModeContext::Active);
 
         assert!(view
             .bindings
@@ -1048,7 +1081,7 @@ mod tests {
             (KeyChord::from_key(VirtualKey::G), Action::GridMode),
             (KeyChord::from_key(VirtualKey::S), Action::ScreenSelect),
             (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
-        ]);
+        ], ModeContext::Active);
 
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
 
@@ -1138,32 +1171,32 @@ mod tests {
                 HelpBinding {
                     key: "C".to_string(),
                     action: "My custom action".to_string(),
-                    category: HelpBindingCategory::Custom,
+                    section: HelpBindingSection::ProfilesRuntime,
                 },
                 HelpBinding {
                     key: "W".to_string(),
                     action: "Move up".to_string(),
-                    category: HelpBindingCategory::Movement,
+                    section: HelpBindingSection::Movement,
                 },
                 HelpBinding {
                     key: "L".to_string(),
                     action: "Left click".to_string(),
-                    category: HelpBindingCategory::Click,
+                    section: HelpBindingSection::ClickDrag,
                 },
                 HelpBinding {
                     key: "J".to_string(),
                     action: "Jump".to_string(),
-                    category: HelpBindingCategory::Jump,
+                    section: HelpBindingSection::JumpGrid,
                 },
                 HelpBinding {
                     key: "U".to_string(),
                     action: "Wheel up".to_string(),
-                    category: HelpBindingCategory::Wheel,
+                    section: HelpBindingSection::Wheel,
                 },
                 HelpBinding {
                     key: "H".to_string(),
                     action: "Hints / Help".to_string(),
-                    category: HelpBindingCategory::System,
+                    section: HelpBindingSection::ProfilesRuntime,
                 },
             ],
             config_warnings: Vec::new(),
@@ -1174,11 +1207,10 @@ mod tests {
 
         for heading in [
             "Movement:",
-            "Click:",
+            "Click/Drag:",
             "Wheel:",
-            "Jump:",
-            "System:",
-            "Custom:",
+            "Jump/Grid:",
+            "Profiles/Runtime:",
         ] {
             assert!(lines.contains(heading), "{heading}");
         }
@@ -1194,7 +1226,7 @@ mod tests {
             (KeyChord::from_key(VirtualKey::W), Action::MoveUp),
             (KeyChord::from_key(VirtualKey::A), Action::MoveLeft),
             (KeyChord::from_key(VirtualKey::D), Action::MoveRight),
-        ]);
+        ], ModeContext::Active);
 
         let lines = format_help_lines(&view, config).join("\n");
 
@@ -1202,6 +1234,41 @@ mod tests {
         assert!(lines.contains("D  -  Move right"));
         assert!(!lines.contains("W  -  Move up"));
         assert!(lines.contains("... 2 more binding(s)"));
+    }
+
+    #[test]
+    fn help_model_is_mode_sensitive() {
+        let bindings = [
+            (KeyChord::from_key(VirtualKey::J), Action::JumpMode),
+            (KeyChord::from_key(VirtualKey::U), Action::UiHintMode),
+            (KeyChord::from_key(VirtualKey::Escape), Action::Disable),
+            (KeyChord::from_key(VirtualKey::W), Action::MoveUp),
+        ];
+        let normal = help_view_from_bindings(bindings.clone(), ModeContext::Active);
+        let jump = help_view_from_bindings(bindings.clone(), ModeContext::Jump);
+        let ui_hint = help_view_from_bindings(bindings, ModeContext::UiHintActive);
+        assert!(normal.bindings.iter().any(|b| b.action == "Move up"));
+        assert!(!jump.bindings.iter().any(|b| b.action == "Move up"));
+        assert!(jump.bindings.iter().any(|b| b.action == "Disable"));
+        assert!(ui_hint.bindings.iter().any(|b| b.action == "UI Hints"));
+    }
+
+    #[test]
+    fn help_section_order_stable() {
+        let view = help_view_from_bindings(
+            [
+                (KeyChord::from_key(VirtualKey::W), Action::MoveUp),
+                (KeyChord::from_key(VirtualKey::L), Action::LeftClick),
+                (KeyChord::from_key(VirtualKey::U), Action::WheelUp),
+                (KeyChord::from_key(VirtualKey::J), Action::JumpMode),
+                (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
+            ],
+            ModeContext::Active,
+        );
+        let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
+        assert!(lines.find("Movement:").unwrap() < lines.find("Click/Drag:").unwrap());
+        assert!(lines.find("Click/Drag:").unwrap() < lines.find("Wheel:").unwrap());
+        assert!(lines.find("Wheel:").unwrap() < lines.find("Jump/Grid:").unwrap());
     }
 
     #[test]
