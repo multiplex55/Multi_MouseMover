@@ -2722,13 +2722,13 @@ fn ui_hint_tooltip_event_enabled(config: &TooltipOverlayConfig, event_enabled: b
 }
 
 fn drain_runtime_notifications<B: MouseBackend>(action_handler: &mut ActionHandler<B>) {
-    let config = &action_handler.mouse_master.config.tooltip_overlay;
+    let config = action_handler.mouse_master.config.tooltip_overlay.clone();
     let Some(notification) = action_handler.mouse_master.take_notifications().pop() else {
         return;
     };
 
     let help_visible = APP_STATE.read().unwrap().help_visible();
-    if runtime_notification_enabled(&notification, config, help_visible) {
+    if runtime_notification_enabled(&notification, &config, help_visible) {
         let stats = help_stats_from_snapshot(
             action_handler.mouse_master.runtime_snapshot(),
             action_handler.active_keys.contains(&Action::SlowMouse),
