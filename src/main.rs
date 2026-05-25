@@ -25,6 +25,7 @@ mod zoom_overlay;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, GridInputUpdate, JumpOverlayResolution, KeyEvent};
+use bookmarks::{resolve_bookmarks_path, BookmarkStore};
 use config_audit::{audit_config_toml, ConfigAuditSeverity, ConfigAuditWarning};
 #[cfg(test)]
 use indicator::IndicatorState;
@@ -44,12 +45,13 @@ use position_history::PositionHistory;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Mutex, RwLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use std::{env, error::Error, fs, io};
+use std::{env, error::Error, fs};
 use ui_hint_overlay::{build_ui_hint_loading_view, build_ui_hint_overlay_view, UiHintOverlay};
 use ui_hints::{build_ui_hint_targets, UiHintInputUpdate, UiHintSession};
 use windows::Win32::Foundation::*;
@@ -134,6 +136,19 @@ fn ui_hint_query_backend(config: &UiHintsConfig) -> UiHintQueryBackend {
     } else {
         UiHintQueryBackend::WindowsUia
     }
+}
+
+#[derive(Debug, Clone)]
+struct LoadedConfig {
+    config: Config,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct BookmarkRuntime {
+    config_path: PathBuf,
+    bookmark_path: PathBuf,
+    store: BookmarkStore,
 }
 
 const DEFAULT_POLLING_RATE_MS: u64 = 8;
@@ -327,6 +342,7 @@ lazy_static! {
     static ref UI_HINT_QUERY_TX: Mutex<Option<Sender<UiHintQueryResult>>> = Mutex::new(None);
     static ref UI_HINT_QUERY_RX: Mutex<Option<Receiver<UiHintQueryResult>>> = Mutex::new(None);
     static ref UI_HINT_SESSION: Mutex<Option<UiHintSession>> = Mutex::new(None);
+    static ref BOOKMARK_RUNTIME: Mutex<Option<BookmarkRuntime>> = Mutex::new(None);
 }
 
 thread_local! {
@@ -1717,7 +1733,8 @@ impl Config {
             warn_config_normalized("bookmarks.file is empty; using bookmarks.json");
             self.bookmarks.file = "bookmarks.json".to_string();
         }
-        self.bookmarks.desktop_switch_wait_ms = self.bookmarks.desktop_switch_wait_ms.clamp(0, 3000);
+        self.bookmarks.desktop_switch_wait_ms =
+            self.bookmarks.desktop_switch_wait_ms.clamp(0, 3000);
         if VirtualKey::from_string(&self.bookmarks.cancel_key).is_none() {
             warn_config_normalized("bookmarks.cancel_key is invalid; using Escape");
             self.bookmarks.cancel_key = "Escape".to_string();
@@ -1727,11 +1744,15 @@ impl Config {
             self.bookmarks.clear_modifier_key = "Backspace".to_string();
         }
         if self.bookmarks.coordinate_policy != "clamp_to_virtual_screen" {
-            warn_config_normalized("bookmarks.coordinate_policy is invalid; using clamp_to_virtual_screen");
+            warn_config_normalized(
+                "bookmarks.coordinate_policy is invalid; using clamp_to_virtual_screen",
+            );
             self.bookmarks.coordinate_policy = "clamp_to_virtual_screen".to_string();
         }
         if self.bookmarks.desktop_behavior != "focus_anchor_window" {
-            warn_config_normalized("bookmarks.desktop_behavior is invalid; using focus_anchor_window");
+            warn_config_normalized(
+                "bookmarks.desktop_behavior is invalid; using focus_anchor_window",
+            );
             self.bookmarks.desktop_behavior = "focus_anchor_window".to_string();
         }
     }
@@ -2141,52 +2162,25 @@ impl Config {
     }
 
     fn load_from_file(path: &str) -> Result<Self, Box<dyn Error>> {
-        // Try to read the config from the provided path relative to the current
-        // working directory.  If that fails, fall back to looking in the same
-        // directory as the executable.  This allows running the binary from any
-        // location as long as `config.toml` sits next to it.
+        Ok(Self::load_with_resolved_path(path)?.config)
+    }
 
-        // DEBUG: print current working directory and executable path
-        if let Ok(cwd) = env::current_dir() {
-            println!("[DEBUG] current_dir: {}", cwd.display());
-        } else {
-            println!("[DEBUG] current_dir: <failed>");
-        }
-
-        if let Ok(exe) = env::current_exe() {
-            println!("[DEBUG] current_exe: {}", exe.display());
-        } else {
-            println!("[DEBUG] current_exe: <failed>");
-        }
-
-        // First attempt: path relative to current directory
-        println!("[DEBUG] trying path: {}", path);
-        match fs::read_to_string(path) {
-            Ok(config_str) => return Self::parse_audited_config(&config_str),
-            Err(e) => {
-                if e.kind() != io::ErrorKind::NotFound {
-                    return Err(e.into());
-                }
-            }
-        }
-
-        // Second attempt: path relative to the executable location
-        if let Ok(mut exe_path) = env::current_exe() {
-            exe_path.pop();
-            exe_path.push(path);
-            println!("[DEBUG] trying exe path: {}", exe_path.display());
-            match fs::read_to_string(&exe_path) {
-                Ok(config_str) => return Self::parse_audited_config(&config_str),
-                Err(e) => {
-                    if e.kind() != io::ErrorKind::NotFound {
-                        return Err(e.into());
-                    }
-                }
-            }
+    fn load_with_resolved_path(path: &str) -> Result<LoadedConfig, Box<dyn Error>> {
+        let resolved_path = resolve_config_path(path);
+        if let Some(config_path) = resolved_path {
+            let config_str = fs::read_to_string(&config_path)?;
+            return Ok(LoadedConfig {
+                config: Self::parse_audited_config(&config_str)?,
+                path: config_path,
+            });
         }
 
         eprintln!("Config file not found, using defaults");
-        Self::default().normalize()
+        let fallback = env::current_dir()?.join(path);
+        Ok(LoadedConfig {
+            config: Self::default().normalize()?,
+            path: fallback,
+        })
     }
 
     fn parse_audited_config(config_str: &str) -> Result<Self, Box<dyn Error>> {
@@ -2257,6 +2251,49 @@ impl Config {
 
         Ok(())
     }
+}
+
+fn resolve_config_path(path: &str) -> Option<PathBuf> {
+    let cwd_path = Path::new(path);
+    if cwd_path.exists() {
+        return fs::canonicalize(cwd_path)
+            .ok()
+            .or_else(|| Some(cwd_path.to_path_buf()));
+    }
+
+    let exe_dir_path = env::current_exe().ok().and_then(|mut exe| {
+        exe.pop();
+        let candidate = exe.join(path);
+        if candidate.exists() {
+            fs::canonicalize(&candidate).ok().or(Some(candidate))
+        } else {
+            None
+        }
+    });
+
+    exe_dir_path
+}
+
+fn load_bookmark_runtime(
+    config: &Config,
+    config_path: &Path,
+) -> Result<BookmarkRuntime, Box<dyn Error>> {
+    let bookmark_path = resolve_bookmarks_path(config_path, Path::new(&config.bookmarks.file));
+    let slot_count = u8::try_from(config.bookmarks.slot_count).map_err(|_| {
+        format!(
+            "bookmarks.slot_count out of range: {}",
+            config.bookmarks.slot_count
+        )
+    })?;
+    let (store, warning) = BookmarkStore::load(&bookmark_path, slot_count)?;
+    if let Some(w) = warning {
+        eprintln!("[bookmarks] {}", w.message);
+    }
+    Ok(BookmarkRuntime {
+        config_path: config_path.to_path_buf(),
+        bookmark_path,
+        store,
+    })
 }
 
 fn warn_config_normalized(message: &str) {
@@ -3086,7 +3123,8 @@ fn apply_loaded_config<B: MouseBackend>(
 }
 
 fn reload_config() -> Result<(), Box<dyn Error>> {
-    let config = Config::load_from_file("config.toml")?;
+    let loaded = Config::load_with_resolved_path("config.toml")?;
+    let config = loaded.config.clone();
     config.runtime_system_bindings()?;
     let resolution = {
         let mut action_handler = ACTION_HANDLER.write().unwrap();
@@ -3101,6 +3139,9 @@ fn reload_config() -> Result<(), Box<dyn Error>> {
         .reset_with_max_positions(config.position_history.max_positions);
     APP_STATE.write().unwrap().exit_position_history_mode();
     sync_jump_overlay(resolution);
+    let bookmark_runtime = load_bookmark_runtime(&config, &loaded.path)?;
+    *BOOKMARK_RUNTIME.lock().unwrap() = Some(bookmark_runtime);
+    ACTION_HANDLER.write().unwrap().clear_active_keys();
     println!("[reload] config reloaded");
     Ok(())
 }
@@ -4270,13 +4311,14 @@ fn main() {
     env::set_var("RUST_BACKTRACE", "1");
     println!("🔹 Backtrace Enabled");
 
-    let config = match Config::load_from_file("config.toml") {
+    let loaded = match Config::load_with_resolved_path("config.toml") {
         Ok(cfg) => cfg,
         Err(e) => {
             eprintln!("Error loading configuration: {}", e);
             std::process::exit(1);
         }
     };
+    let config = loaded.config.clone();
     println!("✅ Config Loaded");
     print_startup_validation_summary(&config);
 
@@ -4288,6 +4330,14 @@ fn main() {
     }
     *POSITION_HISTORY_STORE.lock().unwrap() =
         PositionHistory::new(config.position_history.max_positions);
+    let bookmark_runtime = match load_bookmark_runtime(&config, &loaded.path) {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("❌ Bookmark Store Failed to Load: {e}");
+            std::process::exit(1);
+        }
+    };
+    *BOOKMARK_RUNTIME.lock().unwrap() = Some(bookmark_runtime);
 
     if let Err(e) = unsafe { install_keyboard_hook() } {
         eprintln!("❌ Keyboard Hook Failed to Install: {e}");
@@ -7089,7 +7139,10 @@ desktop_switch_wait_ms = 999999
         assert_eq!(config.bookmarks.slot_count, 1);
         assert_eq!(config.bookmarks.file, "bookmarks.json");
         assert_eq!(config.bookmarks.desktop_behavior, "focus_anchor_window");
-        assert_eq!(config.bookmarks.coordinate_policy, "clamp_to_virtual_screen");
+        assert_eq!(
+            config.bookmarks.coordinate_policy,
+            "clamp_to_virtual_screen"
+        );
         assert_eq!(config.bookmarks.cancel_key, "Escape");
         assert_eq!(config.bookmarks.clear_modifier_key, "Backspace");
         assert_eq!(config.bookmarks.desktop_switch_wait_ms, 3000);
@@ -7121,5 +7174,54 @@ coordinate_policy = "clamp_to_virtual_screen"
             .warnings
             .iter()
             .all(|w| !w.message.contains("Unknown config path")));
+    }
+    #[test]
+    fn startup_bookmark_path_resolves_relative_to_config_not_cwd() {
+        let config = parse_config(
+            r#"[bookmarks]
+file = "bookmarks.json"
+"#,
+        );
+        let config_path = PathBuf::from("/tmp/multi_mouse/config.toml");
+        let runtime = load_bookmark_runtime(&config, &config_path).unwrap();
+        assert_eq!(
+            runtime.bookmark_path,
+            PathBuf::from("/tmp/multi_mouse/bookmarks.json")
+        );
+        assert_eq!(runtime.config_path, config_path);
+    }
+
+    #[test]
+    fn bookmark_reload_switches_target_file_path() {
+        let mut old_config = Config::default().normalize().unwrap();
+        old_config.bookmarks.file = "bookmarks-a.json".to_string();
+        let mut new_config = Config::default().normalize().unwrap();
+        new_config.bookmarks.file = "bookmarks-b.json".to_string();
+        let config_path = PathBuf::from("/tmp/multi_mouse/config.toml");
+
+        let old_runtime = load_bookmark_runtime(&old_config, &config_path).unwrap();
+        let new_runtime = load_bookmark_runtime(&new_config, &config_path).unwrap();
+
+        assert_ne!(old_runtime.bookmark_path, new_runtime.bookmark_path);
+        assert_eq!(
+            new_runtime.bookmark_path,
+            PathBuf::from("/tmp/multi_mouse/bookmarks-b.json")
+        );
+    }
+
+    #[test]
+    fn relative_bookmark_subpath_is_resolved_from_config_directory() {
+        let config = parse_config(
+            r#"[bookmarks]
+file = "data/bookmarks.json"
+"#,
+        );
+        let config_path = PathBuf::from("/tmp/multi_mouse/config.toml");
+        let runtime = load_bookmark_runtime(&config, &config_path).unwrap();
+
+        assert_eq!(
+            runtime.bookmark_path,
+            PathBuf::from("/tmp/multi_mouse/data/bookmarks.json")
+        );
     }
 }
