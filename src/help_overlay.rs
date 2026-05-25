@@ -1220,7 +1220,6 @@ mod tests {
             "Click/Drag:",
             "Wheel:",
             "Jump/Grid:",
-            "Bookmarks:",
             "Profiles/Runtime:",
         ] {
             assert!(lines.contains(heading), "{heading}");
@@ -1297,7 +1296,7 @@ mod tests {
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
         assert!(lines.contains("Bookmarks:"));
         assert!(lines.contains("Shift+B  -  Bookmark mode"));
-        assert!(lines.contains("Key1  -  Jump to bookmark slot 1"));
+        assert!(lines.contains("Num1  -  Jump to bookmark slot 1"));
         assert!(lines.contains("Backspace  -  Clear bookmark slot 1"));
     }
 
