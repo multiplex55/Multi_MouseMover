@@ -5891,7 +5891,7 @@ enabled = true",
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
         assert!(summary.contains("window_jump: enabled=true bindings=0"));
         assert!(summary
-            .contains("position_history: enabled=false bindings=save:0 clear:0 mode:0 total:0"));
+            .contains("position_history: enabled=true bindings=save:0 clear:0 mode:0 total:0"));
         assert!(summary.contains("warnings=1"));
         assert!(summary.contains("warning: wheel.min_speed clamped"));
     }
