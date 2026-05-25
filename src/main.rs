@@ -3197,14 +3197,16 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         .config
                         .ui_hints
                         .after_select;
-                    let mut handler = ACTION_HANDLER.write().unwrap();
-                    handler
-                        .mouse_master
-                        .move_mouse_to(target.target_x, target.target_y);
-                    if matches!(after_select, UiHintAfterSelect::MoveAndLeftClick)
-                        && !handler.mouse_master.left_button_held()
                     {
-                        handler.mouse_master.handle_action(Action::LeftClick);
+                        let mut handler = ACTION_HANDLER.write().unwrap();
+                        handler
+                            .mouse_master
+                            .move_mouse_to(target.target_x, target.target_y);
+                        if matches!(after_select, UiHintAfterSelect::MoveAndLeftClick)
+                            && !handler.mouse_master.left_button_held()
+                        {
+                            handler.mouse_master.handle_action(Action::LeftClick);
+                        }
                     }
                     exit_ui_hint_mode(UiHintExitReason::Completed);
                 }
