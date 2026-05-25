@@ -5943,7 +5943,9 @@ enabled = true"#,
             },
             Case {
                 name: "position_history",
-                config_toml: "[position_history]
+                config_toml: r#"key_bindings = []
+
+[position_history]
 enabled = true",
                 expected_substring:
                     "position_history.enabled=true but no position history bindings were found",
@@ -6043,7 +6045,7 @@ enabled = true",
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
         assert!(summary.contains("window_jump: enabled=true bindings=6"));
         assert!(summary
-            .contains("position_history: enabled=true bindings=save:0 clear:0 mode:0 total:0"));
+            .contains("position_history: enabled=true bindings=save:1 clear:1 mode:1 total:3"));
         assert!(summary.contains("warnings=1"));
         assert!(summary.contains("warning: wheel.min_speed clamped"));
     }
