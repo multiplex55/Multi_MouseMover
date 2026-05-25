@@ -4239,6 +4239,10 @@ mod tests {
         toml::from_str::<Config>(toml).unwrap().normalize().unwrap()
     }
 
+    fn parse_audited_config_for_test(toml: &str) -> Config {
+        Config::parse_audited_config(toml).unwrap()
+    }
+
     fn parse_config_error(toml: &str) -> String {
         match toml::from_str::<Config>(toml) {
             Ok(config) => config
@@ -5796,7 +5800,7 @@ enabled = true",
 
         for case in cases {
             let _ = take_config_warnings();
-            let _ = parse_config(case.config_toml);
+            let _ = parse_audited_config_for_test(case.config_toml);
             let warnings = take_config_warnings();
             assert!(
                 warnings
@@ -5812,7 +5816,7 @@ enabled = true",
     #[test]
     fn feature_binding_validation_does_not_warn_when_enabled_features_have_bindings() {
         let _ = take_config_warnings();
-        let _ = parse_config(
+        let _ = parse_audited_config_for_test(
             r#"
             key_bindings = [
                 ["F13", "surgical_mode"],
@@ -5885,7 +5889,7 @@ enabled = true",
         assert!(summary.contains("features: [enabled, bindings]"));
         assert!(summary.contains("surgical_mode: enabled=false bindings=0"));
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
-        assert!(summary.contains("window_jump: enabled=false bindings=0"));
+        assert!(summary.contains("window_jump: enabled=true bindings=0"));
         assert!(summary
             .contains("position_history: enabled=false bindings=save:0 clear:0 mode:0 total:0"));
         assert!(summary.contains("warnings=1"));
