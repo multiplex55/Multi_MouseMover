@@ -59,6 +59,29 @@ impl PositionHistory {
         &self.positions
     }
 
+    pub fn reset_with_max_positions(&mut self, max_positions: usize) {
+        self.max_positions = max_positions.max(1);
+        while self.positions.len() > self.max_positions {
+            self.positions.remove(0);
+        }
+    }
+
+    pub fn index_for_label(
+        &self,
+        label: &str,
+        selection_keys: &[char],
+        label_length: usize,
+    ) -> Option<usize> {
+        let labels = generate_ui_hint_labels(
+            self.positions.len(),
+            selection_keys,
+            label_length,
+            UiHintOverflowBehavior::IncreaseLength,
+            Some(self.positions.len()),
+        );
+        labels.iter().position(|candidate| candidate == label)
+    }
+
     pub fn labeled_positions(
         &self,
         selection_keys: &[char],
@@ -116,6 +139,12 @@ mod tests {
     }
 
     #[test]
+    fn clear_returns_false_when_already_empty() {
+        let mut h = PositionHistory::new(2);
+        assert!(!h.clear());
+    }
+
+    #[test]
     fn label_assignment_is_deterministic() {
         let mut h = PositionHistory::new(3);
         h.add(1, 1);
@@ -123,5 +152,20 @@ mod tests {
         let first = h.labeled_positions(&['A', 'B'], 2, false);
         let second = h.labeled_positions(&['A', 'B'], 2, false);
         assert_eq!(first, second);
+    }
+}
+
+
+#[cfg(test)]
+mod mapping_tests {
+    use super::*;
+
+    #[test]
+    fn maps_label_to_index() {
+        let mut h = PositionHistory::new(4);
+        h.add(10, 10);
+        h.add(20, 20);
+        let idx = h.index_for_label("B", &['A', 'B', 'C'], 1);
+        assert_eq!(idx, Some(1));
     }
 }
