@@ -1,17 +1,21 @@
 use crate::UiHintsConfig;
-use windows::core::Interface;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED,
+};
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
-    IUIAutomationElementArray, TreeScope_Descendants, UIA_BoundingRectanglePropertyId,
-    UIA_ControlTypePropertyId, UIA_IsEnabledPropertyId, UIA_IsKeyboardFocusablePropertyId,
-    UIA_IsOffscreenPropertyId, UIA_NamePropertyId,
+    IUIAutomationElementArray, TreeScope_Descendants, UIA_IsEnabledPropertyId,
+    UIA_IsKeyboardFocusablePropertyId, UIA_IsOffscreenPropertyId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, GetForegroundWindow, GetMonitorInfoW, GetWindow, GetWindowRect,
-    GetWindowThreadProcessId, IsWindowEnabled, IsWindowVisible, MonitorFromWindow,
-    MONITOR_DEFAULTTONEAREST, MONITORINFO, GW_OWNER,
+    EnumThreadWindows, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
+    GW_OWNER,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +43,11 @@ pub fn find_ui_hint_targets_for_window(
         return Err(UiHintQueryError::NoForegroundWindow);
     }
 
-    let windows = discover_windows_in_scope(fg, config.include_thread_windows, config.include_owned_popups)?;
+    let windows = discover_windows_in_scope(
+        fg,
+        config.include_thread_windows,
+        config.include_owned_popups,
+    )?;
 
     let _com = ComGuard::init()?;
     let automation: IUIAutomation = unsafe {
@@ -64,6 +72,7 @@ struct ComGuard;
 impl ComGuard {
     fn init() -> Result<Self, UiHintQueryError> {
         unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+            .ok()
             .map_err(|_| UiHintQueryError::UiAutomationInitFailed)?;
         Ok(Self)
     }
@@ -74,16 +83,18 @@ impl Drop for ComGuard {
     }
 }
 
-fn build_interactive_condition(automation: &IUIAutomation) -> Result<IUIAutomationCondition, UiHintQueryError> {
+fn build_interactive_condition(
+    automation: &IUIAutomation,
+) -> Result<IUIAutomationCondition, UiHintQueryError> {
     unsafe {
         let enabled = automation
-            .CreatePropertyCondition(UIA_IsEnabledPropertyId, true.into())
+            .CreatePropertyCondition(UIA_IsEnabledPropertyId, &VARIANT::from(true))
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let onscreen = automation
-            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, false.into())
+            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, &VARIANT::from(false))
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let focusable = automation
-            .CreatePropertyCondition(UIA_IsKeyboardFocusablePropertyId, true.into())
+            .CreatePropertyCondition(UIA_IsKeyboardFocusablePropertyId, &VARIANT::from(true))
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         automation
             .CreateAndConditionFromArray(&[enabled, onscreen, focusable])
@@ -132,7 +143,7 @@ fn should_include_thread_window(
     if hwnd.0 == foreground.0 {
         return true;
     }
-    if unsafe { !IsWindowVisible(hwnd).as_bool() || !IsWindowEnabled(hwnd).as_bool() } {
+    if unsafe { !IsWindowVisible(hwnd).as_bool() } {
         return false;
     }
     let mut rect = RECT::default();
@@ -144,10 +155,11 @@ fn should_include_thread_window(
             return false;
         }
     }
-    if include_owned_popups && unsafe { GetWindow(hwnd, GW_OWNER) }.0 == foreground.0 {
+    let owner = unsafe { GetWindow(hwnd, GW_OWNER) }.ok();
+    if include_owned_popups && owner.map(|h| h.0) == Some(foreground.0) {
         return true;
     }
-    unsafe { GetWindow(hwnd, GW_OWNER) }.0.is_null()
+    owner.map(|h| h.0.is_null()).unwrap_or(true)
 }
 
 unsafe extern "system" fn enum_collect_windows(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -168,7 +180,9 @@ fn collect_window_elements(
         let arr: IUIAutomationElementArray = root
             .FindAll(TreeScope_Descendants, condition)
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
-        let len = arr.Length().map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let len = arr
+            .Length()
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let mut out = Vec::new();
         for i in 0..len {
             if let Ok(el) = arr.GetElement(i) {
@@ -190,12 +204,23 @@ fn normalize_element(el: &IUIAutomationElement) -> Option<RawUiElement> {
         let width = rect.right - rect.left;
         let height = rect.bottom - rect.top;
 
-        let clickable = el.GetClickablePoint().ok().map(|p| (p.x as i32, p.y as i32)).or_else(|| {
+        let mut clickable_point = POINT::default();
+        let clickable = if el.GetClickablePoint(&mut clickable_point).ok().is_some() {
+            Some((clickable_point.x, clickable_point.y))
+        } else {
             Some((rect.left + width / 2, rect.top + height / 2))
-        });
+        };
 
-        let name = el.CurrentName().ok().map(|s| s.to_string()).unwrap_or_default();
-        let control_type = el.CurrentControlType().ok().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
+        let name = el
+            .CurrentName()
+            .ok()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        let control_type = el
+            .CurrentControlType()
+            .ok()
+            .map(|c| c.0.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
 
         Some(RawUiElement {
             bounds: (rect.left, rect.top, width, height),
@@ -221,9 +246,16 @@ fn rects_intersect(a: RECT, b: RECT) -> bool {
 
 unsafe fn monitor_rect(hwnd: HWND) -> Option<RECT> {
     let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-    if monitor.0.is_null() { return None; }
-    let mut info = MONITORINFO { cbSize: core::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-    if !GetMonitorInfoW(monitor, &mut info).as_bool() { return None; }
+    if monitor.0.is_null() {
+        return None;
+    }
+    let mut info = MONITORINFO {
+        cbSize: core::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+        return None;
+    }
     Some(info.rcMonitor)
 }
 
@@ -235,20 +267,45 @@ mod tests {
     fn inclusion_filter_requires_visible_nonzero_intersecting() {
         let fg = HWND(1 as *mut _);
         let other = HWND(2 as *mut _);
-        let monitor = Some(RECT { left: 0, top: 0, right: 100, bottom: 100 });
+        let monitor = Some(RECT {
+            left: 0,
+            top: 0,
+            right: 100,
+            bottom: 100,
+        });
         // logic-only check
         assert!(rects_intersect(
-            RECT { left: 10, top: 10, right: 20, bottom: 20 },
+            RECT {
+                left: 10,
+                top: 10,
+                right: 20,
+                bottom: 20
+            },
             monitor.unwrap()
         ));
-        assert!(!is_valid_rect(&RECT { left: 5, top: 5, right: 5, bottom: 10 }));
+        assert!(!is_valid_rect(&RECT {
+            left: 5,
+            top: 5,
+            right: 5,
+            bottom: 10
+        }));
         assert!(should_include_thread_window(fg, fg, false, monitor));
         let _ = other;
     }
 
     #[test]
     fn stage1_filter_rejects_zero_size() {
-        assert!(!stage1_filter(&RawUiElement { bounds: (0, 0, 0, 10), clickable_point: None, name: String::new(), control_type: String::new() }));
-        assert!(stage1_filter(&RawUiElement { bounds: (0, 0, 1, 1), clickable_point: None, name: String::new(), control_type: String::new() }));
+        assert!(!stage1_filter(&RawUiElement {
+            bounds: (0, 0, 0, 10),
+            clickable_point: None,
+            name: String::new(),
+            control_type: String::new()
+        }));
+        assert!(stage1_filter(&RawUiElement {
+            bounds: (0, 0, 1, 1),
+            clickable_point: None,
+            name: String::new(),
+            control_type: String::new()
+        }));
     }
 }
