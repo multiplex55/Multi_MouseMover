@@ -360,7 +360,9 @@ impl<B: MouseBackend> MouseMaster<B> {
             | Action::UiHintMode
             | Action::SaveMousePosition
             | Action::ClearMousePositions
-            | Action::PositionHistoryMode => {}
+            | Action::PositionHistoryMode
+            | Action::BookmarkMode
+            | Action::BookmarkSlot(_) => {}
             Action::Disable => self.set_active_mode(false),
             Action::PanicReset => {
                 self.hard_reset_runtime();

@@ -433,6 +433,26 @@ label_length = 2
 show_numbers = false
 ```
 
+### `[bookmarks]`
+
+Configures bookmark mode and bookmark slot behavior. Bookmark JSON path resolution is relative to the resolved `config.toml` path when `bookmarks.file` is not absolute.
+
+```toml
+[bookmarks]
+enabled = true
+file = "bookmarks.json"
+slot_count = 9            # clamped to 1..99
+show_tooltips = true
+desktop_behavior = "focus_anchor_window"
+desktop_switch_wait_ms = 150   # clamped to 0..3000
+require_desktop_switch_success = false
+cancel_key = "Escape"           # invalid values fallback to Escape
+clear_modifier_key = "Backspace" # invalid values fallback to Backspace
+coordinate_policy = "clamp_to_virtual_screen"
+```
+
+`desktop_behavior` currently supports `focus_anchor_window` (invalid values fall back to this). `coordinate_policy` currently supports `clamp_to_virtual_screen` (invalid values fall back to this).
+
 ### Surgical mode
 
 | Path | Type | Default | Required | Status | Description |

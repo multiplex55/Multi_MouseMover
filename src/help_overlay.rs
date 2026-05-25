@@ -874,6 +874,8 @@ fn format_action(action: &Action) -> String {
         Action::SaveMousePosition => "Save mouse position".to_string(),
         Action::ClearMousePositions => "Clear saved mouse positions".to_string(),
         Action::PositionHistoryMode => "Position history mode".to_string(),
+        Action::BookmarkMode => "Bookmark mode".to_string(),
+        Action::BookmarkSlot(slot) => format!("Bookmark slot {slot}"),
         Action::StepMove { direction, tier } => {
             let direction = match direction {
                 Direction2D::Up => "up",
@@ -944,7 +946,9 @@ fn action_section(action: &Action) -> HelpBindingSection {
         | Action::UiHintMode
         | Action::SaveMousePosition
         | Action::ClearMousePositions
-        | Action::PositionHistoryMode => HelpBindingSection::JumpGrid,
+        | Action::PositionHistoryMode
+        | Action::BookmarkMode
+        | Action::BookmarkSlot(_) => HelpBindingSection::JumpGrid,
         Action::Exit
         | Action::ReloadConfig
         | Action::PanicReset

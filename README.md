@@ -75,6 +75,8 @@ The app starts active. Press `Ctrl+E` (or `Ctrl+Q` in configs that set that as `
 
 System bindings bypass the active-mode gate. The configured toggle-active chord (commonly `Ctrl+E` or `Ctrl+Q`) can always reactivate control, and `Escape` remains the configured exit key.
 
+Bookmark mode is configurable under `[bookmarks]` in `config.toml` (including slot count, key validation fallbacks, desktop behavior, and coordinate policy). The bookmark JSON file path is resolved relative to the resolved config file path when a relative `bookmarks.file` value is used.
+
 ## Drag Behavior
 
 Press `N` to toggle left-button drag mode. When drag is on, Multi MouseMover holds the left mouse button down so movement keys can drag windows, text selections, sliders, or canvas objects. Press `N` again to release it.

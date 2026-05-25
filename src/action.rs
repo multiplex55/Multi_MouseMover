@@ -76,6 +76,8 @@ pub enum Action {
     SaveMousePosition,
     ClearMousePositions,
     PositionHistoryMode,
+    BookmarkMode,
+    BookmarkSlot(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -205,6 +207,15 @@ impl Action {
             "save_mouse_position" => Some(Self::SaveMousePosition),
             "clear_mouse_positions" => Some(Self::ClearMousePositions),
             "position_history_mode" => Some(Self::PositionHistoryMode),
+            "bookmark_mode" => Some(Self::BookmarkMode),
+            action if action.starts_with("bookmark_slot_") => {
+                action
+                    .trim_start_matches("bookmark_slot_")
+                    .parse::<u8>()
+                    .ok()
+                    .filter(|slot| (1..=99).contains(slot))
+                    .map(Self::BookmarkSlot)
+            }
             action
                 if action.starts_with("movement_profile:")
                     || action.starts_with("mouse_profile:")
