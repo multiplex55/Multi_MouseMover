@@ -2396,30 +2396,33 @@ mod tests {
             titlebar: (11, 12),
         };
         assert_eq!(
-            Self::window_snap_for_action(&Action::MoveToWindowTopEdge, p),
+            MouseMaster::<FakeBackend>::window_snap_for_action(&Action::MoveToWindowTopEdge, p),
             Some((1, 2))
         );
         assert_eq!(
-            Self::window_snap_for_action(&Action::MoveToWindowBottomEdge, p),
+            MouseMaster::<FakeBackend>::window_snap_for_action(&Action::MoveToWindowBottomEdge, p),
             Some((3, 4))
         );
         assert_eq!(
-            Self::window_snap_for_action(&Action::MoveToWindowLeftEdge, p),
+            MouseMaster::<FakeBackend>::window_snap_for_action(&Action::MoveToWindowLeftEdge, p),
             Some((5, 6))
         );
         assert_eq!(
-            Self::window_snap_for_action(&Action::MoveToWindowRightEdge, p),
+            MouseMaster::<FakeBackend>::window_snap_for_action(&Action::MoveToWindowRightEdge, p),
             Some((7, 8))
         );
         assert_eq!(
-            Self::window_snap_for_action(&Action::MoveToWindowCenter, p),
+            MouseMaster::<FakeBackend>::window_snap_for_action(&Action::MoveToWindowCenter, p),
             Some((9, 10))
         );
         assert_eq!(
-            Self::window_snap_for_action(&Action::MoveToWindowTitlebar, p),
+            MouseMaster::<FakeBackend>::window_snap_for_action(&Action::MoveToWindowTitlebar, p),
             Some((11, 12))
         );
-        assert_eq!(Self::window_snap_for_action(&Action::MoveUp, p), None);
+        assert_eq!(
+            MouseMaster::<FakeBackend>::window_snap_for_action(&Action::MoveUp, p),
+            None
+        );
     }
 
     #[test]
