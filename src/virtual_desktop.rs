@@ -1,4 +1,3 @@
-use windows::core::PWSTR;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, IsWindow, IsWindowVisible,
@@ -63,8 +62,8 @@ pub fn focus_anchor_window(anchor_hwnd: Option<isize>) -> FocusAnchorResult {
             reason: Some(FocusAnchorFailureReason::AnchorMissing),
         };
     };
-    let hwnd = HWND(raw);
-    let exists = unsafe { IsWindow(hwnd).as_bool() };
+    let hwnd = HWND(raw as *mut core::ffi::c_void);
+    let exists = unsafe { IsWindow(Some(hwnd)).as_bool() };
     if !exists {
         return FocusAnchorResult {
             success: false,
@@ -104,7 +103,7 @@ fn read_window_title(hwnd: HWND) -> Option<String> {
         return None;
     }
     let mut buffer = vec![0u16; len as usize + 1];
-    let copied = unsafe { GetWindowTextW(hwnd, PWSTR(buffer.as_mut_ptr()), buffer.len() as i32) };
+    let copied = unsafe { GetWindowTextW(hwnd, &mut buffer) };
     if copied <= 0 {
         return None;
     }
