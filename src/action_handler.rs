@@ -2361,6 +2361,37 @@ mod tests {
     }
 
     #[test]
+    fn clear_runtime_input_state_clears_active_continuous_actions() {
+        let mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+        let mut handler = crate::action::ActionHandler::new(mouse);
+        handler.process_active_keys(Action::MoveUp, true);
+        handler.process_active_keys(Action::SurgicalMode, true);
+
+        handler.clear_runtime_input_state();
+
+        assert!(handler.active_keys.is_empty());
+    }
+
+    #[test]
+    fn clear_runtime_input_state_releases_held_left_button() {
+        let mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+        let mut handler = crate::action::ActionHandler::new(mouse);
+        handler.mouse_master.handle_action(Action::ToggleDragMode);
+        assert!(handler.mouse_master.left_button_held());
+
+        handler.clear_runtime_input_state();
+
+        assert!(!handler.mouse_master.left_button_held());
+        assert!(
+            handler
+                .mouse_master
+                .backend
+                .button_ups
+                .contains(&Button::Left)
+        );
+    }
+
+    #[test]
     fn click_then_disable_releases_drag_then_clicks_normally() {
         let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
 

@@ -719,6 +719,12 @@ impl<B: crate::action_handler::MouseBackend> ActionHandler<B> {
         self.mouse_master.reset_speed();
     }
 
+    pub fn clear_runtime_input_state(&mut self) {
+        self.clear_active_keys();
+        self.mouse_master.release_left_button_if_held();
+        self.mouse_master.surgical_zoom_state = Default::default();
+    }
+
     pub fn tick_movement(&mut self) -> MovementTick {
         self.mouse_master
             .tick_movement(&self.active_keys, Duration::from_millis(0))

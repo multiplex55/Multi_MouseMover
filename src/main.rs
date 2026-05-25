@@ -2987,16 +2987,41 @@ fn set_active_mode(active: bool) {
     sync_jump_overlay(resolution);
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RuntimeCleanupReason {
+    Exit,
+    PanicReset,
+    Deactivate,
+    Reload,
+    ModeTransition,
+}
+
+fn clear_all_runtime_input_state<B: MouseBackend>(
+    action_handler: &mut ActionHandler<B>,
+    app_state: &mut AppState,
+    reason: RuntimeCleanupReason,
+) -> JumpOverlayResolution {
+    action_handler.clear_runtime_input_state();
+    app_state.clear_active_action_keys_and_exit_exclusive_modes();
+    app_state.hide_help();
+    help_overlay::hide_help_overlay();
+    if matches!(reason, RuntimeCleanupReason::PanicReset) {
+        action_handler.mouse_master.push_panic_reset_notification();
+    }
+    app_state.resolve_jump_overlay()
+}
+
 fn apply_active_mode_transition<B: MouseBackend>(
     action_handler: &mut ActionHandler<B>,
     app_state: &mut AppState,
     active: bool,
 ) -> JumpOverlayResolution {
     if !active {
-        action_handler.mouse_master.release_left_button_if_held();
-        action_handler.clear_active_keys();
-        app_state.clear_active_action_keys_and_exit_exclusive_modes();
-        app_state.hide_help();
+        let _ = clear_all_runtime_input_state(
+            action_handler,
+            app_state,
+            RuntimeCleanupReason::Deactivate,
+        );
     }
 
     action_handler.mouse_master.set_active_mode(active);
@@ -3064,11 +3089,13 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
     if action == Action::ClickThenDisable {
         if is_down {
             action_handler.execute_action(&Action::ClickThenDisable);
-            action_handler.clear_active_keys();
-            app_state.clear_active_action_keys_and_exit_exclusive_modes();
+            let _ = clear_all_runtime_input_state(
+                action_handler,
+                app_state,
+                RuntimeCleanupReason::ModeTransition,
+            );
             action_handler.mouse_master.set_active_mode(false);
             app_state.set_active_mode(false);
-            clear_help_for_exclusive_mode(app_state);
             return Some(app_state.resolve_jump_overlay());
         }
         return None;
@@ -3136,10 +3163,7 @@ fn apply_loaded_config<B: MouseBackend>(
     config: Config,
 ) -> Result<JumpOverlayResolution, Box<dyn Error>> {
     let active = action_handler.mouse_master.current_mode == ModeState::Active;
-    action_handler.mouse_master.release_left_button_if_held();
-    action_handler.clear_active_keys();
-    app_state.clear_active_action_keys_and_exit_exclusive_modes();
-    app_state.hide_help();
+    let _ = clear_all_runtime_input_state(action_handler, app_state, RuntimeCleanupReason::Reload);
     action_handler
         .mouse_master
         .apply_config_preserving_mode(config.clone());
@@ -3179,11 +3203,11 @@ fn panic_reset() -> JumpOverlayResolution {
     let mut action_handler = ACTION_HANDLER.write().unwrap();
     let mut app_state = APP_STATE.write().unwrap();
     action_handler.mouse_master.hard_reset_runtime();
-    action_handler.mouse_master.push_panic_reset_notification();
-    action_handler.clear_active_keys();
-    app_state.clear_active_action_keys_and_exit_exclusive_modes();
-    app_state.hide_help();
-    app_state.resolve_jump_overlay()
+    clear_all_runtime_input_state(
+        &mut action_handler,
+        &mut app_state,
+        RuntimeCleanupReason::PanicReset,
+    )
 }
 
 fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
@@ -3417,7 +3441,15 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::Exit => {
             exit_ui_hint_mode(UiHintExitReason::Exit);
-            let _ = panic_reset();
+            {
+                let mut action_handler = ACTION_HANDLER.write().unwrap();
+                let mut app_state = APP_STATE.write().unwrap();
+                let _ = clear_all_runtime_input_state(
+                    &mut action_handler,
+                    &mut app_state,
+                    RuntimeCleanupReason::Exit,
+                );
+            }
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
         }
         AppCommand::ReloadConfig => {
@@ -4879,6 +4911,76 @@ mod tests {
             .find(next_heading)
             .unwrap_or_else(|| panic!("missing README heading {next_heading}"));
         &after_start[..end]
+    }
+
+    #[test]
+    fn runtime_cleanup_clears_modes_and_held_inputs() {
+        let mut app_state = AppState::default();
+        app_state.set_bound_keys([VirtualKey::J]);
+        app_state.route_key_event(KeyEvent::new(VirtualKey::J, true), Some(Action::JumpMode));
+        while let Some(command) = app_state.pop_command() {
+            if let AppCommand::EnterJumpMode { activation_key, .. } = command {
+                let _ = app_state.enter_jump_mode(
+                    &JumpConfig::default(),
+                    FinalAdjustConfig::default(),
+                    JumpRegion::new(0, 0, 100, 100),
+                    activation_key,
+                );
+            }
+        }
+
+        let mut handler = ActionHandler::new(MouseMaster::new_with_backend(
+            checked_in_config(),
+            FakeBackend::default(),
+        ));
+        handler.process_active_keys(Action::MoveUp, true);
+        handler.mouse_master.handle_action(Action::ToggleDragMode);
+
+        let _ = clear_all_runtime_input_state(
+            &mut handler,
+            &mut app_state,
+            RuntimeCleanupReason::PanicReset,
+        );
+
+        assert!(handler.active_keys.is_empty());
+        assert!(!handler.mouse_master.left_button_held());
+        assert!(!app_state.is_jump_active());
+    }
+
+    #[test]
+    fn apply_loaded_config_uses_runtime_cleanup() {
+        let mut handler = ActionHandler::new(MouseMaster::new_with_backend(
+            checked_in_config(),
+            FakeBackend::default(),
+        ));
+        handler.process_active_keys(Action::MoveRight, true);
+        handler.mouse_master.handle_action(Action::ToggleDragMode);
+        let mut app_state = AppState::default();
+
+        let _ = apply_loaded_config(
+            &mut handler,
+            &mut app_state,
+            checked_in_config(),
+        )
+        .unwrap();
+
+        assert!(handler.active_keys.is_empty());
+        assert!(!handler.mouse_master.left_button_held());
+    }
+
+    #[test]
+    fn apply_active_mode_transition_false_cleans_up_and_sets_idle() {
+        let mut handler = ActionHandler::new(MouseMaster::new_with_backend(
+            checked_in_config(),
+            FakeBackend::default(),
+        ));
+        handler.process_active_keys(Action::MoveLeft, true);
+        let mut app_state = AppState::default();
+
+        let _ = apply_active_mode_transition(&mut handler, &mut app_state, false);
+
+        assert!(handler.active_keys.is_empty());
+        assert_eq!(handler.mouse_master.current_mode, ModeState::Idle);
     }
 
     fn readme_toml_block_after(marker: &str) -> &'static str {
