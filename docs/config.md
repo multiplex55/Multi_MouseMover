@@ -329,3 +329,15 @@ selection_keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 label_length = 2
 show_numbers = false
 ```
+
+### Surgical mode
+
+| Path | Type | Default | Required | Status | Description |
+| --- | --- | --- | --- | --- | --- |
+| `surgical_mode.enabled` | boolean | `false` | Yes | Active | Enables fixed-speed surgical movement tier. |
+| `surgical_mode.speed_px` | integer | `1` | Yes | Active | Fixed movement speed used when `surgical_mode` action is held. |
+| `surgical_mode.zoom_enabled` | boolean | `false` | Yes | Active | Enables cursor-follow zoom overlay while surgical mode is active. |
+| `surgical_mode.zoom_scale` | float | `2.0` | Yes | Active | Zoom factor for surgical overlay. |
+| `surgical_mode.zoom_size_px` | integer | `180` | Yes | Active | Surgical overlay square size in pixels. |
+| `surgical_mode.overlay_offset_x` | integer | `24` | Yes | Active | Overlay horizontal offset from cursor. |
+| `surgical_mode.overlay_offset_y` | integer | `24` | Yes | Active | Overlay vertical offset from cursor. |
