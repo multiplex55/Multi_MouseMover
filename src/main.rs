@@ -3286,6 +3286,14 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             AppCommand::EnterPositionHistoryMode { activation_key } => {
                 println!("[command] EnterPositionHistoryMode key={activation_key:?}")
             }
+            AppCommand::EnterBookmarkMode { activation_key } => {
+                println!("[command] EnterBookmarkMode key={activation_key:?}")
+            }
+            AppCommand::RecallBookmarkSlot(slot) => println!("[command] RecallBookmarkSlot slot={slot}"),
+            AppCommand::SetBookmarkSlot(slot) => println!("[command] SetBookmarkSlot slot={slot}"),
+            AppCommand::ClearBookmarkSlot(slot) => println!("[command] ClearBookmarkSlot slot={slot}"),
+            AppCommand::ClearAllBookmarks => println!("[command] ClearAllBookmarks"),
+            AppCommand::CancelBookmarkMode => println!("[command] CancelBookmarkMode"),
             AppCommand::PositionHistoryInput(event) => {
                 println!(
                     "[command] PositionHistoryInput key={:?} state={}",
@@ -3752,6 +3760,16 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .unwrap()
                 .enter_position_history_mode(activation_key);
             *UI_HINT_SESSION.lock().unwrap() = Some(session);
+        }
+        AppCommand::EnterBookmarkMode { activation_key } => {
+            APP_STATE.write().unwrap().enter_bookmark_mode(activation_key);
+        }
+        AppCommand::RecallBookmarkSlot(_slot) => {}
+        AppCommand::SetBookmarkSlot(_slot) => {}
+        AppCommand::ClearBookmarkSlot(_slot) => {}
+        AppCommand::ClearAllBookmarks => {}
+        AppCommand::CancelBookmarkMode => {
+            APP_STATE.write().unwrap().exit_bookmark_mode();
         }
         AppCommand::PositionHistoryInput(event) => {
             if !event.is_down {
