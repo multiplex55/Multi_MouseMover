@@ -1111,6 +1111,7 @@ mod tests {
             wheel_tick_interval_ms: 12,
             wheel_vertical_multiplier: 2,
             wheel_horizontal_multiplier: 4,
+            mode_context: "general".to_string(),
         };
 
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");

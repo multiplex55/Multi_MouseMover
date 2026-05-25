@@ -65,7 +65,7 @@ struct OverlayPosition {
     y: i32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct OverlayVisualState {
     snapshot_state: IndicatorState,
     text: Option<String>,
@@ -153,7 +153,7 @@ impl Default for StatusOverlayConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct OverlayRenderPlan {
     visible: bool,
     width: i32,

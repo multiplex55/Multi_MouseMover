@@ -2728,10 +2728,12 @@ fn drain_runtime_notifications<B: MouseBackend>(action_handler: &mut ActionHandl
 
     let help_visible = APP_STATE.read().unwrap().help_visible();
     if runtime_notification_enabled(&notification, &config, help_visible) {
+        let app_state = APP_STATE.read().unwrap();
         let stats = help_stats_from_snapshot(
             action_handler.mouse_master.runtime_snapshot(),
             action_handler.active_keys.contains(&Action::SlowMouse),
-            APP_STATE.read().unwrap().is_jump_active(),
+            app_state.is_jump_active(),
+            app_state.mode_context(),
         );
         let message = help_overlay::format_tooltip_message(&notification, &stats);
         help_overlay::show_temporary_tooltip(
