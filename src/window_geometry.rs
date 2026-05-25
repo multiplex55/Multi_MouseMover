@@ -1,8 +1,7 @@
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
-use windows::Win32::UI::WindowsAndMessaging::{
-    ClientToScreen, GetClientRect, GetForegroundWindow, GetWindowRect,
-};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetForegroundWindow, GetWindowRect};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowRect {
@@ -41,7 +40,7 @@ pub fn foreground_window_snap_points(
     clamp_to_window: bool,
 ) -> Option<WindowSnapPoints> {
     let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0 == 0 {
+    if hwnd.0.is_null() {
         return None;
     }
     let rect = foreground_rect(hwnd, use_extended_frame_bounds)?;
@@ -64,8 +63,8 @@ fn foreground_rect(hwnd: HWND, use_extended_frame_bounds: bool) -> Option<Window
 
 fn window_rect(hwnd: HWND) -> Option<WindowRect> {
     let mut rect = RECT::default();
-    let ok = unsafe { GetWindowRect(hwnd, &mut rect) }.as_bool();
-    ok.then_some(from_win_rect(rect))
+    unsafe { GetWindowRect(hwnd, &mut rect) }.ok()?;
+    Some(from_win_rect(rect))
 }
 
 fn extended_frame_bounds(hwnd: HWND) -> Option<WindowRect> {
@@ -93,16 +92,12 @@ fn from_win_rect(rect: RECT) -> WindowRect {
 #[allow(dead_code)]
 fn client_rect_in_screen(hwnd: HWND) -> Option<WindowRect> {
     let mut client = RECT::default();
-    if !unsafe { GetClientRect(hwnd, &mut client) }.as_bool() {
-        return None;
-    }
+    unsafe { GetClientRect(hwnd, &mut client) }.ok()?;
     let mut origin = POINT {
         x: client.left,
         y: client.top,
     };
-    if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
-        return None;
-    }
+    unsafe { ClientToScreen(hwnd, &mut origin) }.ok()?;
     Some(WindowRect {
         left: origin.x,
         top: origin.y,

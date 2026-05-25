@@ -785,6 +785,12 @@ fn format_action(action: &Action) -> String {
         Action::MoveToBottomEdge => "Jump to bottom edge".to_string(),
         Action::MoveToLeftEdge => "Jump to left edge".to_string(),
         Action::MoveToRightEdge => "Jump to right edge".to_string(),
+        Action::MoveToWindowTopEdge => "Jump to window top edge".to_string(),
+        Action::MoveToWindowBottomEdge => "Jump to window bottom edge".to_string(),
+        Action::MoveToWindowLeftEdge => "Jump to window left edge".to_string(),
+        Action::MoveToWindowRightEdge => "Jump to window right edge".to_string(),
+        Action::MoveToWindowCenter => "Jump to window center".to_string(),
+        Action::MoveToWindowTitlebar => "Jump to window titlebar".to_string(),
         Action::CenterCurrentMonitor => "Center current monitor".to_string(),
         Action::LeftClick => "Left click".to_string(),
         Action::RightClick => "Right click".to_string(),
@@ -876,6 +882,12 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::MoveToBottomEdge
         | Action::MoveToLeftEdge
         | Action::MoveToRightEdge
+        | Action::MoveToWindowTopEdge
+        | Action::MoveToWindowBottomEdge
+        | Action::MoveToWindowLeftEdge
+        | Action::MoveToWindowRightEdge
+        | Action::MoveToWindowCenter
+        | Action::MoveToWindowTitlebar
         | Action::CenterCurrentMonitor
         | Action::JumpMode
         | Action::JumpModeProfile(_)
