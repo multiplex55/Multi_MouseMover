@@ -162,6 +162,59 @@ static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_DECODED: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_SWALLOWED: AtomicU64 = AtomicU64::new(0);
 static UI_HINT_QUERY_ID: AtomicU64 = AtomicU64::new(0);
+lazy_static! {
+    static ref LAST_UI_HINT_COMPLETION: Mutex<Option<UiHintCompletionState>> = Mutex::new(None);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiHintCompletionAction {
+    MoveOnly,
+    LeftClick,
+    RightClick,
+    MiddleClick,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UiHintCompletionState {
+    trigger_key: VirtualKey,
+    target_x: i32,
+    target_y: i32,
+    action: UiHintCompletionAction,
+    expires_at: Instant,
+}
+
+fn resolve_ui_hint_completion_action(
+    config: &UiHintsConfig,
+    event: &KeyEvent,
+) -> UiHintCompletionAction {
+    let mut action = match config.after_select {
+        UiHintAfterSelect::Move => UiHintCompletionAction::MoveOnly,
+        UiHintAfterSelect::MoveAndLeftClick => UiHintCompletionAction::LeftClick,
+        UiHintAfterSelect::MoveAndRightClick => UiHintCompletionAction::RightClick,
+        UiHintAfterSelect::MoveAndMiddleClick => UiHintCompletionAction::MiddleClick,
+    };
+    if let Some(m) = config.left_click_modifier {
+        if m.matches_event(event) {
+            action = UiHintCompletionAction::LeftClick;
+        }
+    }
+    if let Some(m) = config.right_click_modifier {
+        if m.matches_event(event) {
+            action = UiHintCompletionAction::RightClick;
+        }
+    }
+    if let Some(m) = config.middle_click_modifier {
+        if m.matches_event(event) {
+            action = UiHintCompletionAction::MiddleClick;
+        }
+    }
+    if let Some(m) = config.browse_modifier {
+        if m.matches_event(event) {
+            action = UiHintCompletionAction::MoveOnly;
+        }
+    }
+    action
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct LoopDiagnostics {
@@ -535,6 +588,28 @@ pub enum UiHintAfterSelect {
     #[default]
     Move,
     MoveAndLeftClick,
+    MoveAndRightClick,
+    MoveAndMiddleClick,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct UiHintModifierConfig {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub right_alt: bool,
+    pub shift: bool,
+    pub win: bool,
+}
+
+impl UiHintModifierConfig {
+    fn matches_event(self, event: &KeyEvent) -> bool {
+        self.ctrl == event.ctrl_down
+            && self.alt == event.alt_down
+            && self.right_alt == event.right_alt_down
+            && self.shift == event.shift_down
+            && self.win == event.win_down
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
@@ -579,6 +654,11 @@ pub struct UiHintsConfig {
     pub query_timeout_ms: u64,
     pub target_point: UiHintTargetPoint,
     pub after_select: UiHintAfterSelect,
+    pub left_click_modifier: Option<UiHintModifierConfig>,
+    pub right_click_modifier: Option<UiHintModifierConfig>,
+    pub middle_click_modifier: Option<UiHintModifierConfig>,
+    pub browse_modifier: Option<UiHintModifierConfig>,
+    pub repeat_click_window_ms: u64,
     pub overlay: UiHintsOverlayConfig,
 }
 
@@ -600,6 +680,11 @@ impl Default for UiHintsConfig {
             query_timeout_ms: 1200,
             target_point: UiHintTargetPoint::ClickablePoint,
             after_select: UiHintAfterSelect::Move,
+            left_click_modifier: None,
+            right_click_modifier: None,
+            middle_click_modifier: None,
+            browse_modifier: None,
+            repeat_click_window_ms: 350,
             overlay: UiHintsOverlayConfig::default(),
         }
     }
@@ -3287,22 +3372,48 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     if ui_hints_debug_enabled() {
                         eprintln!("[ui-hints] completion/cancel: completed");
                     }
-                    let after_select = ACTION_HANDLER
-                        .read()
-                        .unwrap()
-                        .mouse_master
-                        .config
-                        .ui_hints
-                        .after_select;
+                    let config = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.clone();
+                    let action = resolve_ui_hint_completion_action(&config, &event);
                     {
                         let mut handler = ACTION_HANDLER.write().unwrap();
-                        handler
-                            .mouse_master
-                            .move_mouse_to(target.target_x, target.target_y);
-                        if matches!(after_select, UiHintAfterSelect::MoveAndLeftClick)
-                            && !handler.mouse_master.left_button_held()
-                        {
-                            handler.mouse_master.handle_action(Action::LeftClick);
+                        let mut replayed = false;
+                        if let Some(last) = *LAST_UI_HINT_COMPLETION.lock().unwrap() {
+                            if last.trigger_key == event.key
+                                && last.action != UiHintCompletionAction::MoveOnly
+                                && Instant::now() <= last.expires_at
+                            {
+                                handler.mouse_master.move_mouse_to(last.target_x, last.target_y);
+                                match last.action {
+                                    UiHintCompletionAction::LeftClick => handler.mouse_master.left_click_once(),
+                                    UiHintCompletionAction::RightClick => handler.mouse_master.right_click_once(),
+                                    UiHintCompletionAction::MiddleClick => handler.mouse_master.middle_click_once(),
+                                    UiHintCompletionAction::MoveOnly => {}
+                                }
+                                replayed = true;
+                            }
+                        }
+                        if !replayed {
+                            handler.mouse_master.move_mouse_to(target.target_x, target.target_y);
+                            match action {
+                                UiHintCompletionAction::LeftClick => {
+                                    if !handler.mouse_master.left_button_held() {
+                                        handler.mouse_master.left_click_once();
+                                    }
+                                }
+                                UiHintCompletionAction::RightClick => handler.mouse_master.right_click_once(),
+                                UiHintCompletionAction::MiddleClick => handler.mouse_master.middle_click_once(),
+                                UiHintCompletionAction::MoveOnly => {}
+                            }
+                        }
+                        *LAST_UI_HINT_COMPLETION.lock().unwrap() = Some(UiHintCompletionState {
+                            trigger_key: event.key,
+                            target_x: target.target_x,
+                            target_y: target.target_y,
+                            action,
+                            expires_at: Instant::now() + Duration::from_millis(config.repeat_click_window_ms),
+                        });
+                        if action == UiHintCompletionAction::MoveOnly {
+                            let _ = LAST_UI_HINT_COMPLETION.lock().unwrap().take();
                         }
                     }
                     exit_ui_hint_mode(UiHintExitReason::Completed);
@@ -6079,6 +6190,23 @@ mod tests {
         assert!(!config.ui_hints.overlay.dim_non_matching);
         assert!(!config.ui_hints.overlay.show_background);
         assert!(!config.ui_hints.overlay.show_border);
+    }
+
+    #[test]
+    fn ui_hint_after_select_and_modifier_resolution() {
+        let mut cfg = UiHintsConfig::default();
+        cfg.after_select = UiHintAfterSelect::MoveAndLeftClick;
+        assert_eq!(resolve_ui_hint_completion_action(&cfg, &KeyEvent::new(VirtualKey::A, true)), UiHintCompletionAction::LeftClick);
+
+        cfg.browse_modifier = Some(UiHintModifierConfig { shift: true, ..UiHintModifierConfig::default() });
+        let mut ev = KeyEvent::new(VirtualKey::A, true);
+        ev.shift_down = true;
+        assert_eq!(resolve_ui_hint_completion_action(&cfg, &ev), UiHintCompletionAction::MoveOnly);
+
+        cfg.right_click_modifier = Some(UiHintModifierConfig { ctrl: true, ..UiHintModifierConfig::default() });
+        let mut ev2 = KeyEvent::new(VirtualKey::A, true);
+        ev2.ctrl_down = true;
+        assert_eq!(resolve_ui_hint_completion_action(&cfg, &ev2), UiHintCompletionAction::RightClick);
     }
 
     #[test]

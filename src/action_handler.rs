@@ -368,6 +368,9 @@ impl<B: MouseBackend> MouseMaster<B> {
             eprintln!("Failed to perform left click: {e}");
         }
     }
+    pub fn left_click_once(&mut self) {
+        self.left_click();
+    }
 
     pub fn left_button_held(&self) -> bool {
         self.left_button_held
@@ -416,11 +419,17 @@ impl<B: MouseBackend> MouseMaster<B> {
             eprintln!("Failed to perform right click: {e}");
         }
     }
+    pub fn right_click_once(&mut self) {
+        self.right_click();
+    }
 
     fn middle_click(&mut self) {
         if let Err(e) = self.backend.click(Button::Middle) {
             eprintln!("Failed to perform middle click: {e}");
         }
+    }
+    pub fn middle_click_once(&mut self) {
+        self.middle_click();
     }
 
     fn scroll_wheel(&mut self, length: i32, axis: Axis) {
