@@ -15,6 +15,7 @@ mod monitor;
 mod overlay;
 mod position_history;
 mod screen_capture;
+mod zoom_overlay;
 mod ui_hint_overlay;
 mod ui_hints;
 mod window_geometry;
@@ -415,6 +416,7 @@ struct Config {
     position_history: PositionHistoryConfig,
     mouse_speed: MouseSpeedConfig,
     slow_mouse: SlowMouseConfig,
+    surgical_mode: SurgicalModeConfig,
     movement_profiles: HashMap<String, MouseSpeedConfig>,
     wheel: WheelConfig,
     wheel_profiles: HashMap<String, WheelProfileConfig>,
@@ -445,6 +447,7 @@ impl Default for Config {
             position_history: PositionHistoryConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             slow_mouse: SlowMouseConfig::default(),
+            surgical_mode: SurgicalModeConfig::default(),
             movement_profiles: HashMap::new(),
             wheel: WheelConfig::default(),
             wheel_profiles: HashMap::new(),
@@ -886,6 +889,32 @@ pub struct SlowMouseConfig {
     max_speed: i32,
     acceleration: i32,
     acceleration_rate: u32,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(default)]
+pub struct SurgicalModeConfig {
+    enabled: bool,
+    speed_px: i32,
+    zoom_enabled: bool,
+    zoom_scale: f32,
+    zoom_size_px: i32,
+    overlay_offset_x: i32,
+    overlay_offset_y: i32,
+}
+
+impl Default for SurgicalModeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            speed_px: 1,
+            zoom_enabled: false,
+            zoom_scale: 2.0,
+            zoom_size_px: 180,
+            overlay_offset_x: 24,
+            overlay_offset_y: 24,
+        }
+    }
 }
 
 impl Default for SlowMouseConfig {
@@ -1452,6 +1481,7 @@ impl Config {
         self.normalize_step_move_config();
         self.normalize_mouse_speed_config();
         self.normalize_slow_mouse_config();
+        self.normalize_surgical_mode_config();
         self.normalize_wheel_config();
         self.normalize_runtime_profiles();
         self.normalize_edge_jump_config();
@@ -1744,6 +1774,21 @@ impl Config {
         if self.wheel.horizontal_multiplier < 1 {
             warn_config_normalized("wheel.horizontal_multiplier is below 1; clamping to 1");
             self.wheel.horizontal_multiplier = 1;
+        }
+    }
+
+    fn normalize_surgical_mode_config(&mut self) {
+        if self.surgical_mode.speed_px < 1 {
+            warn_config_normalized("surgical_mode.speed_px is below 1; clamping to 1");
+            self.surgical_mode.speed_px = 1;
+        }
+        if self.surgical_mode.zoom_scale < 1.0 {
+            warn_config_normalized("surgical_mode.zoom_scale is below 1.0; clamping to 1.0");
+            self.surgical_mode.zoom_scale = 1.0;
+        }
+        if self.surgical_mode.zoom_size_px < 32 {
+            warn_config_normalized("surgical_mode.zoom_size_px is below 32; clamping to 32");
+            self.surgical_mode.zoom_size_px = 32;
         }
     }
 

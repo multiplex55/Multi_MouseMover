@@ -62,6 +62,7 @@ pub enum Action {
     ReloadConfig,
     PanicReset,
     SlowMouse,
+    SurgicalMode,
     JumpMode,
     JumpModeProfile(String),
     GridMode,
@@ -190,6 +191,7 @@ impl Action {
             "reload_config" => Some(Self::ReloadConfig),
             "panic_reset" => Some(Self::PanicReset),
             "slow_mouse" => Some(Self::SlowMouse),
+            "surgical_mode" => Some(Self::SurgicalMode),
             "jump_mode" => Some(Self::JumpMode),
             "grid_mode" | "grid" => Some(Self::GridMode),
             "screen_select" | "select_screen" => Some(Self::ScreenSelect),
@@ -267,7 +269,10 @@ impl Action {
     }
 
     pub fn is_continuous(&self) -> bool {
-        self.is_movement() || self == &Self::SlowMouse || self.is_wheel_direction()
+        self.is_movement()
+            || self == &Self::SlowMouse
+            || self == &Self::SurgicalMode
+            || self.is_wheel_direction()
     }
 }
 
@@ -295,6 +300,7 @@ mod tests {
             ("wheel_profile_previous", Action::WheelProfilePrevious),
             ("reload_config", Action::ReloadConfig),
             ("panic_reset", Action::PanicReset),
+            ("surgical_mode", Action::SurgicalMode),
             ("center_current_monitor", Action::CenterCurrentMonitor),
             ("click_then_disable", Action::ClickThenDisable),
             ("toggle_drag_mode", Action::ToggleDragMode),
@@ -459,6 +465,7 @@ mod tests {
             Action::ReloadConfig,
             Action::PanicReset,
             Action::SlowMouse,
+            Action::SurgicalMode,
             Action::JumpMode,
             Action::GridMode,
             Action::ScreenSelect,

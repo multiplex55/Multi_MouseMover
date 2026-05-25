@@ -7,6 +7,7 @@ use crate::{
     app_state::KeyEvent,
     keyboard::VirtualKey,
     window_geometry::{foreground_window_snap_points, WindowSnapPoints},
+    zoom_overlay::{update_zoom_state, SurgicalZoomConfig, SurgicalZoomState},
     Config, FinalAdjustConfig,
 };
 use action::{Action, Direction2D, StepMoveTier};
@@ -154,6 +155,7 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     pub acceleration_counter: u32,
     pub top_speed_behavior: TopSpeedBehavior,
     pub left_button_held: bool,
+    pub surgical_zoom_state: SurgicalZoomState,
     last_wheel_tick: Option<Instant>,
     mouse_speed_flash_until: Option<Instant>,
     wheel_speed_flash_until: Option<Instant>,
@@ -210,6 +212,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             acceleration_counter: 0,
             top_speed_behavior: TopSpeedBehavior::from_config(&config),
             left_button_held: false,
+            surgical_zoom_state: SurgicalZoomState::default(),
             last_wheel_tick: None,
             mouse_speed_flash_until: None,
             wheel_speed_flash_until: None,
@@ -588,6 +591,23 @@ impl<B: MouseBackend> MouseMaster<B> {
 
         if tick.moving {
             self.move_mouse(tick.dx.round() as i32, tick.dy.round() as i32);
+        }
+        let surgical_active = active_actions.contains(&Action::SurgicalMode);
+        if let Ok((x, y)) = self.backend.location() {
+            update_zoom_state(
+                &mut self.surgical_zoom_state,
+                SurgicalZoomConfig {
+                    enabled: self.config.surgical_mode.enabled,
+                    zoom_enabled: self.config.surgical_mode.zoom_enabled,
+                    zoom_scale: self.config.surgical_mode.zoom_scale,
+                    zoom_size_px: self.config.surgical_mode.zoom_size_px,
+                    overlay_offset_x: self.config.surgical_mode.overlay_offset_x,
+                    overlay_offset_y: self.config.surgical_mode.overlay_offset_y,
+                },
+                surgical_active,
+                x,
+                y,
+            );
         }
 
         self.tick_wheel(active_actions);
@@ -1174,9 +1194,19 @@ fn calculate_movement(
     }
 
     let speed = if active_actions.contains(&Action::SlowMouse) {
+        if active_actions.contains(&Action::SurgicalMode) && config.surgical_mode.enabled {
+            *current_speed = baseline_speed;
+            *acceleration_counter = 0;
+            config.surgical_mode.speed_px
+        } else {
+            *current_speed = baseline_speed;
+            *acceleration_counter = 0;
+            effective_slow_speed(config, baseline_speed)
+        }
+    } else if active_actions.contains(&Action::SurgicalMode) && config.surgical_mode.enabled {
         *current_speed = baseline_speed;
         *acceleration_counter = 0;
-        effective_slow_speed(config, baseline_speed)
+        config.surgical_mode.speed_px
     } else {
         advance_speed(
             config,
@@ -2100,6 +2130,47 @@ mod tests {
         assert!((tick.dy + (5.0 * DIAGONAL_NORMALIZATION)).abs() < f64::EPSILON);
         assert_eq!(mouse.mouse_speed_baseline, 7);
         assert_eq!(mouse.current_speed, 7);
+        assert_eq!(mouse.acceleration_counter, 0);
+    }
+
+    #[test]
+    fn surgical_mode_precedence_over_slow_and_normal() {
+        let mut config = config_with_speed_defaults();
+        config.surgical_mode.enabled = true;
+        config.surgical_mode.speed_px = 2;
+        config.slow_mouse.strategy = crate::SlowMouseStrategy::Fixed;
+        config.slow_mouse.fixed_speed = 5;
+        let mut mouse = MouseMaster::new_with_backend(config, MockMouseBackend::default());
+        let actions = actions([Action::MoveRight, Action::SlowMouse, Action::SurgicalMode]);
+        let tick = mouse.tick_movement(&actions, Duration::from_millis(8));
+        assert_eq!(tick.speed, 2);
+    }
+
+    #[test]
+    fn surgical_mode_fixed_speed_invariant() {
+        let mut config = config_with_speed_defaults();
+        config.surgical_mode.enabled = true;
+        config.surgical_mode.speed_px = 3;
+        let mut mouse = MouseMaster::new_with_backend(config, MockMouseBackend::default());
+        let actions = actions([Action::MoveRight, Action::SurgicalMode]);
+        let a = mouse.tick_movement(&actions, Duration::from_millis(8));
+        let b = mouse.tick_movement(&actions, Duration::from_millis(8));
+        assert_eq!(a.speed, 3);
+        assert_eq!(b.speed, 3);
+        assert_eq!(mouse.acceleration_counter, 0);
+    }
+
+    #[test]
+    fn surgical_mode_resets_acceleration_state() {
+        let mut config = config_with_speed_defaults();
+        config.surgical_mode.enabled = true;
+        config.surgical_mode.speed_px = 2;
+        let mut mouse = MouseMaster::new_with_backend(config, MockMouseBackend::default());
+        let normal = actions([Action::MoveRight]);
+        mouse.tick_movement(&normal, Duration::from_millis(8));
+        assert!(mouse.acceleration_counter > 0);
+        let surgical = actions([Action::MoveRight, Action::SurgicalMode]);
+        mouse.tick_movement(&surgical, Duration::from_millis(8));
         assert_eq!(mouse.acceleration_counter, 0);
     }
 
