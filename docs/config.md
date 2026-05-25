@@ -262,13 +262,14 @@ font_scale = 1.1
 - `selection_keys` removes whitespace, uppercases alpha keys, and removes duplicates while preserving first occurrence order.
 - Values outside supported ranges are normalized and logged as config warnings so the mode remains usable.
 - Duplicate and deeply nested UIA controls are common in complex apps; increase `min_hint_spacing_px` to reduce visual crowding.
-- When many controls are visible, results may be capped by `max_hints`; consider larger `selection_keys` and spacing tuning before raising the cap aggressively.
+- When many controls are visible (for example browsers/Electron apps), results may be capped by `max_hints`; consider larger `selection_keys` and spacing tuning before raising the cap aggressively.
 
 ## UI Hints limitations
 
-- UIA dependency variability: each app exposes a different UIA tree, so discoverability and clickable points can vary widely between Explorer, browsers, Electron apps, Office apps, and custom IDE toolkits.
-- Elevation mismatch: an elevated foreground app can block or reduce non-elevated UIA visibility. Run Multi MouseMover at matching integrity level for consistent results.
-- Duplicate/nested controls: many apps surface overlapping descendants; `min_hint_spacing_px` is the primary noise-reduction control for this behavior.
+- Weak UIA trees: each app exposes a different UIA tree, and some expose very little actionable metadata, so discoverability can vary widely.
+- Elevation boundary behavior: an elevated foreground app can block or reduce non-elevated UIA visibility (and vice versa). Run Multi MouseMover at a matching integrity level when possible.
+- Custom-rendered/game UIs: many non-standard UI toolkits and game engines do not provide robust UIA metadata, so hints may be partial or absent.
+- High-density element apps: browsers/Electron apps can expose very large control trees; tune `min_hint_spacing_px` and `max_hints` to keep overlays readable.
 
 ## Migration Notes
 
