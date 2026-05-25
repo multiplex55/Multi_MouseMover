@@ -13,6 +13,7 @@ mod key_chord;
 mod keyboard;
 mod monitor;
 mod overlay;
+mod position_history;
 mod screen_capture;
 mod ui_hint_overlay;
 mod ui_hints;
@@ -410,6 +411,7 @@ struct Config {
     status_overlay: StatusOverlayConfig,
     tooltip_overlay: TooltipOverlayConfig,
     ui_hints: UiHintsConfig,
+    position_history: PositionHistoryConfig,
     mouse_speed: MouseSpeedConfig,
     slow_mouse: SlowMouseConfig,
     movement_profiles: HashMap<String, MouseSpeedConfig>,
@@ -438,6 +440,7 @@ impl Default for Config {
             status_overlay: StatusOverlayConfig::default(),
             tooltip_overlay: TooltipOverlayConfig::default(),
             ui_hints: UiHintsConfig::default(),
+            position_history: PositionHistoryConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             slow_mouse: SlowMouseConfig::default(),
             movement_profiles: HashMap::new(),
@@ -566,6 +569,28 @@ pub struct TooltipOverlayConfig {
     pub events: TooltipOverlayEvents,
 }
 
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
+pub struct PositionHistoryConfig {
+    pub enabled: bool,
+    pub max_positions: usize,
+    pub selection_keys: String,
+    pub label_length: i32,
+    pub show_numbers: bool,
+}
+
+impl Default for PositionHistoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_positions: 20,
+            selection_keys: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string(),
+            label_length: 2,
+            show_numbers: false,
+        }
+    }
+}
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UiHintOverflowBehavior {

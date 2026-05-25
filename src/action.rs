@@ -65,6 +65,9 @@ pub enum Action {
     Disable,
     ShowHelp,
     UiHintMode,
+    SaveMousePosition,
+    ClearMousePositions,
+    PositionHistoryMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -183,6 +186,9 @@ impl Action {
             "disable" | "disable_app" | "idle_mode" => Some(Self::Disable),
             "show_help" | "help" | "toggle_help" | "hints" | "show_hints" => Some(Self::ShowHelp),
             "ui_hint_mode" | "ui_hints" | "show_ui_hints" | "hint_mode" => Some(Self::UiHintMode),
+            "save_mouse_position" => Some(Self::SaveMousePosition),
+            "clear_mouse_positions" => Some(Self::ClearMousePositions),
+            "position_history_mode" => Some(Self::PositionHistoryMode),
             action
                 if action.starts_with("movement_profile:")
                     || action.starts_with("mouse_profile:")
@@ -535,6 +541,22 @@ mod tests {
     fn ui_hint_mode_is_not_continuous() {
         assert!(!Action::UiHintMode.is_continuous());
     }
+
+    #[test]
+    fn parses_position_history_actions() {
+        assert_eq!(
+            Action::from_string("save_mouse_position"),
+            Some(Action::SaveMousePosition)
+        );
+        assert_eq!(
+            Action::from_string("clear_mouse_positions"),
+            Some(Action::ClearMousePositions)
+        );
+        assert_eq!(
+            Action::from_string("position_history_mode"),
+            Some(Action::PositionHistoryMode)
+        );
+    }
 }
 
 /// Manages actions associated with key presses
@@ -591,4 +613,5 @@ impl<B: crate::action_handler::MouseBackend> ActionHandler<B> {
         self.mouse_master
             .tick_movement(&self.active_keys, Duration::from_millis(0))
     }
+
 }
