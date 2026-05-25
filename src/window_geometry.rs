@@ -97,7 +97,7 @@ fn client_rect_in_screen(hwnd: HWND) -> Option<WindowRect> {
         x: client.left,
         y: client.top,
     };
-    if unsafe { ClientToScreen(hwnd, &mut origin) }.is_err() {
+    if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
         return None;
     }
     Some(WindowRect {
