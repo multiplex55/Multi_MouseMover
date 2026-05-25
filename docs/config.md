@@ -99,7 +99,11 @@ key_bindings = [
 | `polling_rate` | integer milliseconds | `8` | Yes | Active | Main input loop delay. Lower values poll more often. |
 | `key_bindings` | array of `[key, action]` pairs | built-in movement/click/jump bindings | Yes | Active | Active-mode action bindings. |
 | `system_bindings.toggle_active` | key chord string | `"Ctrl+E"` | Yes | Active | Global active/idle toggle. |
-| `system_bindings.exit` | key chord string | `"Escape"` | Yes | Active | Global exit binding. |
+| `system_bindings.exit` | key chord string | `"Escape"` | Yes | Active | Global exit binding. Routed before mode-local handlers. |
+| `system_bindings.exit_ignore_extra_modifiers` | boolean | `true` | Yes | Active | When true, `exit` matches if required modifiers are present even when extra modifiers are held. |
+| `system_bindings.panic_reset` | key chord string | `"RightAlt+Escape"` | Yes | Active | Global non-exiting panic cleanup binding, routed before mode-local handlers. |
+| `system_bindings.panic_reset_ignore_extra_modifiers` | boolean | `true` | Yes | Active | When true, `panic_reset` allows extra held modifiers. |
+| `system_bindings.panic_reset_sets_idle` | boolean | `true` | Yes | Active | When true, panic reset also sets idle mode (`SetActiveMode { active = false }`). |
 | `mouse_speed.default_speed` | integer | `1` | Yes | Active | Normal held-movement speed and replacement for legacy `starting_speed`. |
 | `mouse_speed.min_speed` | integer | `1` | Yes | Active | Lower bound for runtime mouse speed changes. |
 | `mouse_speed.max_speed` | integer | `12` | Yes | Active | Upper bound for runtime mouse speed changes. |
@@ -469,3 +473,22 @@ coordinate_policy = "clamp_to_virtual_screen"
 ### Surgical behavior semantics
 
 `SurgicalMode` is a **held precision modifier**: movement requires both the surgical key and a movement key. Holding surgical alone produces no cursor movement. While active, movement runs at fixed `surgical_mode.speed_px` with no acceleration ramp.
+
+
+## System binding priority and Escape conflicts
+
+`system_bindings` are always evaluated first for key-down events: `exit`, then `panic_reset`, then `toggle_active`.
+Only after those checks does mode-local routing run (bookmark cancel, UI hint, jump/grid, etc.).
+
+Conflict example:
+
+```toml
+[system_bindings]
+exit = "Escape"
+
+[bookmark_mode]
+cancel = "Escape" # conceptual mode-local cancel
+```
+
+Pressing `Escape` dispatches `Exit`, not bookmark cancel, because system bindings have higher priority.
+If you instead set `exit = "Ctrl+Alt+Escape"`, a plain `Escape` can still be consumed by bookmark cancel.
