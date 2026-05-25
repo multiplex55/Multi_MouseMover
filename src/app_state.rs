@@ -439,11 +439,7 @@ impl AppState {
             return ModeContext::Inactive;
         }
         if self.is_position_history_active() {
-            if self.is_position_history_activation_key_event(&event) {
-                return;
-            }
-            self.enqueue_command(AppCommand::PositionHistoryInput(event));
-            return;
+            return ModeContext::UiHintActive;
         }
 
         if self.is_jump_active() {

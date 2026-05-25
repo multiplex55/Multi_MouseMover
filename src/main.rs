@@ -3555,7 +3555,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::SaveMousePosition => {
-            let mut handler = ACTION_HANDLER.write().unwrap();
+            let handler = ACTION_HANDLER.write().unwrap();
             let cfg = handler.mouse_master.config.position_history.clone();
             if !cfg.enabled {
                 return;
