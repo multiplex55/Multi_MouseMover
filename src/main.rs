@@ -497,6 +497,12 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("RightAlt+A", "move_to_left_edge"),
         ("RightAlt+S", "move_to_bottom_edge"),
         ("RightAlt+D", "move_to_right_edge"),
+        ("RightAlt+Ctrl+W", "move_to_window_top_edge"),
+        ("RightAlt+Ctrl+A", "move_to_window_left_edge"),
+        ("RightAlt+Ctrl+S", "move_to_window_bottom_edge"),
+        ("RightAlt+Ctrl+D", "move_to_window_right_edge"),
+        ("RightAlt+Ctrl+Q", "move_to_window_center"),
+        ("RightAlt+Ctrl+E", "move_to_window_titlebar"),
         ("RightAlt+R", "reload_config"),
         ("RightAlt+Escape", "panic_reset"),
         ("Alt+E", "step_move_up"),
@@ -4750,6 +4756,12 @@ mod tests {
                 ["RightAlt+A", "move_to_left_edge"],
                 ["RightAlt+S", "move_to_bottom_edge"],
                 ["RightAlt+D", "move_to_right_edge"],
+                ["RightAlt+Ctrl+W", "move_to_window_top_edge"],
+                ["RightAlt+Ctrl+A", "move_to_window_left_edge"],
+                ["RightAlt+Ctrl+S", "move_to_window_bottom_edge"],
+                ["RightAlt+Ctrl+D", "move_to_window_right_edge"],
+                ["RightAlt+Ctrl+Q", "move_to_window_center"],
+                ["RightAlt+Ctrl+E", "move_to_window_titlebar"],
                 ["U", "wheel_speed_up"],
                 ["I", "wheel_speed_down"],
                 ["C", "mouse_speed_up"],
@@ -4772,6 +4784,12 @@ mod tests {
             ("RightAlt+A", Action::MoveToLeftEdge),
             ("RightAlt+S", Action::MoveToBottomEdge),
             ("RightAlt+D", Action::MoveToRightEdge),
+            ("RightAlt+Ctrl+W", Action::MoveToWindowTopEdge),
+            ("RightAlt+Ctrl+A", Action::MoveToWindowLeftEdge),
+            ("RightAlt+Ctrl+S", Action::MoveToWindowBottomEdge),
+            ("RightAlt+Ctrl+D", Action::MoveToWindowRightEdge),
+            ("RightAlt+Ctrl+Q", Action::MoveToWindowCenter),
+            ("RightAlt+Ctrl+E", Action::MoveToWindowTitlebar),
             ("U", Action::WheelSpeedUp),
             ("I", Action::WheelSpeedDown),
             ("C", Action::MouseSpeedUp),
@@ -5803,8 +5821,10 @@ enabled = true",
             },
             Case {
                 name: "window_jump",
-                config_toml: "[window_jump]
-enabled = true",
+                config_toml: r#"key_bindings = []
+
+[window_jump]
+enabled = true"#,
                 expected_substring:
                     "window_jump.enabled=true but no window-jump action bindings were found",
             },
@@ -5908,7 +5928,7 @@ enabled = true",
         assert!(summary.contains("features: [enabled, bindings]"));
         assert!(summary.contains("surgical_mode: enabled=false bindings=0"));
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
-        assert!(summary.contains("window_jump: enabled=true bindings=0"));
+        assert!(summary.contains("window_jump: enabled=true bindings=6"));
         assert!(summary
             .contains("position_history: enabled=true bindings=save:0 clear:0 mode:0 total:0"));
         assert!(summary.contains("warnings=1"));

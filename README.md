@@ -56,7 +56,9 @@ Action bindings run only while active mode is enabled:
 | `H` | Navigate back |
 | `Y` | Navigate forward |
 | `Q` / `P` | Switch to idle |
-| `RightAlt+W` / `RightAlt+A` / `RightAlt+S` / `RightAlt+D` | Move cursor to screen edge |
+| `RightAlt+W` / `RightAlt+A` / `RightAlt+S` / `RightAlt+D` | Jump to **monitor edge** (top / left / bottom / right) |
+| `RightAlt+Ctrl+W` / `RightAlt+Ctrl+A` / `RightAlt+Ctrl+S` / `RightAlt+Ctrl+D` | Jump to **active-window edge** (top / left / bottom / right) |
+| `RightAlt+Ctrl+Q` / `RightAlt+Ctrl+E` | Jump to active-window center / titlebar |
 | `Alt+E` / `Alt+S` / `Alt+D` / `Alt+F` | Step move up / left / down / right (normal tier) |
 | `Alt+Ctrl+E` / `Alt+Ctrl+S` / `Alt+Ctrl+D` / `Alt+Ctrl+F` | Step move up / left / down / right (small tier) |
 | `Alt+Shift+E` / `Alt+Shift+S` / `Alt+Shift+D` / `Alt+Shift+F` | Step move up / left / down / right (large tier) |
