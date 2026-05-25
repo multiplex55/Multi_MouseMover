@@ -115,13 +115,10 @@ pub enum UiHintState {
     },
 }
 
-
 #[derive(Debug)]
 pub enum PositionHistoryState {
     Inactive,
-    Active {
-        activation_key: VirtualKey,
-    },
+    Active { activation_key: VirtualKey },
 }
 
 #[derive(Debug)]
@@ -818,7 +815,7 @@ impl AppState {
 
         if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
             self.exit_ui_hint_mode();
-        self.exit_position_history_mode();
+            self.exit_position_history_mode();
             self.enqueue_command(AppCommand::SetActiveMode { active: false });
             return;
         }
@@ -835,7 +832,7 @@ impl AppState {
             ) && event.is_down
             {
                 self.exit_ui_hint_mode();
-        self.exit_position_history_mode();
+                self.exit_position_history_mode();
             }
             self.enqueue_command(AppCommand::UiHintInput(event));
             return;
@@ -896,14 +893,14 @@ impl AppState {
 
         if event.is_down && matches!(action.as_ref(), Some(Action::ReloadConfig)) {
             self.exit_ui_hint_mode();
-        self.exit_position_history_mode();
+            self.exit_position_history_mode();
             self.enqueue_command(AppCommand::ReloadConfig);
             return;
         }
 
         if event.is_down && matches!(action.as_ref(), Some(Action::PanicReset)) {
             self.exit_ui_hint_mode();
-        self.exit_position_history_mode();
+            self.exit_position_history_mode();
             self.enqueue_command(AppCommand::PanicReset);
             return;
         }
@@ -2928,14 +2925,33 @@ mod tests {
         let mut state = AppState::default();
         state.set_bound_keys([VirtualKey::M, VirtualKey::J, VirtualKey::Backspace]);
 
-        state.route_key_event(KeyEvent::new(VirtualKey::M, true), Some(Action::SaveMousePosition));
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::SaveMousePosition]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::M, true),
+            Some(Action::SaveMousePosition),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::SaveMousePosition]
+        );
 
-        state.route_key_event(KeyEvent::new(VirtualKey::Backspace, true), Some(Action::ClearMousePositions));
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::ClearMousePositions]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Backspace, true),
+            Some(Action::ClearMousePositions),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ClearMousePositions]
+        );
 
-        state.route_key_event(KeyEvent::new(VirtualKey::J, true), Some(Action::PositionHistoryMode));
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::EnterPositionHistoryMode { activation_key: VirtualKey::J }]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::J, true),
+            Some(Action::PositionHistoryMode),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::EnterPositionHistoryMode {
+                activation_key: VirtualKey::J
+            }]
+        );
     }
-
 }

@@ -155,7 +155,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod mapping_tests {
     use super::*;

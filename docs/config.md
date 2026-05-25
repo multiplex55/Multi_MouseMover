@@ -253,6 +253,9 @@ key_bindings = [
 | `ui_hints.min_hint_spacing_px` | integer pixels | `32` | Yes | Active | Minimum spacing between hints. |
 | `ui_hints.include_thread_windows` | boolean | `true` | Yes | Active | Includes same-thread windows in candidate collection. |
 | `ui_hints.include_owned_popups` | boolean | `true` | Yes | Active | Includes owned popup windows in candidate collection. |
+| `ui_hints.query_strategy` | enum string | `"descendants"` | Yes | Active | Query traversal strategy (`descendants`, `children_then_descendants`). |
+| `ui_hints.min_targets_before_fallback` | integer | `8` | Yes | Active | Minimum children matches before fallback to descendants when using children-first strategy. |
+| `ui_hints.query_timeout_ms` | integer milliseconds | `1200` | Yes | Active | Timeout for async UIA queries before mode exits. |
 | `ui_hints.target_point` | enum string | `"clickable_point"` | Yes | Active | Target point choice for hint selection (`clickable_point`, `center`). |
 | `ui_hints.after_select` | enum string | `"move"` | Yes | Active | Post-selection behavior (`move`, `move_and_left_click`). |
 | `ui_hints.overlay.font_scale` | float | `1.0` | Yes | Active | UI hint overlay font scaling factor. |
@@ -328,6 +331,9 @@ Use `jump.coarse.width` and `jump.coarse.height` for new coarse jump sizing. Kee
 | `ui_hints.min_hint_spacing_px` | integer px | `32` | Clamped to `0..=400`; dedupes nearby candidates to reduce noisy nested/duplicate controls. |
 | `ui_hints.include_thread_windows` | bool | `true` | Include same-thread windows during candidate collection. |
 | `ui_hints.include_owned_popups` | bool | `true` | Include owned popup windows (menus/dropdowns/tooltips) in candidate collection. |
+| `ui_hints.query_strategy` | enum | `"descendants"` | Supported: `descendants`, `children_then_descendants`. |
+| `ui_hints.min_targets_before_fallback` | integer | `8` | Clamped to `1..=5000`; applies to `children_then_descendants` fallback threshold. |
+| `ui_hints.query_timeout_ms` | integer ms | `1200` | Clamped to `100..=30000`; query aborts if deadline is exceeded. |
 | `ui_hints.target_point` | enum | `"clickable_point"` | Supported: `clickable_point` (current runtime behavior). |
 | `ui_hints.after_select` | enum | `"move"` | Supported: `move` (moves cursor only). |
 
@@ -349,6 +355,9 @@ max_hints = 250
 min_hint_spacing_px = 28
 include_thread_windows = true
 include_owned_popups = true
+query_strategy = "descendants"
+min_targets_before_fallback = 8
+query_timeout_ms = 1200
 target_point = "clickable_point"
 after_select = "move"
 
