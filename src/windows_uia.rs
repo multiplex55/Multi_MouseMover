@@ -96,8 +96,10 @@ fn should_fallback_to_descendants(
     child_count: i32,
     min_targets_before_fallback: i32,
 ) -> bool {
-    matches!(strategy, crate::UiHintQueryStrategy::ChildrenThenDescendants)
-        && child_count < min_targets_before_fallback
+    matches!(
+        strategy,
+        crate::UiHintQueryStrategy::ChildrenThenDescendants
+    ) && child_count < min_targets_before_fallback
 }
 
 fn discover_windows_in_scope(
@@ -199,7 +201,9 @@ fn collect_window_elements(
                 }
             }
         };
-        let len = arr.Length().map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let len = arr
+            .Length()
+            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let mut out = Vec::new();
         for i in 0..len {
             if let Ok(el) = arr.GetElement(i) {

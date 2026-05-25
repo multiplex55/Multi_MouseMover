@@ -2,7 +2,13 @@ use crate::monitor::{
     all_monitor_rects, current_monitor_rect_for_cursor, monitor_containing_point,
     next_monitor_with_wrap, MonitorEdge, MonitorRect,
 };
-use crate::{action, app_state::KeyEvent, keyboard::VirtualKey, Config, FinalAdjustConfig};
+use crate::{
+    action,
+    app_state::KeyEvent,
+    keyboard::VirtualKey,
+    window_geometry::{foreground_window_snap_points, WindowSnapPoints},
+    Config, FinalAdjustConfig,
+};
 use action::{Action, Direction2D, StepMoveTier};
 use enigo::*;
 use std::collections::{HashSet, VecDeque};
@@ -283,6 +289,12 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::MoveToLeftEdge => self.move_to_monitor_edge(MonitorEdge::Left),
             Action::MoveToRightEdge => self.move_to_monitor_edge(MonitorEdge::Right),
             Action::CenterCurrentMonitor => self.center_current_monitor(),
+            Action::MoveToWindowTopEdge => self.move_to_window_snap(|p| p.top_edge),
+            Action::MoveToWindowBottomEdge => self.move_to_window_snap(|p| p.bottom_edge),
+            Action::MoveToWindowLeftEdge => self.move_to_window_snap(|p| p.left_edge),
+            Action::MoveToWindowRightEdge => self.move_to_window_snap(|p| p.right_edge),
+            Action::MoveToWindowCenter => self.move_to_window_snap(|p| p.center),
+            Action::MoveToWindowTitlebar => self.move_to_window_snap(|p| p.titlebar),
             Action::ScreenSelect => self.select_next_screen(),
             Action::StepMove { direction, tier } => self.step_move(direction, tier),
             Action::ClickThenDisable => {
@@ -648,6 +660,33 @@ impl<B: MouseBackend> MouseMaster<B> {
     pub fn move_to_monitor_edge(&mut self, edge: MonitorEdge) {
         if let Some(rect) = current_monitor_rect_for_cursor(self.config.edge_jump.use_work_area) {
             let (x, y) = edge_target(rect, edge, self.config.edge_jump.offset_px);
+            self.move_mouse_to(x, y);
+        }
+    }
+
+    fn window_snap_for_action(action: &Action, points: WindowSnapPoints) -> Option<(i32, i32)> {
+        match action {
+            Action::MoveToWindowTopEdge => Some(points.top_edge),
+            Action::MoveToWindowBottomEdge => Some(points.bottom_edge),
+            Action::MoveToWindowLeftEdge => Some(points.left_edge),
+            Action::MoveToWindowRightEdge => Some(points.right_edge),
+            Action::MoveToWindowCenter => Some(points.center),
+            Action::MoveToWindowTitlebar => Some(points.titlebar),
+            _ => None,
+        }
+    }
+
+    fn move_to_window_snap(&mut self, map: fn(WindowSnapPoints) -> (i32, i32)) {
+        if !self.config.window_jump.enabled {
+            return;
+        }
+        if let Some(points) = foreground_window_snap_points(
+            self.config.window_jump.use_extended_frame_bounds,
+            self.config.window_jump.edge_offset_px,
+            self.config.window_jump.titlebar_y_offset_px,
+            self.config.window_jump.clamp_to_window,
+        ) {
+            let (x, y) = map(points);
             self.move_mouse_to(x, y);
         }
     }
@@ -1637,8 +1676,14 @@ mod tests {
             &mut acceleration_counter,
         );
 
-        assert_eq!(movement.speed, effective_slow_speed(&config, config.starting_speed));
-        assert_eq!(movement.dx, f64::from(effective_slow_speed(&config, config.starting_speed)));
+        assert_eq!(
+            movement.speed,
+            effective_slow_speed(&config, config.starting_speed)
+        );
+        assert_eq!(
+            movement.dx,
+            f64::from(effective_slow_speed(&config, config.starting_speed))
+        );
         assert_eq!(movement.dy, 0.0);
     }
 
@@ -2017,7 +2062,8 @@ mod tests {
         config.slow_mouse.min_speed = 1;
         config.slow_mouse.max_speed = 12;
         let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
-        let slow_diagonal_actions = actions(&[Action::MoveUp, Action::MoveRight, Action::SlowMouse]);
+        let slow_diagonal_actions =
+            actions(&[Action::MoveUp, Action::MoveRight, Action::SlowMouse]);
 
         let tick = mouse.tick_movement(&slow_diagonal_actions, Duration::from_millis(8));
         let magnitude = (tick.dx.powi(2) + tick.dy.powi(2)).sqrt();
@@ -2311,6 +2357,43 @@ mod tests {
             tier: StepMoveTier::Large,
         });
         assert_eq!(mouse.backend.moves, vec![(299, 95)]);
+    }
+
+    #[test]
+    fn window_snap_actions_map_to_expected_points() {
+        let p = WindowSnapPoints {
+            top_edge: (1, 2),
+            bottom_edge: (3, 4),
+            left_edge: (5, 6),
+            right_edge: (7, 8),
+            center: (9, 10),
+            titlebar: (11, 12),
+        };
+        assert_eq!(
+            window_snap_for_action(&Action::MoveToWindowTopEdge, p),
+            Some((1, 2))
+        );
+        assert_eq!(
+            window_snap_for_action(&Action::MoveToWindowBottomEdge, p),
+            Some((3, 4))
+        );
+        assert_eq!(
+            window_snap_for_action(&Action::MoveToWindowLeftEdge, p),
+            Some((5, 6))
+        );
+        assert_eq!(
+            window_snap_for_action(&Action::MoveToWindowRightEdge, p),
+            Some((7, 8))
+        );
+        assert_eq!(
+            window_snap_for_action(&Action::MoveToWindowCenter, p),
+            Some((9, 10))
+        );
+        assert_eq!(
+            window_snap_for_action(&Action::MoveToWindowTitlebar, p),
+            Some((11, 12))
+        );
+        assert_eq!(window_snap_for_action(&Action::MoveUp, p), None);
     }
 
     #[test]

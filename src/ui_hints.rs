@@ -448,7 +448,10 @@ mod tests {
     #[test]
     fn supports_custom_symbol_keyset_input() {
         let mut session = UiHintSession::new(vec![target(1, "A;")], vec!['A', ';']).unwrap();
-        assert_eq!(session.handle_key(VirtualKey::A), UiHintInputUpdate::PrefixChanged);
+        assert_eq!(
+            session.handle_key(VirtualKey::A),
+            UiHintInputUpdate::PrefixChanged
+        );
         assert_eq!(
             session.handle_key(VirtualKey::Oem1),
             UiHintInputUpdate::Completed {
@@ -460,7 +463,10 @@ mod tests {
     #[test]
     fn supports_digit_keyset_input() {
         let mut session = UiHintSession::new(vec![target(1, "12")], vec!['1', '2']).unwrap();
-        assert_eq!(session.handle_key(VirtualKey::Num1), UiHintInputUpdate::PrefixChanged);
+        assert_eq!(
+            session.handle_key(VirtualKey::Num1),
+            UiHintInputUpdate::PrefixChanged
+        );
         assert_eq!(
             session.handle_key(VirtualKey::Num2),
             UiHintInputUpdate::Completed {
@@ -473,11 +479,18 @@ mod tests {
     fn collapses_duplicate_bounds_and_sorts_deterministically() {
         let config = sample_config();
         let targets = build_ui_hint_targets(
-            vec![raw(5, 10, 10, 10, 10, None), raw(2, 10, 10, 10, 10, None), raw(3, 20, 10, 10, 10, None)],
+            vec![
+                raw(5, 10, 10, 10, 10, None),
+                raw(2, 10, 10, 10, 10, None),
+                raw(3, 20, 10, 10, 10, None),
+            ],
             &config,
         );
         assert_eq!(targets.iter().map(|t| t.id).collect::<Vec<_>>(), vec![2, 3]);
-        assert_eq!(targets.iter().map(|t| t.label.clone()).collect::<Vec<_>>(), vec!["AA", "AB"]);
+        assert_eq!(
+            targets.iter().map(|t| t.label.clone()).collect::<Vec<_>>(),
+            vec!["AA", "AB"]
+        );
     }
 
     #[test]

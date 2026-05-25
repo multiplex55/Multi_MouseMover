@@ -67,8 +67,13 @@ pub enum AppCommand {
     JumpInput(KeyEvent, Option<Action>),
     GridInput(KeyEvent, Option<Action>),
     UiHintInput(KeyEvent),
-    UiHintQueryCompleted { query_id: u64, elements: Vec<crate::windows_uia::RawUiElement> },
-    UiHintQueryFailed { query_id: u64 },
+    UiHintQueryCompleted {
+        query_id: u64,
+        elements: Vec<crate::windows_uia::RawUiElement>,
+    },
+    UiHintQueryFailed {
+        query_id: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -91,8 +96,16 @@ pub struct AppState {
 #[derive(Debug)]
 pub enum UiHintState {
     Inactive,
-    Querying { activation_key: VirtualKey, query_id: u64, foreground_hwnd: isize },
-    Active { activation_key: VirtualKey, query_id: u64, foreground_hwnd: isize },
+    Querying {
+        activation_key: VirtualKey,
+        query_id: u64,
+        foreground_hwnd: isize,
+    },
+    Active {
+        activation_key: VirtualKey,
+        query_id: u64,
+        foreground_hwnd: isize,
+    },
 }
 
 #[derive(Debug)]
@@ -303,13 +316,26 @@ impl AppState {
     ) {
         self.exit_jump_mode();
         self.exit_grid_mode();
-        self.ui_hints = UiHintState::Querying { activation_key, query_id, foreground_hwnd };
+        self.ui_hints = UiHintState::Querying {
+            activation_key,
+            query_id,
+            foreground_hwnd,
+        };
     }
 
     pub fn activate_ui_hint_if_querying(&mut self, query_id: u64) -> bool {
-        if let UiHintState::Querying { activation_key, query_id: active_query_id, foreground_hwnd } = self.ui_hints {
+        if let UiHintState::Querying {
+            activation_key,
+            query_id: active_query_id,
+            foreground_hwnd,
+        } = self.ui_hints
+        {
             if active_query_id == query_id {
-                self.ui_hints = UiHintState::Active { activation_key, query_id, foreground_hwnd };
+                self.ui_hints = UiHintState::Active {
+                    activation_key,
+                    query_id,
+                    foreground_hwnd,
+                };
                 return true;
             }
         }
@@ -318,7 +344,9 @@ impl AppState {
 
     pub fn current_ui_hint_query_id(&self) -> Option<u64> {
         match self.ui_hints {
-            UiHintState::Querying { query_id, .. } | UiHintState::Active { query_id, .. } => Some(query_id),
+            UiHintState::Querying { query_id, .. } | UiHintState::Active { query_id, .. } => {
+                Some(query_id)
+            }
             UiHintState::Inactive => None,
         }
     }
@@ -1068,7 +1096,11 @@ mod tests {
     }
 
     fn enter_ui_hint_mode(state: &mut AppState, activation_key: VirtualKey) {
-        state.ui_hints = UiHintState::Active { activation_key, query_id: 1, foreground_hwnd: 0 };
+        state.ui_hints = UiHintState::Active {
+            activation_key,
+            query_id: 1,
+            foreground_hwnd: 0,
+        };
     }
 
     fn final_adjust_config(enabled: bool) -> Config {
@@ -2237,7 +2269,10 @@ mod tests {
         ] {
             let event = KeyEvent::new(key, true);
             state.route_key_event(event, action.clone());
-            assert_eq!(state.pop_command(), Some(AppCommand::GridInput(event, action)));
+            assert_eq!(
+                state.pop_command(),
+                Some(AppCommand::GridInput(event, action))
+            );
         }
     }
 
