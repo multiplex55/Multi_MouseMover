@@ -7,11 +7,9 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
     COINIT_APARTMENTTHREADED,
 };
-use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
-    IUIAutomationElementArray, TreeScope_Descendants, UIA_IsEnabledPropertyId,
-    UIA_IsKeyboardFocusablePropertyId, UIA_IsOffscreenPropertyId,
+    IUIAutomationElementArray, TreeScope_Descendants,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
@@ -87,17 +85,8 @@ fn build_interactive_condition(
     automation: &IUIAutomation,
 ) -> Result<IUIAutomationCondition, UiHintQueryError> {
     unsafe {
-        let enabled = automation
-            .CreatePropertyCondition(UIA_IsEnabledPropertyId, &VARIANT::from(true))
-            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
-        let onscreen = automation
-            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, &VARIANT::from(false))
-            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
-        let focusable = automation
-            .CreatePropertyCondition(UIA_IsKeyboardFocusablePropertyId, &VARIANT::from(true))
-            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         automation
-            .CreateAndConditionFromArray(&[enabled, onscreen, focusable])
+            .CreateTrueCondition()
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)
     }
 }
@@ -197,6 +186,15 @@ fn collect_window_elements(
 
 fn normalize_element(el: &IUIAutomationElement) -> Option<RawUiElement> {
     unsafe {
+        if !el.CurrentIsEnabled().ok()?.as_bool() {
+            return None;
+        }
+        if el.CurrentIsOffscreen().ok()?.as_bool() {
+            return None;
+        }
+        if !el.CurrentIsKeyboardFocusable().ok()?.as_bool() {
+            return None;
+        }
         let rect = el.CurrentBoundingRectangle().ok()?;
         if !is_valid_rect(&rect) {
             return None;
