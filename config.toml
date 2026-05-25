@@ -485,3 +485,10 @@ width = 10
 height = 8
 visual_context_margin_percent = 0
 zoom_scale = 1.0
+
+[position_history]
+enabled = true
+max_positions = 20
+selection_keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+label_length = 2
+show_numbers = false

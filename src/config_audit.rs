@@ -360,6 +360,11 @@ fn is_known_active_path(path: &str) -> bool {
         "ui_hints.overlay.dim_non_matching",
         "ui_hints.overlay.show_background",
         "ui_hints.overlay.show_border",
+        "position_history.enabled",
+        "position_history.max_positions",
+        "position_history.selection_keys",
+        "position_history.label_length",
+        "position_history.show_numbers",
         "jump.mode",
         "jump.cursor_between_stages",
         "jump.start_region",
@@ -781,4 +786,18 @@ mod tests {
         assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
         assert!(warning.message.contains("could not be parsed"));
     }
+    #[test]
+    fn audit_accepts_position_history_paths() {
+        let report = audit_config_toml(r#"
+            [position_history]
+            enabled = true
+            max_positions = 16
+            selection_keys = "ASDF"
+            label_length = 2
+            show_numbers = false
+        "#);
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+
 }
