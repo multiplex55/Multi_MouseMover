@@ -91,6 +91,16 @@ key_bindings = [
     ["Alt+Shift+F", "step_move_large_right"],
     ["/", "show_help"],
     ["0", "ui_hint_mode"],
+    ["Shift+B", "bookmark_mode"],
+    ["1", "bookmark_slot_1"],
+    ["2", "bookmark_slot_2"],
+    ["3", "bookmark_slot_3"],
+    ["4", "bookmark_slot_4"],
+    ["5", "bookmark_slot_5"],
+    ["6", "bookmark_slot_6"],
+    ["7", "bookmark_slot_7"],
+    ["8", "bookmark_slot_8"],
+    ["9", "bookmark_slot_9"],
 
     # Position history (chosen to avoid overlap with existing bindings).
     ["RightAlt+F13", "save_mouse_position"],
@@ -534,6 +544,18 @@ max_positions = 20
 selection_keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 label_length = 2
 show_numbers = false
+
+[bookmarks]
+enabled = true
+file = "bookmarks.json"
+slot_count = 9
+show_tooltips = true
+desktop_behavior = "focus_anchor_window"
+desktop_switch_wait_ms = 150
+require_desktop_switch_success = false
+cancel_key = "Escape"
+clear_modifier_key = "Backspace"
+coordinate_policy = "clamp_to_virtual_screen"
 
 [surgical_mode]
 enabled = true

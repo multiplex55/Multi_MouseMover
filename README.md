@@ -56,6 +56,16 @@ Action bindings run only while active mode is enabled:
 | `RightAlt+M` | Save current cursor position (session only) |
 | `RightAlt+Backspace` | Clear saved cursor positions (session only) |
 | `RightAlt+J` | Enter position-history selection mode |
+| `Shift+B` | Enter bookmark mode |
+| `1` | Select bookmark slot 1 (in bookmark mode) |
+| `2` | Select bookmark slot 2 (in bookmark mode) |
+| `3` | Select bookmark slot 3 (in bookmark mode) |
+| `4` | Select bookmark slot 4 (in bookmark mode) |
+| `5` | Select bookmark slot 5 (in bookmark mode) |
+| `6` | Select bookmark slot 6 (in bookmark mode) |
+| `7` | Select bookmark slot 7 (in bookmark mode) |
+| `8` | Select bookmark slot 8 (in bookmark mode) |
+| `9` | Select bookmark slot 9 (in bookmark mode) |
 | `H` | Navigate back |
 | `Y` | Navigate forward |
 | `Q` / `P` | Switch to idle |
@@ -74,6 +84,8 @@ Action bindings run only while active mode is enabled:
 The app starts active. Press `Ctrl+E` (or `Ctrl+Q` in configs that set that as `system_bindings.toggle_active`) to switch between active and idle mode. In active mode, configured action bindings are swallowed and translated into mouse commands. In idle mode, normal action bindings are ignored so the same keys can pass through to Windows and other apps.
 
 System bindings bypass the active-mode gate. The configured toggle-active chord (commonly `Ctrl+E` or `Ctrl+Q`) can always reactivate control, and `Escape` remains the configured exit key.
+
+Bookmark mode is configurable under `[bookmarks]` in `config.toml` (including slot count, key validation fallbacks, desktop behavior, and coordinate policy). The bookmark JSON file path is resolved relative to the resolved config file path when a relative `bookmarks.file` value is used.
 
 ## Drag Behavior
 

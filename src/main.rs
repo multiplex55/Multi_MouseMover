@@ -421,6 +421,7 @@ struct Config {
     tooltip_overlay: TooltipOverlayConfig,
     ui_hints: UiHintsConfig,
     position_history: PositionHistoryConfig,
+    bookmarks: BookmarksConfig,
     mouse_speed: MouseSpeedConfig,
     slow_mouse: SlowMouseConfig,
     surgical_mode: SurgicalModeConfig,
@@ -453,6 +454,7 @@ impl Default for Config {
             tooltip_overlay: TooltipOverlayConfig::default(),
             ui_hints: UiHintsConfig::default(),
             position_history: PositionHistoryConfig::default(),
+            bookmarks: BookmarksConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             slow_mouse: SlowMouseConfig::default(),
             surgical_mode: SurgicalModeConfig::default(),
@@ -498,6 +500,16 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("RightAlt+M", "save_mouse_position"),
         ("RightAlt+Backspace", "clear_mouse_positions"),
         ("RightAlt+J", "position_history_mode"),
+        ("Shift+B", "bookmark_mode"),
+        ("1", "bookmark_slot_1"),
+        ("2", "bookmark_slot_2"),
+        ("3", "bookmark_slot_3"),
+        ("4", "bookmark_slot_4"),
+        ("5", "bookmark_slot_5"),
+        ("6", "bookmark_slot_6"),
+        ("7", "bookmark_slot_7"),
+        ("8", "bookmark_slot_8"),
+        ("9", "bookmark_slot_9"),
         ("H", "navigate_back"),
         ("Y", "navigate_forward"),
         ("Q", "disable"),
@@ -601,6 +613,38 @@ pub struct PositionHistoryConfig {
     pub selection_keys: String,
     pub label_length: i32,
     pub show_numbers: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
+pub struct BookmarksConfig {
+    pub enabled: bool,
+    pub file: String,
+    pub slot_count: u32,
+    pub show_tooltips: bool,
+    pub desktop_behavior: String,
+    pub desktop_switch_wait_ms: u64,
+    pub require_desktop_switch_success: bool,
+    pub cancel_key: String,
+    pub clear_modifier_key: String,
+    pub coordinate_policy: String,
+}
+
+impl Default for BookmarksConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            file: "bookmarks.json".to_string(),
+            slot_count: 9,
+            show_tooltips: true,
+            desktop_behavior: "focus_anchor_window".to_string(),
+            desktop_switch_wait_ms: 150,
+            require_desktop_switch_success: false,
+            cancel_key: "Escape".to_string(),
+            clear_modifier_key: "Backspace".to_string(),
+            coordinate_policy: "clamp_to_virtual_screen".to_string(),
+        }
+    }
 }
 
 impl Default for PositionHistoryConfig {
@@ -1531,6 +1575,7 @@ impl Config {
         self.normalize_window_jump_config();
         self.normalize_tooltip_overlay_config();
         self.normalize_ui_hints_config();
+        self.normalize_bookmarks_config();
         // Keep the legacy field stable for downstream code and diagnostics after the
         // modern baseline has won normalization.
         self.starting_speed = self.mouse_speed.default_speed;
@@ -1663,6 +1708,31 @@ impl Config {
             .window_jump
             .titlebar_y_offset_px
             .clamp(0, MAX_EDGE_JUMP_OFFSET_PX);
+    }
+
+    fn normalize_bookmarks_config(&mut self) {
+        self.bookmarks.slot_count = self.bookmarks.slot_count.clamp(1, 99);
+        if self.bookmarks.file.trim().is_empty() {
+            warn_config_normalized("bookmarks.file is empty; using bookmarks.json");
+            self.bookmarks.file = "bookmarks.json".to_string();
+        }
+        self.bookmarks.desktop_switch_wait_ms = self.bookmarks.desktop_switch_wait_ms.clamp(0, 3000);
+        if VirtualKey::from_string(&self.bookmarks.cancel_key).is_none() {
+            warn_config_normalized("bookmarks.cancel_key is invalid; using Escape");
+            self.bookmarks.cancel_key = "Escape".to_string();
+        }
+        if VirtualKey::from_string(&self.bookmarks.clear_modifier_key).is_none() {
+            warn_config_normalized("bookmarks.clear_modifier_key is invalid; using Backspace");
+            self.bookmarks.clear_modifier_key = "Backspace".to_string();
+        }
+        if self.bookmarks.coordinate_policy != "clamp_to_virtual_screen" {
+            warn_config_normalized("bookmarks.coordinate_policy is invalid; using clamp_to_virtual_screen");
+            self.bookmarks.coordinate_policy = "clamp_to_virtual_screen".to_string();
+        }
+        if self.bookmarks.desktop_behavior != "focus_anchor_window" {
+            warn_config_normalized("bookmarks.desktop_behavior is invalid; using focus_anchor_window");
+            self.bookmarks.desktop_behavior = "focus_anchor_window".to_string();
+        }
     }
 
     fn normalize_final_adjust_config(&mut self) {
@@ -7000,5 +7070,55 @@ enabled = true"#,
         assert!(overlay.is_visible());
         overlay.hide();
         assert!(!overlay.is_visible());
+    }
+
+    #[test]
+    fn bookmarks_config_normalizes_invalid_values() {
+        let config = parse_config(
+            r#"[bookmarks]
+slot_count = 0
+file = ""
+desktop_behavior = "bad"
+coordinate_policy = "bad"
+cancel_key = "Nope"
+clear_modifier_key = "Nope"
+desktop_switch_wait_ms = 999999
+"#,
+        );
+        assert_eq!(config.bookmarks.slot_count, 1);
+        assert_eq!(config.bookmarks.file, "bookmarks.json");
+        assert_eq!(config.bookmarks.desktop_behavior, "focus_anchor_window");
+        assert_eq!(config.bookmarks.coordinate_policy, "clamp_to_virtual_screen");
+        assert_eq!(config.bookmarks.cancel_key, "Escape");
+        assert_eq!(config.bookmarks.clear_modifier_key, "Backspace");
+        assert_eq!(config.bookmarks.desktop_switch_wait_ms, 3000);
+    }
+
+    #[test]
+    fn bookmarks_slot_count_high_clamps() {
+        let config = parse_config("[bookmarks]\nslot_count = 999\n");
+        assert_eq!(config.bookmarks.slot_count, 99);
+    }
+
+    #[test]
+    fn config_audit_recognizes_bookmarks_paths() {
+        let report = audit_config_toml(
+            r#"[bookmarks]
+enabled = true
+file = "bookmarks.json"
+slot_count = 9
+show_tooltips = true
+desktop_behavior = "focus_anchor_window"
+desktop_switch_wait_ms = 10
+require_desktop_switch_success = false
+cancel_key = "Escape"
+clear_modifier_key = "Backspace"
+coordinate_policy = "clamp_to_virtual_screen"
+"#,
+        );
+        assert!(report
+            .warnings
+            .iter()
+            .all(|w| !w.message.contains("Unknown config path")));
     }
 }
