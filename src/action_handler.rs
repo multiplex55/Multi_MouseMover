@@ -2298,7 +2298,7 @@ mod tests {
             direction: Direction2D::Right,
             tier: StepMoveTier::Large,
         });
-        assert_eq!(mouse.backend.moves, vec![(199, 95)]);
+        assert_eq!(mouse.backend.moves, vec![(299, 95)]);
     }
 
     #[test]

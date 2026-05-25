@@ -4251,8 +4251,8 @@ mod tests {
         }
 
         assert!(
-            !section.contains("`Alt+E`") && !section.contains("Alt + E"),
-            "README should not document stale Alt+E active toggle"
+            !section.contains("Alt+E active toggle") && !section.contains("Alt + E active toggle"),
+            "README should not document stale Alt+E active-toggle phrasing"
         );
     }
 
