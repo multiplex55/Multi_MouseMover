@@ -180,15 +180,18 @@ hide_threshold_px = 0
 
 ## UI Hints Mode
 
-UI Hints mode discovers accessible controls from the foreground app and overlays short labels so you can jump the cursor directly to UI targets. Trigger it with your configured binding (default sample config: `0`).
+UI Hints mode discovers accessible controls from the foreground app and overlays short labels so you can jump the cursor directly to UI targets. Example binding in `config.toml`:
+
+```toml
+["0", "ui_hint_mode"]
+```
 
 Interaction flow:
 
-1. Press the UI Hints binding to start query mode.
-2. Multi MouseMover queries UI Automation (UIA) for visible actionable controls.
-3. Labels are rendered near discovered controls.
-4. Type label characters to narrow candidates; an exact match moves the cursor to the target point.
-5. `Backspace` removes one typed character; `Escape` cancels and exits UI Hints mode.
+1. Press the UI Hints binding.
+2. Labels appear after the UI Automation (UIA) query completes.
+3. Type the label for your target control.
+4. `Escape` cancels and exits UI Hints mode at any point.
 
 Optional tooltip events for query lifecycle can be toggled under `[tooltip_overlay.events]`:
 
@@ -199,9 +202,10 @@ Optional tooltip events for query lifecycle can be toggled under `[tooltip_overl
 
 Limitations and caveats:
 
-- UIA output varies per app and framework, so hint availability is not uniform.
-- If the target app is elevated and Multi MouseMover is not, UIA visibility may be limited.
-- Apps with duplicated/nested controls can produce dense hint clusters; increase `ui_hints.min_hint_spacing_px` to reduce overlap noise.
+- Some apps expose weak or incomplete UIA trees, so hint coverage can be sparse or inconsistent.
+- Elevation boundaries apply: if the foreground app is elevated and Multi MouseMover is not (or vice versa), UIA visibility and interaction can be reduced.
+- Custom-rendered or game UIs often provide little/no actionable UIA metadata, so hints may be missing.
+- High-density UI apps (especially browsers/Electron apps) can generate crowded overlays; tune `ui_hints.min_hint_spacing_px` and `ui_hints.max_hints` to reduce noise.
 
 ## Final Adjust
 
