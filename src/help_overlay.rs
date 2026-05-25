@@ -41,6 +41,7 @@ pub enum HelpBindingSection {
     ClickDrag,
     Wheel,
     JumpGrid,
+    Bookmarks,
     UiHints,
     StepMove,
     Surgical,
@@ -54,6 +55,7 @@ impl HelpBindingSection {
             Self::ClickDrag => "Click/Drag",
             Self::Wheel => "Wheel",
             Self::JumpGrid => "Jump/Grid",
+            Self::Bookmarks => "Bookmarks",
             Self::UiHints => "UI Hints",
             Self::StepMove => "Step Move",
             Self::Surgical => "Surgical",
@@ -646,6 +648,7 @@ pub fn format_help_lines(view: &HelpOverlayView, config: TooltipOverlayConfig) -
         HelpBindingSection::ClickDrag,
         HelpBindingSection::Wheel,
         HelpBindingSection::JumpGrid,
+        HelpBindingSection::Bookmarks,
         HelpBindingSection::UiHints,
         HelpBindingSection::StepMove,
         HelpBindingSection::Surgical,
@@ -875,7 +878,9 @@ fn format_action(action: &Action) -> String {
         Action::ClearMousePositions => "Clear saved mouse positions".to_string(),
         Action::PositionHistoryMode => "Position history mode".to_string(),
         Action::BookmarkMode => "Bookmark mode".to_string(),
-        Action::BookmarkSlot(slot) => format!("Bookmark slot {slot}"),
+        Action::BookmarkSlot(slot) => format!("Jump to bookmark slot {slot}"),
+        Action::ClearBookmarkSlot(slot) => format!("Clear bookmark slot {slot}"),
+        Action::ClearAllBookmarks => "Clear all bookmarks".to_string(),
         Action::StepMove { direction, tier } => {
             let direction = match direction {
                 Direction2D::Up => "up",
@@ -946,9 +951,10 @@ fn action_section(action: &Action) -> HelpBindingSection {
         | Action::UiHintMode
         | Action::SaveMousePosition
         | Action::ClearMousePositions
-        | Action::PositionHistoryMode
-        | Action::BookmarkMode
-        | Action::BookmarkSlot(_) => HelpBindingSection::JumpGrid,
+        | Action::PositionHistoryMode => HelpBindingSection::JumpGrid,
+        Action::BookmarkMode | Action::BookmarkSlot(_) | Action::ClearBookmarkSlot(_) | Action::ClearAllBookmarks => {
+            HelpBindingSection::Bookmarks
+        }
         Action::Exit
         | Action::ReloadConfig
         | Action::PanicReset
@@ -1273,6 +1279,25 @@ mod tests {
         assert!(lines.find("Movement:").unwrap() < lines.find("Click/Drag:").unwrap());
         assert!(lines.find("Click/Drag:").unwrap() < lines.find("Wheel:").unwrap());
         assert!(lines.find("Wheel:").unwrap() < lines.find("Jump/Grid:").unwrap());
+    }
+
+    #[test]
+    fn bookmark_entries_appear_in_help_bindings() {
+        let view = help_view_from_bindings(
+            [
+                (KeyChord::parse("Shift+B").unwrap(), Action::BookmarkMode),
+                (KeyChord::from_key(VirtualKey::Num1), Action::BookmarkSlot(1)),
+                (KeyChord::from_key(VirtualKey::Backspace), Action::ClearBookmarkSlot(1)),
+                (KeyChord::from_key(VirtualKey::Escape), Action::Disable),
+            ],
+            ModeContext::Active,
+        );
+
+        let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
+        assert!(lines.contains("Bookmarks:"));
+        assert!(lines.contains("Shift+B  -  Bookmark mode"));
+        assert!(lines.contains("Num1  -  Jump to bookmark slot 1"));
+        assert!(lines.contains("Backspace  -  Clear bookmark slot 1"));
     }
 
     #[test]
