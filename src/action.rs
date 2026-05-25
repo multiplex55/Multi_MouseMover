@@ -211,14 +211,12 @@ impl Action {
             "position_history_mode" => Some(Self::PositionHistoryMode),
             "bookmark_mode" => Some(Self::BookmarkMode),
             "clear_all_bookmarks" => Some(Self::ClearAllBookmarks),
-            action if action.starts_with("bookmark_slot_") => {
-                action
-                    .trim_start_matches("bookmark_slot_")
-                    .parse::<u8>()
-                    .ok()
-                    .filter(|slot| (1..=9).contains(slot))
-                    .map(Self::BookmarkSlot)
-            }
+            action if action.starts_with("bookmark_slot_") => action
+                .trim_start_matches("bookmark_slot_")
+                .parse::<u8>()
+                .ok()
+                .filter(|slot| (1..=9).contains(slot))
+                .map(Self::BookmarkSlot),
             action if action.starts_with("bookmark_") => action
                 .trim_start_matches("bookmark_")
                 .parse::<u8>()
@@ -633,7 +631,10 @@ mod tests {
 
     #[test]
     fn parses_bookmark_actions() {
-        assert_eq!(Action::from_string("bookmark_mode"), Some(Action::BookmarkMode));
+        assert_eq!(
+            Action::from_string("bookmark_mode"),
+            Some(Action::BookmarkMode)
+        );
         assert_eq!(
             Action::from_string("bookmark_slot_1"),
             Some(Action::BookmarkSlot(1))
@@ -642,7 +643,10 @@ mod tests {
             Action::from_string("bookmark_slot_9"),
             Some(Action::BookmarkSlot(9))
         );
-        assert_eq!(Action::from_string("bookmark_1"), Some(Action::BookmarkSlot(1)));
+        assert_eq!(
+            Action::from_string("bookmark_1"),
+            Some(Action::BookmarkSlot(1))
+        );
         assert_eq!(
             Action::from_string("jump_to_bookmark_1"),
             Some(Action::BookmarkSlot(1))

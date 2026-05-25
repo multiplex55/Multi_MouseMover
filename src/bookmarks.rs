@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_single_slot_keeps_others_intact() {
+    fn clear_existing_slot_removes_only_target_slot() {
         let mut store = BookmarkStore::new(9);
         store.set_slot(1, fixture_record(1));
         store.set_slot(2, fixture_record(2));
@@ -281,6 +281,29 @@ mod tests {
         assert_eq!(store.remove_slot(1), RemoveOutcome::Removed);
         assert_eq!(store.get_slot(1), None);
         assert!(store.get_slot(2).is_some());
+    }
+
+    #[test]
+    fn clearing_empty_slot_yields_not_found() {
+        let mut store = BookmarkStore::new(9);
+        assert_eq!(store.remove_slot(3), RemoveOutcome::NotFound);
+    }
+
+    #[test]
+    fn save_after_clear_removes_slot_from_persisted_json() {
+        let path = test_path("clear_persist");
+        let mut store = BookmarkStore::new(9);
+        store.set_slot(1, fixture_record(1));
+        store.set_slot(2, fixture_record(2));
+        store.save(&path).unwrap();
+
+        assert_eq!(store.remove_slot(1), RemoveOutcome::Removed);
+        store.save(&path).unwrap();
+
+        let raw = fs::read_to_string(path).unwrap();
+        let file: BookmarkFile = serde_json::from_str(&raw).unwrap();
+        assert!(!file.slots.contains_key(&1));
+        assert!(file.slots.contains_key(&2));
     }
 
     #[test]

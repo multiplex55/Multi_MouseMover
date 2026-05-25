@@ -28,7 +28,7 @@ use action_handler::*;
 use app_state::{AppCommand, AppState, GridInputUpdate, JumpOverlayResolution, KeyEvent};
 use bookmarks::{
     resolve_bookmarks_path, BookmarkRecord, BookmarkStore, MonitorRect as BookmarkMonitorRect,
-    SetOutcome,
+    RemoveOutcome, SetOutcome,
 };
 use config_audit::{audit_config_toml, ConfigAuditSeverity, ConfigAuditWarning};
 #[cfg(test)]
@@ -524,6 +524,7 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("RightAlt+Backspace", "clear_mouse_positions"),
         ("RightAlt+J", "position_history_mode"),
         ("Shift+B", "bookmark_mode"),
+        ("Shift+Ctrl+B", "clear_all_bookmarks"),
         ("1", "bookmark_slot_1"),
         ("2", "bookmark_slot_2"),
         ("3", "bookmark_slot_3"),
@@ -3981,8 +3982,47 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
             APP_STATE.write().unwrap().exit_bookmark_mode();
         }
-        AppCommand::ClearBookmarkSlot(_slot) => {}
-        AppCommand::ClearAllBookmarks => {}
+        AppCommand::ClearBookmarkSlot(slot) => {
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+            if !config.bookmarks.enabled {
+                return;
+            }
+            let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            let outcome = runtime.store.remove_slot(slot);
+            match outcome {
+                RemoveOutcome::Removed => match runtime.store.save(&runtime.bookmark_path) {
+                    Ok(()) => show_bookmark_tooltip(&config, format!("Bookmark {slot} cleared")),
+                    Err(e) => {
+                        show_bookmark_tooltip(&config, format!("Bookmark {slot} clear failed: {e}"))
+                    }
+                },
+                RemoveOutcome::NotFound => {
+                    show_bookmark_tooltip(&config, format!("Bookmark {slot} already empty"))
+                }
+            }
+            APP_STATE.write().unwrap().exit_bookmark_mode();
+        }
+        AppCommand::ClearAllBookmarks => {
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+            if !config.bookmarks.enabled {
+                return;
+            }
+            let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            runtime.store.clear_all();
+            match runtime.store.save(&runtime.bookmark_path) {
+                Ok(()) => show_bookmark_tooltip(&config, "All bookmarks cleared".to_string()),
+                Err(e) => {
+                    show_bookmark_tooltip(&config, format!("Clear all bookmarks failed: {e}"))
+                }
+            }
+            APP_STATE.write().unwrap().exit_bookmark_mode();
+        }
         AppCommand::CancelBookmarkMode => {
             APP_STATE.write().unwrap().exit_bookmark_mode();
         }

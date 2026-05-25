@@ -70,7 +70,8 @@ pub fn focus_anchor_window(anchor_hwnd: Option<isize>) -> FocusAnchorResult {
             reason: Some(FocusAnchorFailureReason::HwndNotFound),
         };
     }
-    let restored_or_visible = unsafe { ShowWindow(hwnd, SW_RESTORE).as_bool() || IsWindowVisible(hwnd).as_bool() };
+    let restored_or_visible =
+        unsafe { ShowWindow(hwnd, SW_RESTORE).as_bool() || IsWindowVisible(hwnd).as_bool() };
     if !restored_or_visible {
         return FocusAnchorResult {
             success: false,
