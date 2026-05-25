@@ -96,6 +96,16 @@ include_thread_windows = true
 include_owned_popups = true
 target_point = "clickable_point"
 after_select = "move"
+repeat_click_window_ms = 350
+# Optional post-select modifiers (exact modifier state match).
+# [ui_hints.left_click_modifier]
+# shift = true
+# [ui_hints.right_click_modifier]
+# ctrl = true
+# [ui_hints.middle_click_modifier]
+# alt = true
+# [ui_hints.browse_modifier]
+# right_alt = true
 
 [ui_hints.overlay]
 font_scale = 1.0
