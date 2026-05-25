@@ -31,7 +31,7 @@ key_bindings = [
     ["F", "move_right"],
     ["LeftShift", "slow_mouse"],
     ["LeftAlt", "scroll_modifier"],
-    ["B", "surgical_mode"],
+    ["Z", "surgical_mode"],
 
     ["J", "left_click"],
     ["K", "right_click"],
@@ -46,9 +46,10 @@ key_bindings = [
     # ["O", "wheel_right"],
 
 
-    ["Z", "mouse_speed_reset"],
+    #["Z", "mouse_speed_reset"],
     ["M", "mouse_speed_down"],
     [",", "mouse_speed_up"],
+
     # Wheel speed controls.
     ["U", "wheel_speed_down"],
     ["I", "wheel_speed_up"],
@@ -91,7 +92,7 @@ key_bindings = [
     ["Alt+Shift+F", "step_move_large_right"],
     ["/", "show_help"],
     ["0", "ui_hint_mode"],
-    ["Shift+B", "bookmark_mode"],
+    ["B", "bookmark_mode"],
     ["1", "bookmark_slot_1"],
     ["2", "bookmark_slot_2"],
     ["3", "bookmark_slot_3"],
