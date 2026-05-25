@@ -533,7 +533,7 @@ mod tests {
         assert_eq!(
             session.handle_key(VirtualKey::B),
             UiHintInputUpdate::Completed {
-                target: session.targets[4].clone()
+                target: session.targets[1].clone()
             }
         );
     }
