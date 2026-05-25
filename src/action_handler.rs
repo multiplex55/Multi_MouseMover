@@ -159,6 +159,7 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     wheel_speed_flash_until: Option<Instant>,
     pending_notifications: VecDeque<RuntimeNotification>,
     monitor_rects_provider: fn(bool) -> Vec<MonitorRect>,
+    window_snap_points_provider: fn(bool, i32, i32, bool) -> Option<WindowSnapPoints>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,12 +215,21 @@ impl<B: MouseBackend> MouseMaster<B> {
             wheel_speed_flash_until: None,
             pending_notifications: VecDeque::new(),
             monitor_rects_provider: all_monitor_rects,
+            window_snap_points_provider: foreground_window_snap_points,
         }
     }
 
     #[cfg(test)]
     fn set_monitor_rects_provider(&mut self, provider: fn(bool) -> Vec<MonitorRect>) {
         self.monitor_rects_provider = provider;
+    }
+
+    #[cfg(test)]
+    fn set_window_snap_points_provider(
+        &mut self,
+        provider: fn(bool, i32, i32, bool) -> Option<WindowSnapPoints>,
+    ) {
+        self.window_snap_points_provider = provider;
     }
 
     pub fn runtime_snapshot(&self) -> MouseRuntimeSnapshot {
@@ -680,7 +690,7 @@ impl<B: MouseBackend> MouseMaster<B> {
         if !self.config.window_jump.enabled {
             return;
         }
-        if let Some(points) = foreground_window_snap_points(
+        if let Some(points) = (self.window_snap_points_provider)(
             self.config.window_jump.use_extended_frame_bounds,
             self.config.window_jump.edge_offset_px,
             self.config.window_jump.titlebar_y_offset_px,
@@ -1331,6 +1341,22 @@ mod tests {
                 bottom: 900,
             },
         ]
+    }
+
+    fn fake_window_snap_points_provider(
+        _use_extended_frame_bounds: bool,
+        _edge_offset_px: i32,
+        _titlebar_y_offset_px: i32,
+        _clamp_to_window: bool,
+    ) -> Option<WindowSnapPoints> {
+        Some(WindowSnapPoints {
+            top_edge: (10, 11),
+            bottom_edge: (20, 21),
+            left_edge: (30, 31),
+            right_edge: (40, 41),
+            center: (50, 51),
+            titlebar: (60, 61),
+        })
     }
 
     fn actions(actions: &[Action]) -> HashSet<Action> {
@@ -2394,6 +2420,37 @@ mod tests {
             Some((11, 12))
         );
         assert_eq!(window_snap_for_action(&Action::MoveUp, p), None);
+    }
+
+    #[test]
+    fn window_snap_actions_dispatch_to_expected_absolute_points() {
+        let actions = [
+            (Action::MoveToWindowTopEdge, (10, 11)),
+            (Action::MoveToWindowBottomEdge, (20, 21)),
+            (Action::MoveToWindowLeftEdge, (30, 31)),
+            (Action::MoveToWindowRightEdge, (40, 41)),
+            (Action::MoveToWindowCenter, (50, 51)),
+            (Action::MoveToWindowTitlebar, (60, 61)),
+        ];
+
+        for (action, expected) in actions {
+            let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+            mouse.set_window_snap_points_provider(fake_window_snap_points_provider);
+            mouse.handle_action(action);
+            assert_eq!(mouse.backend.moves, vec![expected]);
+        }
+    }
+
+    #[test]
+    fn window_snap_actions_do_not_move_when_feature_disabled() {
+        let mut config = test_config();
+        config.window_jump.enabled = false;
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        mouse.set_window_snap_points_provider(fake_window_snap_points_provider);
+
+        mouse.handle_action(Action::MoveToWindowCenter);
+
+        assert!(mouse.backend.moves.is_empty());
     }
 
     #[test]
