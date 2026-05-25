@@ -3256,8 +3256,8 @@ fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32
         }
         _ => {
             let vr = virtual_screen_region();
-            x = x.clamp(vr.left, vr.right().saturating_sub(1));
-            y = y.clamp(vr.top, vr.bottom().saturating_sub(1));
+            x = x.clamp(vr.left, (vr.left + vr.width).saturating_sub(1));
+            y = y.clamp(vr.top, (vr.top + vr.height).saturating_sub(1));
         }
     }
     (x, y)
