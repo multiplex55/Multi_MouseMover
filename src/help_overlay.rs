@@ -1,4 +1,4 @@
-use crate::action::Action;
+use crate::action::{Action, Direction2D, StepMoveTier};
 use crate::action_handler::{RuntimeNotification, RuntimeNotificationKind};
 use crate::key_chord::KeyChord;
 use crate::TooltipOverlayConfig;
@@ -584,6 +584,10 @@ pub fn format_tooltip_message(
             title: "Panic reset".to_string(),
             body: "Runtime state restored".to_string(),
         },
+        RuntimeNotificationKind::StepMove => TooltipMessage {
+            title: "Step move".to_string(),
+            body: notification.body.clone(),
+        },
     }
 }
 
@@ -816,6 +820,19 @@ fn format_action(action: &Action) -> String {
         Action::Disable => "Disable".to_string(),
         Action::ShowHelp => "Hints / Help".to_string(),
         Action::UiHintMode => "UI Hints".to_string(),
+        Action::StepMove { direction, tier } => {
+            let direction = match direction {
+                Direction2D::Up => "up",
+                Direction2D::Down => "down",
+                Direction2D::Left => "left",
+                Direction2D::Right => "right",
+            };
+            match tier {
+                StepMoveTier::Normal => format!("Step move {direction}"),
+                StepMoveTier::Small => format!("Step move small {direction}"),
+                StepMoveTier::Large => format!("Step move large {direction}"),
+            }
+        }
     }
 }
 
@@ -835,7 +852,8 @@ fn action_category(action: &Action) -> HelpBindingCategory {
         | Action::MovementProfileNext
         | Action::MovementProfilePrevious
         | Action::MovementProfileSelect(_)
-        | Action::SlowMouse => HelpBindingCategory::Movement,
+        | Action::SlowMouse
+        | Action::StepMove { .. } => HelpBindingCategory::Movement,
         Action::LeftClick
         | Action::RightClick
         | Action::MiddleClick

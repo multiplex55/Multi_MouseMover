@@ -3,7 +3,7 @@ use crate::monitor::{
     next_monitor_with_wrap, MonitorEdge, MonitorRect,
 };
 use crate::{action, app_state::KeyEvent, keyboard::VirtualKey, Config, FinalAdjustConfig};
-use action::Action;
+use action::{Action, Direction2D, StepMoveTier};
 use enigo::*;
 use std::collections::{HashSet, VecDeque};
 use std::env;
@@ -60,6 +60,7 @@ pub enum RuntimeNotificationKind {
     Drag,
     ConfigReload,
     PanicReset,
+    StepMove,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,6 +284,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             Action::MoveToRightEdge => self.move_to_monitor_edge(MonitorEdge::Right),
             Action::CenterCurrentMonitor => self.center_current_monitor(),
             Action::ScreenSelect => self.select_next_screen(),
+            Action::StepMove { direction, tier } => self.step_move(direction, tier),
             Action::ClickThenDisable => {
                 self.release_left_button_if_held();
                 self.left_click();
@@ -655,6 +657,58 @@ impl<B: MouseBackend> MouseMaster<B> {
         self.move_mouse_to(x, y);
     }
 
+    pub fn step_move(&mut self, direction: Direction2D, tier: StepMoveTier) {
+        if !self.config.step_move.enabled {
+            return;
+        }
+        let step = match tier {
+            StepMoveTier::Small => self.config.step_move.small_step_px,
+            StepMoveTier::Normal => self.config.step_move.normal_step_px,
+            StepMoveTier::Large => self.config.step_move.large_step_px,
+        };
+        let Ok((x, y)) = self.backend.location() else {
+            return;
+        };
+        let (dx, dy) = match direction {
+            Direction2D::Up => (0, -step),
+            Direction2D::Down => (0, step),
+            Direction2D::Left => (-step, 0),
+            Direction2D::Right => (step, 0),
+        };
+        let mut target = (x + dx, y + dy);
+        match self.config.step_move.clamp_mode {
+            crate::StepMoveClampMode::None => {}
+            crate::StepMoveClampMode::VirtualScreen => {
+                if let Some(rect) = virtual_screen_rect((self.monitor_rects_provider)(false)) {
+                    target.0 = target.0.clamp(rect.left, rect.right - 1);
+                    target.1 = target.1.clamp(rect.top, rect.bottom - 1);
+                }
+            }
+            crate::StepMoveClampMode::CurrentMonitor => {
+                if let Some(rect) = current_monitor_rect_for_cursor(false) {
+                    target.0 = target.0.clamp(rect.left, rect.right - 1);
+                    target.1 = target.1.clamp(rect.top, rect.bottom - 1);
+                }
+            }
+            crate::StepMoveClampMode::CurrentWorkArea => {
+                if let Some(rect) = current_monitor_rect_for_cursor(true) {
+                    target.0 = target.0.clamp(rect.left, rect.right - 1);
+                    target.1 = target.1.clamp(rect.top, rect.bottom - 1);
+                }
+            }
+        }
+        self.move_mouse_to(target.0, target.1);
+        self.reset_acceleration_to_baseline();
+        if self.config.step_move.show_tooltip {
+            self.push_notification(RuntimeNotification {
+                kind: RuntimeNotificationKind::StepMove,
+                title: "Step move".to_string(),
+                body: format!("Step {:?} {}px", direction, step),
+                duration_ms: self.config.tooltip_overlay.duration_ms,
+            });
+        }
+    }
+
     /// Resets the speed and acceleration counter when motion stops
     pub fn reset_speed(&mut self) {
         self.reset_acceleration_to_baseline();
@@ -890,6 +944,17 @@ impl<B: MouseBackend> MouseMaster<B> {
         println!("Switched to mode: {}", mode);
         // FUTURE GROWTH
     }
+}
+
+fn virtual_screen_rect(monitors: Vec<MonitorRect>) -> Option<MonitorRect> {
+    let mut iter = monitors.into_iter();
+    let first = iter.next()?;
+    Some(iter.fold(first, |acc, rect| MonitorRect {
+        left: acc.left.min(rect.left),
+        top: acc.top.min(rect.top),
+        right: acc.right.max(rect.right),
+        bottom: acc.bottom.max(rect.bottom),
+    }))
 }
 
 pub fn edge_target(rect: MonitorRect, edge: MonitorEdge, offset_px: i32) -> (i32, i32) {
@@ -2206,6 +2271,34 @@ mod tests {
         assert_eq!(edge_target(rect, MonitorEdge::Left, 1), (11, 70));
         assert_eq!(edge_target(rect, MonitorEdge::Right, 1), (208, 70));
         assert_eq!(edge_target(rect, MonitorEdge::Top, 7), (110, 27));
+    }
+
+    #[test]
+    fn step_move_emits_one_shot_absolute_move() {
+        let mut backend = FakeBackend::default();
+        backend.location = (100, 100);
+        let mut mouse = MouseMaster::new_with_backend(test_config(), backend);
+        mouse.handle_action(Action::StepMove {
+            direction: Direction2D::Right,
+            tier: StepMoveTier::Normal,
+        });
+        assert_eq!(mouse.backend.moves, vec![(180, 100)]);
+    }
+
+    #[test]
+    fn step_move_virtual_screen_clamps_bounds() {
+        let mut backend = FakeBackend::default();
+        backend.location = (95, 95);
+        let mut cfg = test_config();
+        cfg.step_move.large_step_px = 500;
+        cfg.step_move.clamp_mode = crate::StepMoveClampMode::VirtualScreen;
+        let mut mouse = MouseMaster::new_with_backend(cfg, backend);
+        mouse.set_monitor_rects_provider(single_monitor_provider);
+        mouse.handle_action(Action::StepMove {
+            direction: Direction2D::Right,
+            tier: StepMoveTier::Large,
+        });
+        assert_eq!(mouse.backend.moves, vec![(299, 95)]);
     }
 
     #[test]

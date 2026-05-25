@@ -57,6 +57,9 @@ Action bindings run only while active mode is enabled:
 | `Y` | Navigate forward |
 | `Q` / `P` | Switch to idle |
 | `RightAlt+W` / `RightAlt+A` / `RightAlt+S` / `RightAlt+D` | Move cursor to screen edge |
+| `Alt+E` / `Alt+S` / `Alt+D` / `Alt+F` | Step move up / left / down / right (normal tier) |
+| `Alt+Ctrl+E` / `Alt+Ctrl+S` / `Alt+Ctrl+D` / `Alt+Ctrl+F` | Step move up / left / down / right (small tier) |
+| `Alt+Shift+E` / `Alt+Shift+S` / `Alt+Shift+D` / `Alt+Shift+F` | Step move up / left / down / right (large tier) |
 | `RightAlt+R` | Reload `config.toml` |
 | `RightAlt+Escape` | Panic reset |
 | `/` | Toggle help tooltip/panel with runtime stats + keybinds |

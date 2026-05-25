@@ -5,6 +5,10 @@ use std::time::Duration;
 /// Enum representing all possible actions
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Action {
+    StepMove {
+        direction: Direction2D,
+        tier: StepMoveTier,
+    },
     // Continuous cursor movement actions.
     MoveUp,
     MoveDown,
@@ -63,11 +67,74 @@ pub enum Action {
     UiHintMode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Direction2D {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StepMoveTier {
+    Small,
+    Normal,
+    Large,
+}
+
 impl Action {
     /// Convert a string to an `Action` enum
     pub fn from_string(action: &str) -> Option<Self> {
         match action.to_lowercase().as_str() {
             "move_up" => Some(Self::MoveUp),
+            "step_move_up" => Some(Self::StepMove {
+                direction: Direction2D::Up,
+                tier: StepMoveTier::Normal,
+            }),
+            "step_move_down" => Some(Self::StepMove {
+                direction: Direction2D::Down,
+                tier: StepMoveTier::Normal,
+            }),
+            "step_move_left" => Some(Self::StepMove {
+                direction: Direction2D::Left,
+                tier: StepMoveTier::Normal,
+            }),
+            "step_move_right" => Some(Self::StepMove {
+                direction: Direction2D::Right,
+                tier: StepMoveTier::Normal,
+            }),
+            "step_move_small_up" => Some(Self::StepMove {
+                direction: Direction2D::Up,
+                tier: StepMoveTier::Small,
+            }),
+            "step_move_small_down" => Some(Self::StepMove {
+                direction: Direction2D::Down,
+                tier: StepMoveTier::Small,
+            }),
+            "step_move_small_left" => Some(Self::StepMove {
+                direction: Direction2D::Left,
+                tier: StepMoveTier::Small,
+            }),
+            "step_move_small_right" => Some(Self::StepMove {
+                direction: Direction2D::Right,
+                tier: StepMoveTier::Small,
+            }),
+            "step_move_large_up" => Some(Self::StepMove {
+                direction: Direction2D::Up,
+                tier: StepMoveTier::Large,
+            }),
+            "step_move_large_down" => Some(Self::StepMove {
+                direction: Direction2D::Down,
+                tier: StepMoveTier::Large,
+            }),
+            "step_move_large_left" => Some(Self::StepMove {
+                direction: Direction2D::Left,
+                tier: StepMoveTier::Large,
+            }),
+            "step_move_large_right" => Some(Self::StepMove {
+                direction: Direction2D::Right,
+                tier: StepMoveTier::Large,
+            }),
             "move_down" => Some(Self::MoveDown),
             "move_left" => Some(Self::MoveLeft),
             "move_right" => Some(Self::MoveRight),
@@ -224,6 +291,27 @@ mod tests {
             ("disable", Action::Disable),
             ("show_help", Action::ShowHelp),
             ("ui_hint_mode", Action::UiHintMode),
+            (
+                "step_move_up",
+                Action::StepMove {
+                    direction: Direction2D::Up,
+                    tier: StepMoveTier::Normal,
+                },
+            ),
+            (
+                "step_move_small_left",
+                Action::StepMove {
+                    direction: Direction2D::Left,
+                    tier: StepMoveTier::Small,
+                },
+            ),
+            (
+                "step_move_large_right",
+                Action::StepMove {
+                    direction: Direction2D::Right,
+                    tier: StepMoveTier::Large,
+                },
+            ),
         ];
 
         for (input, expected) in cases {
@@ -355,6 +443,10 @@ mod tests {
             Action::Disable,
             Action::ShowHelp,
             Action::UiHintMode,
+            Action::StepMove {
+                direction: Direction2D::Up,
+                tier: StepMoveTier::Normal,
+            },
         ];
 
         for action in non_movement_actions {

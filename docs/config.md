@@ -290,3 +290,24 @@ font_scale = 1.1
 | `jump.coarse.preview_margin_percent` | `jump.coarse.visual_context_margin_percent` | Deprecated alias used only when the new field is absent. |
 | `jump.fine.preview_margin_percent` | `jump.fine.visual_context_margin_percent` | Deprecated alias used only when the new field is absent. |
 | `jump.precise.preview_margin_percent` | `jump.precise.visual_context_margin_percent` | Deprecated alias used only when the new field is absent. |
+
+## Step move configuration
+
+`[step_move]` controls one-shot pixel nudges via directional actions.
+
+```toml
+[step_move]
+enabled = true
+small_step_px = 20
+normal_step_px = 80
+large_step_px = 240
+clamp_mode = "virtual_screen" # none | virtual_screen | current_monitor | current_work_area
+show_tooltip = true
+```
+
+Suggested bindings:
+- `Alt+E/S/D/F` => `step_move_up/left/down/right` (normal tier)
+- `Alt+Ctrl+E/S/D/F` => `step_move_small_*`
+- `Alt+Shift+E/S/D/F` => `step_move_large_*`
+
+Note: many apps reserve `Alt` accelerators for menu/navigation. If a binding is intercepted, prefer switching to a less contended modifier combo.
