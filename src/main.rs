@@ -5946,7 +5946,7 @@ enabled = true"#,
                 config_toml: r#"key_bindings = []
 
 [position_history]
-enabled = true",
+enabled = true"#,
                 expected_substring:
                     "position_history.enabled=true but no position history bindings were found",
             },
