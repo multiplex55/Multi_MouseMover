@@ -2581,9 +2581,12 @@ mod tests {
 
         state.exit_grid_mode();
         enter_ui_hint_mode(&mut state, VirtualKey::U);
-        assert_eq!(state.mode_context(), ModeContext::UiHintQuerying);
+        assert_eq!(state.mode_context(), ModeContext::UiHintActive);
 
-        state.activate_ui_hint_if_querying(1);
+        state.exit_ui_hint_mode();
+        state.enter_ui_hint_querying(VirtualKey::U, 1, 0);
+        assert_eq!(state.mode_context(), ModeContext::UiHintQuerying);
+        assert!(state.activate_ui_hint_if_querying(1));
         assert_eq!(state.mode_context(), ModeContext::UiHintActive);
 
         state.set_active_mode(false);
