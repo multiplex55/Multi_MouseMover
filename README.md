@@ -44,10 +44,9 @@ Action bindings run only while active mode is enabled:
 | `RightShift` | Middle click |
 | `N` | Toggle left-button drag mode |
 | `.` | Click, then switch to idle |
-| `,` / `M` | Wheel up / down |
-| `I` / `O` | Wheel left / right |
+| `W` / `R` | Wheel up / down |
 | `X` / `Z` | Mouse speed down / reset |
-| `V` / `B` | Wheel speed up / down |
+| `U` / `I` | Wheel speed up / down |
 | `RightAlt+C` / `RightAlt+X` | Next / previous movement profile |
 | `RightAlt+V` / `RightAlt+B` | Next / previous wheel profile |
 | `F` | Jump mode |
@@ -78,7 +77,7 @@ Press `N` to toggle left-button drag mode. When drag is on, Multi MouseMover hol
 
 ## Wheel And Speed Controls
 
-Hold `,`, `M`, `I`, or `O` for repeated vertical or horizontal wheel ticks. Wheel repeat timing comes from `[wheel].tick_interval`; wheel strength comes from the current wheel speed and axis multipliers.
+Hold `W` or `R` for repeated vertical wheel ticks. Horizontal wheel bindings are commented out in the checked-in `config.toml` by default. Wheel repeat timing comes from `[wheel].tick_interval`; wheel strength comes from the current wheel speed and axis multipliers.
 
 Mouse movement has two layers. `[mouse_speed]` controls the baseline tier changed by `X` and `Z`; `acceleration`, `acceleration_rate`, and `top_speed` then shape how held movement ramps while a direction key is down. `LeftShift` slows movement while held.
 

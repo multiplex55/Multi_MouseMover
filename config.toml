@@ -37,17 +37,19 @@ key_bindings = [
     ["N", "toggle_drag_mode"],
     [".", "click_then_disable"],
 
+    # Wheel directions (horizontal wheel bindings are commented out by preference).
     ["W", "wheel_up"],
     ["R", "wheel_down"],
-    ["I", "wheel_left"],
-    ["O", "wheel_right"],
+    # ["I", "wheel_left"],
+    # ["O", "wheel_right"],
 
 
     ["Z", "mouse_speed_reset"],
     ["M", "mouse_speed_down"],
     [",", "mouse_speed_up"],
-    ["U", "wheel_speed_up"],
-    ["I", "wheel_speed_down"],
+    # Wheel speed controls.
+    ["U", "wheel_speed_down"],
+    ["I", "wheel_speed_up"],
     ["RightAlt+C", "movement_profile_next"],
     ["RightAlt+X", "movement_profile_previous"],
     ["RightAlt+V", "wheel_profile_next"],
