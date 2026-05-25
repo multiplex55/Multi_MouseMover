@@ -5760,6 +5760,25 @@ mod tests {
     }
 
     #[test]
+    fn scroll_mode_defaults_and_exclusivity_fields_parse() {
+        let config: Config = toml::from_str("[scroll_mode]\nenabled = true").unwrap();
+        assert!(config.scroll_mode.enabled);
+        assert_eq!(config.scroll_mode.modifier_action, "scroll_modifier");
+        assert!(config.scroll_mode.exit_on_click);
+        assert!(config.scroll_mode.exclusive_with_jump_mode);
+        assert!(config.scroll_mode.exclusive_with_grid_mode);
+        assert!(config.scroll_mode.exclusive_with_ui_hint_mode);
+
+        let config: Config = toml::from_str(
+            "[scroll_mode]\nenabled=true\nexclusive_with_jump_mode=false\nexclusive_with_grid_mode=false\nexclusive_with_ui_hint_mode=false",
+        )
+        .unwrap();
+        assert!(!config.scroll_mode.exclusive_with_jump_mode);
+        assert!(!config.scroll_mode.exclusive_with_grid_mode);
+        assert!(!config.scroll_mode.exclusive_with_ui_hint_mode);
+    }
+
+    #[test]
     fn feature_binding_validation_warns_when_enabled_features_have_no_bindings() {
         struct Case {
             name: &'static str,
