@@ -45,7 +45,7 @@ use std::sync::{Mutex, RwLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::{env, error::Error, fs, io};
-use ui_hint_overlay::{build_ui_hint_overlay_view, UiHintOverlay};
+use ui_hint_overlay::{build_ui_hint_loading_view, build_ui_hint_overlay_view, UiHintOverlay};
 use ui_hints::{build_ui_hint_targets, UiHintInputUpdate, UiHintSession};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
@@ -465,7 +465,7 @@ pub enum TooltipOverlayPositioning {
     BottomRight,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct TooltipOverlayEvents {
     pub mouse: bool,
@@ -574,6 +574,9 @@ pub struct UiHintsConfig {
     pub min_hint_spacing_px: i32,
     pub include_thread_windows: bool,
     pub include_owned_popups: bool,
+    pub query_strategy: UiHintQueryStrategy,
+    pub min_targets_before_fallback: i32,
+    pub query_timeout_ms: u64,
     pub target_point: UiHintTargetPoint,
     pub after_select: UiHintAfterSelect,
     pub overlay: UiHintsOverlayConfig,
@@ -592,11 +595,23 @@ impl Default for UiHintsConfig {
             min_hint_spacing_px: 32,
             include_thread_windows: true,
             include_owned_popups: true,
+            query_strategy: UiHintQueryStrategy::Descendants,
+            min_targets_before_fallback: 8,
+            query_timeout_ms: 1200,
             target_point: UiHintTargetPoint::ClickablePoint,
             after_select: UiHintAfterSelect::Move,
             overlay: UiHintsOverlayConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UiHintQueryStrategy {
+    #[serde(alias = "default")]
+    #[default]
+    Descendants,
+    ChildrenThenDescendants,
 }
 
 impl Default for TooltipOverlayConfig {
@@ -1416,6 +1431,8 @@ impl Config {
             0,
             200,
         );
+        self.ui_hints.min_targets_before_fallback = normalize_i32_range("ui_hints.min_targets_before_fallback", self.ui_hints.min_targets_before_fallback, 1, 5000);
+        self.ui_hints.query_timeout_ms = self.ui_hints.query_timeout_ms.clamp(100, 30_000);
         self.ui_hints.overlay.font_scale = normalize_f32_range(
             "ui_hints.overlay.font_scale",
             self.ui_hints.overlay.font_scale,
@@ -3013,6 +3030,13 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .write()
                 .unwrap()
                 .enter_ui_hint_querying(activation_key, 0, 0);
+            UI_HINT_OVERLAY.with(|overlay| {
+                let mut overlay = overlay.borrow_mut();
+                overlay.ensure_window();
+                let loading = build_ui_hint_loading_view(config.overlay.font_scale);
+                overlay.render(&loading);
+                overlay.show();
+            });
             if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_start) {
                 help_overlay::show_temporary_tooltip(
                     "UI Hints",

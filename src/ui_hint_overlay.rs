@@ -22,6 +22,7 @@ pub enum UiHintLabelPlacement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiHintOverlayView {
+    pub loading: bool,
     pub placement: UiHintLabelPlacement,
     pub input: String,
     pub targets: Vec<UiHintOverlayTarget>,
@@ -92,6 +93,7 @@ pub fn build_ui_hint_overlay_view(
         .collect();
 
     UiHintOverlayView {
+        loading: false,
         placement: UiHintLabelPlacement::Anchor,
         input,
         targets,
@@ -101,6 +103,21 @@ pub fn build_ui_hint_overlay_view(
         offset_y,
         show_background,
         show_border,
+    }
+}
+
+pub fn build_ui_hint_loading_view(font_scale: f32) -> UiHintOverlayView {
+    UiHintOverlayView {
+        loading: true,
+        placement: UiHintLabelPlacement::Anchor,
+        input: String::new(),
+        targets: Vec::new(),
+        dim_non_matching: false,
+        font_scale,
+        offset_x: 0,
+        offset_y: 0,
+        show_background: true,
+        show_border: true,
     }
 }
 
@@ -250,6 +267,12 @@ impl UiHintOverlay {
             );
             let old = SelectObject(hdc, font.into());
             let _ = SetBkMode(hdc, TRANSPARENT);
+
+            if view.loading {
+                let text: Vec<u16> = "Loading UI hints...\0".encode_utf16().collect();
+                let _ = SetTextColor(hdc, RGB(255, 255, 255));
+                let _ = TextOutW(hdc, 40, 40, &text[..text.len().saturating_sub(1)]);
+            }
 
             for target in &view.targets {
                 let (client_x, client_y) =
