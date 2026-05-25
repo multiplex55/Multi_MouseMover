@@ -465,7 +465,7 @@ pub enum TooltipOverlayPositioning {
     BottomRight,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(default)]
 pub struct TooltipOverlayEvents {
     pub mouse: bool,
@@ -605,7 +605,7 @@ impl Default for UiHintsConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UiHintQueryStrategy {
     #[serde(alias = "default")]
