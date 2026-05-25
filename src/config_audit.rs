@@ -701,7 +701,9 @@ mod tests {
         let duplicate_warning = report
             .warnings
             .iter()
-            .find(|warning| warning.path == "key_bindings" && warning.message.contains("Duplicate key chord"))
+            .find(|warning| {
+                warning.path == "key_bindings" && warning.message.contains("Duplicate key chord")
+            })
             .expect("expected duplicate key chord warning");
         assert!(duplicate_warning.message.contains("later entry wins"));
         assert!(duplicate_warning.message.contains("key_bindings[0]"));
@@ -733,7 +735,9 @@ mod tests {
 
     #[test]
     fn audit_duplicate_key_chord_warning_text_is_stable_for_regression_fixture() {
-        let report = audit_config_toml(include_str!("../tests/fixtures/config_duplicate_wheel_chord.toml"));
+        let report = audit_config_toml(include_str!(
+            "../tests/fixtures/config_duplicate_wheel_chord.toml"
+        ));
 
         let warning = report
             .warnings
