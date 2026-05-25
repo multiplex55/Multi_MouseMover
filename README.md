@@ -53,6 +53,9 @@ Action bindings run only while active mode is enabled:
 | `F` | Jump mode |
 | `G` | Grid mode |
 | `C` | Screen select |
+| `RightAlt+M` | Save current cursor position (session only) |
+| `RightAlt+Backspace` | Clear saved cursor positions (session only) |
+| `RightAlt+J` | Enter position-history selection mode |
 | `H` | Navigate back |
 | `Y` | Navigate forward |
 | `Q` / `P` | Switch to idle |
@@ -262,3 +265,14 @@ For input-pipeline regressions, run the diagnostic smoke test in [docs/smoke_tes
 ## License
 
 This project is licensed under the terms of the MIT license. See [LICENSE](LICENSE) for details.
+
+
+## Position History (Session Only)
+
+Position history is in-memory for this phase (no disk persistence).
+
+Flow:
+1. Press `RightAlt+M` to save the current cursor location.
+2. Press `RightAlt+J` to enter selection mode and type the shown label.
+3. The cursor jumps to the selected saved position.
+4. Press `RightAlt+Backspace` to clear all saved positions.

@@ -39,6 +39,7 @@ use key_chord::{KeyChord, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::{StatusOverlayConfig, OVERLAY};
+use position_history::PositionHistory;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -168,6 +169,8 @@ static UI_HINT_QUERY_ID: AtomicU64 = AtomicU64::new(0);
 lazy_static! {
     static ref LAST_UI_HINT_COMPLETION: Mutex<Option<UiHintCompletionState>> = Mutex::new(None);
     static ref LAST_SURGICAL_TOOLTIP_ACTIVE: Mutex<bool> = Mutex::new(false);
+    static ref POSITION_HISTORY_STORE: Mutex<PositionHistory> =
+        Mutex::new(PositionHistory::new(PositionHistoryConfig::default().max_positions));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,6 +492,9 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("F", "jump_mode"),
         ("G", "grid_mode"),
         ("C", "screen_select"),
+        ("RightAlt+M", "save_mouse_position"),
+        ("RightAlt+Backspace", "clear_mouse_positions"),
+        ("RightAlt+J", "position_history_mode"),
         ("H", "navigate_back"),
         ("Y", "navigate_forward"),
         ("Q", "disable"),
@@ -2990,6 +2996,11 @@ fn reload_config() -> Result<(), Box<dyn Error>> {
     };
     config.initialize_bindings();
     config.initialize_system_bindings()?;
+    POSITION_HISTORY_STORE
+        .lock()
+        .unwrap()
+        .reset_with_max_positions(config.position_history.max_positions);
+    APP_STATE.write().unwrap().exit_position_history_mode();
     sync_jump_overlay(resolution);
     println!("[reload] config reloaded");
     Ok(())
@@ -3127,6 +3138,18 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     event.key,
                     if event.is_down { "down" } else { "up" },
                     action
+                )
+            }
+            AppCommand::SaveMousePosition => println!("[command] SaveMousePosition"),
+            AppCommand::ClearMousePositions => println!("[command] ClearMousePositions"),
+            AppCommand::EnterPositionHistoryMode { activation_key } => {
+                println!("[command] EnterPositionHistoryMode key={activation_key:?}")
+            }
+            AppCommand::PositionHistoryInput(event) => {
+                println!(
+                    "[command] PositionHistoryInput key={:?} state={}",
+                    event.key,
+                    if event.is_down { "down" } else { "up" }
                 )
             }
             AppCommand::UiHintInput(event) => {
@@ -3529,6 +3552,94 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     sync_jump_overlay(resolution);
                 }
                 None => {}
+            }
+        }
+        AppCommand::SaveMousePosition => {
+            let handler = ACTION_HANDLER.write().unwrap();
+            let cfg = handler.mouse_master.config.position_history.clone();
+            if !cfg.enabled {
+                return;
+            }
+            if let Ok((x, y)) = handler.mouse_master.backend.location() {
+                POSITION_HISTORY_STORE.lock().unwrap().add(x, y);
+            }
+        }
+        AppCommand::ClearMousePositions => {
+            POSITION_HISTORY_STORE.lock().unwrap().clear();
+            APP_STATE.write().unwrap().exit_position_history_mode();
+            UI_HINT_OVERLAY.with(|overlay| {
+                let _ = overlay.borrow_mut().hide();
+            });
+        }
+        AppCommand::EnterPositionHistoryMode { activation_key } => {
+            let cfg = ACTION_HANDLER
+                .read()
+                .unwrap()
+                .mouse_master
+                .config
+                .position_history
+                .clone();
+            if !cfg.enabled {
+                return;
+            }
+            let selection_keys: Vec<char> = cfg.selection_keys.chars().collect();
+            let entries = POSITION_HISTORY_STORE.lock().unwrap().labeled_positions(
+                &selection_keys,
+                cfg.label_length as usize,
+                cfg.show_numbers,
+            );
+            let targets: Vec<ui_hints::UiHintTarget> = entries
+                .into_iter()
+                .map(|(label, p)| ui_hints::UiHintTarget {
+                    id: p.id,
+                    label,
+                    bounds: (p.x - 2, p.y - 2, p.x + 2, p.y + 2),
+                    target_x: p.x,
+                    target_y: p.y,
+                    metadata: Some("history".to_string()),
+                })
+                .collect();
+            let Some(session) = UiHintSession::new(targets, selection_keys) else {
+                return;
+            };
+            APP_STATE
+                .write()
+                .unwrap()
+                .enter_position_history_mode(activation_key);
+            *UI_HINT_SESSION.lock().unwrap() = Some(session);
+        }
+        AppCommand::PositionHistoryInput(event) => {
+            if !event.is_down {
+                return;
+            }
+            let update = {
+                let mut guard = UI_HINT_SESSION.lock().unwrap();
+                let Some(session) = guard.as_mut() else {
+                    return;
+                };
+                session.handle_key(event.key)
+            };
+            match update {
+                UiHintInputUpdate::Completed { target } => {
+                    ACTION_HANDLER
+                        .write()
+                        .unwrap()
+                        .mouse_master
+                        .move_mouse_to(target.target_x, target.target_y);
+                    APP_STATE.write().unwrap().exit_position_history_mode();
+                    UI_HINT_OVERLAY.with(|overlay| {
+                        let _ = overlay.borrow_mut().hide();
+                    });
+                }
+                UiHintInputUpdate::Cancelled => {
+                    APP_STATE.write().unwrap().exit_position_history_mode();
+                    UI_HINT_OVERLAY.with(|overlay| {
+                        let _ = overlay.borrow_mut().hide();
+                    });
+                }
+                UiHintInputUpdate::Consumed
+                | UiHintInputUpdate::Invalid
+                | UiHintInputUpdate::PrefixChanged => {}
             }
         }
         AppCommand::UiHintInput(event) => {
@@ -4069,6 +4180,8 @@ fn main() {
         eprintln!("❌ System Binding Initialization Failed: {e}");
         std::process::exit(1);
     }
+    *POSITION_HISTORY_STORE.lock().unwrap() =
+        PositionHistory::new(config.position_history.max_positions);
 
     if let Err(e) = unsafe { install_keyboard_hook() } {
         eprintln!("❌ Keyboard Hook Failed to Install: {e}");
@@ -5830,8 +5943,10 @@ enabled = true"#,
             },
             Case {
                 name: "position_history",
-                config_toml: "[position_history]
-enabled = true",
+                config_toml: r#"key_bindings = []
+
+[position_history]
+enabled = true"#,
                 expected_substring:
                     "position_history.enabled=true but no position history bindings were found",
             },
@@ -5930,7 +6045,7 @@ enabled = true",
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
         assert!(summary.contains("window_jump: enabled=true bindings=6"));
         assert!(summary
-            .contains("position_history: enabled=true bindings=save:0 clear:0 mode:0 total:0"));
+            .contains("position_history: enabled=true bindings=save:1 clear:1 mode:1 total:3"));
         assert!(summary.contains("warnings=1"));
         assert!(summary.contains("warning: wheel.min_speed clamped"));
     }

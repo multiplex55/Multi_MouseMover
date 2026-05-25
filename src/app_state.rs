@@ -67,6 +67,12 @@ pub enum AppCommand {
     JumpInput(KeyEvent, Option<Action>),
     GridInput(KeyEvent, Option<Action>),
     UiHintInput(KeyEvent),
+    SaveMousePosition,
+    ClearMousePositions,
+    EnterPositionHistoryMode {
+        activation_key: VirtualKey,
+    },
+    PositionHistoryInput(KeyEvent),
     UiHintQueryCompleted {
         query_id: u64,
         elements: Vec<crate::windows_uia::RawUiElement>,
@@ -86,6 +92,7 @@ pub struct AppState {
     jump: JumpState,
     grid: GridState,
     ui_hints: UiHintState,
+    position_history: PositionHistoryState,
     active_mode: bool,
     preserve_global_shortcuts: bool,
     system_bindings: RuntimeSystemBindings,
@@ -105,6 +112,15 @@ pub enum UiHintState {
         activation_key: VirtualKey,
         query_id: u64,
         foreground_hwnd: isize,
+    },
+}
+
+
+#[derive(Debug)]
+pub enum PositionHistoryState {
+    Inactive,
+    Active {
+        activation_key: VirtualKey,
     },
 }
 
@@ -197,6 +213,7 @@ impl Default for AppState {
             jump: JumpState::Inactive,
             grid: GridState::Inactive,
             ui_hints: UiHintState::Inactive,
+            position_history: PositionHistoryState::Inactive,
             active_mode: true,
             preserve_global_shortcuts: true,
             system_bindings: RuntimeSystemBindings::default(),
@@ -265,6 +282,7 @@ impl AppState {
         self.exit_jump_mode();
         self.exit_grid_mode();
         self.exit_ui_hint_mode();
+        self.exit_position_history_mode();
     }
 
     pub fn set_system_bindings(&mut self, system_bindings: RuntimeSystemBindings) {
@@ -313,6 +331,18 @@ impl AppState {
 
     pub fn is_ui_hint_querying(&self) -> bool {
         matches!(self.ui_hints, UiHintState::Querying { .. })
+    }
+
+    pub fn is_position_history_active(&self) -> bool {
+        matches!(self.position_history, PositionHistoryState::Active { .. })
+    }
+
+    pub fn enter_position_history_mode(&mut self, activation_key: VirtualKey) {
+        self.position_history = PositionHistoryState::Active { activation_key };
+    }
+
+    pub fn exit_position_history_mode(&mut self) {
+        self.position_history = PositionHistoryState::Inactive;
     }
 
     pub fn exit_ui_hint_mode(&mut self) {
@@ -408,6 +438,10 @@ impl AppState {
         if !self.active_mode {
             return ModeContext::Inactive;
         }
+        if self.is_position_history_active() {
+            return ModeContext::UiHintActive;
+        }
+
         if self.is_jump_active() {
             return ModeContext::Jump;
         }
@@ -784,6 +818,7 @@ impl AppState {
 
         if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
             self.exit_ui_hint_mode();
+        self.exit_position_history_mode();
             self.enqueue_command(AppCommand::SetActiveMode { active: false });
             return;
         }
@@ -800,8 +835,17 @@ impl AppState {
             ) && event.is_down
             {
                 self.exit_ui_hint_mode();
+        self.exit_position_history_mode();
             }
             self.enqueue_command(AppCommand::UiHintInput(event));
+            return;
+        }
+
+        if self.is_position_history_active() {
+            if self.is_position_history_activation_key_event(&event) {
+                return;
+            }
+            self.enqueue_command(AppCommand::PositionHistoryInput(event));
             return;
         }
 
@@ -852,12 +896,14 @@ impl AppState {
 
         if event.is_down && matches!(action.as_ref(), Some(Action::ReloadConfig)) {
             self.exit_ui_hint_mode();
+        self.exit_position_history_mode();
             self.enqueue_command(AppCommand::ReloadConfig);
             return;
         }
 
         if event.is_down && matches!(action.as_ref(), Some(Action::PanicReset)) {
             self.exit_ui_hint_mode();
+        self.exit_position_history_mode();
             self.enqueue_command(AppCommand::PanicReset);
             return;
         }
@@ -888,6 +934,23 @@ impl AppState {
 
         if event.is_down && matches!(action.as_ref(), Some(Action::UiHintMode)) {
             self.enqueue_command(AppCommand::EnterUiHintMode {
+                activation_key: event.key,
+            });
+            return;
+        }
+
+        if event.is_down && matches!(action.as_ref(), Some(Action::SaveMousePosition)) {
+            self.enqueue_command(AppCommand::SaveMousePosition);
+            return;
+        }
+
+        if event.is_down && matches!(action.as_ref(), Some(Action::ClearMousePositions)) {
+            self.enqueue_command(AppCommand::ClearMousePositions);
+            return;
+        }
+
+        if event.is_down && matches!(action.as_ref(), Some(Action::PositionHistoryMode)) {
+            self.enqueue_command(AppCommand::EnterPositionHistoryMode {
                 activation_key: event.key,
             });
             return;
@@ -947,6 +1010,14 @@ impl AppState {
         }
 
         false
+    }
+
+    fn is_position_history_activation_key_event(&mut self, event: &KeyEvent) -> bool {
+        let PositionHistoryState::Active { activation_key } = &self.position_history else {
+            return false;
+        };
+
+        event.key == *activation_key
     }
 
     fn is_grid_activation_key_event(&mut self, event: &KeyEvent) -> bool {
@@ -2852,4 +2923,19 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn position_history_actions_route_to_explicit_commands() {
+        let mut state = AppState::default();
+        state.set_bound_keys([VirtualKey::M, VirtualKey::J, VirtualKey::Backspace]);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::M, true), Some(Action::SaveMousePosition));
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::SaveMousePosition]);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::Backspace, true), Some(Action::ClearMousePositions));
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::ClearMousePositions]);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::J, true), Some(Action::PositionHistoryMode));
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::EnterPositionHistoryMode { activation_key: VirtualKey::J }]);
+    }
+
 }
