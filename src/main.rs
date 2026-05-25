@@ -353,6 +353,7 @@ struct Config {
     grid_mode: GridModeConfig,
     jump: JumpConfig,
     final_adjust: FinalAdjustConfig,
+    step_move: StepMoveConfig,
     status_overlay: StatusOverlayConfig,
     tooltip_overlay: TooltipOverlayConfig,
     ui_hints: UiHintsConfig,
@@ -380,6 +381,7 @@ impl Default for Config {
             grid_mode: GridModeConfig::default(),
             jump: JumpConfig::default(),
             final_adjust: FinalAdjustConfig::default(),
+            step_move: StepMoveConfig::default(),
             status_overlay: StatusOverlayConfig::default(),
             tooltip_overlay: TooltipOverlayConfig::default(),
             ui_hints: UiHintsConfig::default(),
@@ -434,6 +436,18 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("RightAlt+D", "move_to_right_edge"),
         ("RightAlt+R", "reload_config"),
         ("RightAlt+Escape", "panic_reset"),
+        ("Alt+E", "step_move_up"),
+        ("Alt+S", "step_move_left"),
+        ("Alt+D", "step_move_down"),
+        ("Alt+F", "step_move_right"),
+        ("Alt+Ctrl+E", "step_move_small_up"),
+        ("Alt+Ctrl+S", "step_move_small_left"),
+        ("Alt+Ctrl+D", "step_move_small_down"),
+        ("Alt+Ctrl+F", "step_move_small_right"),
+        ("Alt+Shift+E", "step_move_large_up"),
+        ("Alt+Shift+S", "step_move_large_left"),
+        ("Alt+Shift+D", "step_move_large_down"),
+        ("Alt+Shift+F", "step_move_large_right"),
         ("/", "show_help"),
     ]
     .into_iter()
@@ -626,6 +640,40 @@ pub struct FinalAdjustConfig {
     cancel_key: String,
     back_key: String,
     show_hint: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StepMoveClampMode {
+    #[default]
+    None,
+    VirtualScreen,
+    CurrentMonitor,
+    CurrentWorkArea,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct StepMoveConfig {
+    enabled: bool,
+    small_step_px: i32,
+    normal_step_px: i32,
+    large_step_px: i32,
+    clamp_mode: StepMoveClampMode,
+    show_tooltip: bool,
+}
+
+impl Default for StepMoveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            small_step_px: 20,
+            normal_step_px: 80,
+            large_step_px: 240,
+            clamp_mode: StepMoveClampMode::VirtualScreen,
+            show_tooltip: true,
+        }
+    }
 }
 
 impl Default for FinalAdjustConfig {
@@ -1252,6 +1300,7 @@ impl Config {
         self.normalize_grid_mode_config();
         self.normalize_jump_config();
         self.normalize_final_adjust_config();
+        self.normalize_step_move_config();
         self.normalize_mouse_speed_config();
         self.normalize_slow_mouse_config();
         self.normalize_wheel_config();
@@ -1409,6 +1458,29 @@ impl Config {
         if VirtualKey::from_string(&self.final_adjust.back_key).is_none() {
             warn_config_normalized("final_adjust.back_key is invalid; using Backspace");
             self.final_adjust.back_key = defaults.back_key;
+        }
+    }
+
+    fn normalize_step_move_config(&mut self) {
+        self.step_move.small_step_px =
+            normalize_i32_range("step_move.small_step_px", self.step_move.small_step_px, 1, 5000);
+        self.step_move.normal_step_px = normalize_i32_range(
+            "step_move.normal_step_px",
+            self.step_move.normal_step_px,
+            1,
+            5000,
+        );
+        self.step_move.large_step_px = normalize_i32_range(
+            "step_move.large_step_px",
+            self.step_move.large_step_px,
+            1,
+            10000,
+        );
+        if self.step_move.normal_step_px < self.step_move.small_step_px {
+            self.step_move.normal_step_px = self.step_move.small_step_px;
+        }
+        if self.step_move.large_step_px < self.step_move.normal_step_px {
+            self.step_move.large_step_px = self.step_move.normal_step_px;
         }
     }
 
@@ -2386,6 +2458,7 @@ fn runtime_notification_enabled(
         RuntimeNotificationKind::Drag => config.events.drag,
         RuntimeNotificationKind::ConfigReload => config.events.reload,
         RuntimeNotificationKind::PanicReset => config.events.panic,
+        RuntimeNotificationKind::StepMove => true,
     }
 }
 
@@ -3852,6 +3925,33 @@ mod tests {
         );
         assert_eq!(config.system_bindings.exit, defaults.system_bindings.exit);
         assert_eq!(config.key_bindings, defaults.key_bindings);
+        assert_eq!(config.step_move, defaults.step_move);
+    }
+
+    #[test]
+    fn step_move_normalization_clamps_ranges_and_ordering() {
+        let config = parse_config(
+            r#"
+            [step_move]
+            small_step_px = -5
+            normal_step_px = 0
+            large_step_px = -10
+            "#,
+        );
+        assert_eq!(config.step_move.small_step_px, 1);
+        assert_eq!(config.step_move.normal_step_px, 1);
+        assert_eq!(config.step_move.large_step_px, 1);
+
+        let config = parse_config(
+            r#"
+            [step_move]
+            small_step_px = 300
+            normal_step_px = 200
+            large_step_px = 100
+            "#,
+        );
+        assert_eq!(config.step_move.normal_step_px, 300);
+        assert_eq!(config.step_move.large_step_px, 300);
     }
 
     #[test]

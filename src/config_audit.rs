@@ -283,6 +283,12 @@ fn is_known_active_path(path: &str) -> bool {
         "final_adjust.cancel_key",
         "final_adjust.back_key",
         "final_adjust.show_hint",
+        "step_move.enabled",
+        "step_move.small_step_px",
+        "step_move.normal_step_px",
+        "step_move.large_step_px",
+        "step_move.clamp_mode",
+        "step_move.show_tooltip",
         "status_overlay.visibility",
         "status_overlay.mode",
         "status_overlay.positioning",
@@ -528,6 +534,22 @@ mod tests {
         let warning = warning_for(&report, "jump.move_cursor_after_each_stage");
         assert_eq!(warning.severity, ConfigAuditSeverity::Deprecated);
         assert!(warning.suggestion.contains("jump.cursor_between_stages"));
+    }
+
+    #[test]
+    fn audit_accepts_step_move_paths() {
+        let report = audit_config_toml(
+            r#"
+            [step_move]
+            enabled = true
+            small_step_px = 10
+            normal_step_px = 80
+            large_step_px = 200
+            clamp_mode = "virtual_screen"
+            show_tooltip = false
+            "#,
+        );
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
 
     #[test]
