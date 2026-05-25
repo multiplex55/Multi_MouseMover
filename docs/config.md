@@ -104,6 +104,12 @@ key_bindings = [
 | `system_bindings.panic_reset` | key chord string | `"RightAlt+Escape"` | Yes | Active | Global non-exiting panic cleanup binding, routed before mode-local handlers. |
 | `system_bindings.panic_reset_ignore_extra_modifiers` | boolean | `true` | Yes | Active | When true, `panic_reset` allows extra held modifiers. |
 | `system_bindings.panic_reset_sets_idle` | boolean | `true` | Yes | Active | When true, panic reset also sets idle mode (`SetActiveMode { active = false }`). |
+| `input.swallow_owned_modifiers` | boolean | `true` | Yes | Active | Swallow app-owned modifier down/up transitions while active mode is enabled. |
+| `input.modifier_reconcile_on_tick` | boolean | `true` | Yes | Active | Enables periodic modifier reconciliation checks. |
+| `input.modifier_reconcile_interval_ms` | integer milliseconds | `50` | Yes | Active | Poll interval for modifier reconciliation. |
+| `input.stuck_key_timeout_ms` | integer milliseconds | `1500` | Yes | Active | Timeout used to classify stale held keys as stuck. |
+| `input.debug_input` | boolean | `false` | Yes | Active | Enables verbose debug-input logs (raw keys, swallow reasons, system matches, trigger tracking). |
+| `input.shift_can_modify_plain_movement` | boolean | `true` | Yes | Active | Keeps shift-relaxed plain-movement matching enabled. |
 | `mouse_speed.default_speed` | integer | `1` | Yes | Active | Normal held-movement speed and replacement for legacy `starting_speed`. |
 | `mouse_speed.min_speed` | integer | `1` | Yes | Active | Lower bound for runtime mouse speed changes. |
 | `mouse_speed.max_speed` | integer | `12` | Yes | Active | Upper bound for runtime mouse speed changes. |
@@ -492,3 +498,7 @@ cancel = "Escape" # conceptual mode-local cancel
 
 Pressing `Escape` dispatches `Exit`, not bookmark cancel, because system bindings have higher priority.
 If you instead set `exit = "Ctrl+Alt+Escape"`, a plain `Escape` can still be consumed by bookmark cancel.
+
+### Alt / RightAlt ownership caveat
+
+When any configured chord includes `RightAlt+...`, the app marks both `RightAlt` and `Alt` as owned modifiers. With `input.swallow_owned_modifiers = true` (default), those modifier down/up events are swallowed while active so modifier state does not leak to other applications during app-owned chords.
