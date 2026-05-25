@@ -231,7 +231,10 @@ mod tests {
 
     fn test_path(name: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("multi_mousemover_bookmark_test_{name}_{}", now_unix_ms()));
+        p.push(format!(
+            "multi_mousemover_bookmark_test_{name}_{}",
+            now_unix_ms()
+        ));
         p
     }
 
@@ -261,7 +264,10 @@ mod tests {
         assert_eq!(store.set_slot(2, fixture_record(2)), SetOutcome::Saved);
         let mut replacement = fixture_record(2);
         replacement.x = 111;
-        assert_eq!(store.set_slot(2, replacement.clone()), SetOutcome::Overwritten);
+        assert_eq!(
+            store.set_slot(2, replacement.clone()),
+            SetOutcome::Overwritten
+        );
         assert_eq!(store.occupied_slots(), vec![2]);
         assert_eq!(store.get_slot(2), Some(&replacement));
     }
