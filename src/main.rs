@@ -4388,6 +4388,7 @@ mod tests {
             drag = false
             reload = false
             panic = false
+            surgical = false
             "#,
         );
 
@@ -4403,6 +4404,7 @@ mod tests {
                 drag: false,
                 reload: false,
                 panic: false,
+                surgical: false,
                 ui_hints_query_start: false,
                 ui_hints_query_fail: true,
                 ui_hints_query_empty: true,
