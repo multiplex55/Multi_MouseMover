@@ -1,6 +1,7 @@
 mod action;
 mod action_handler;
 mod app_state;
+mod bookmarks;
 mod config_audit;
 mod grid_session;
 mod help_overlay;
@@ -2615,7 +2616,7 @@ fn decode_key_event(w_param: WPARAM, kbd: KBDLLHOOKSTRUCT) -> Option<KeyEvent> {
 }
 
 fn is_keyboard_hook_key_message(code: i32, w_param: WPARAM) -> bool {
-    code == HC_ACTION.try_into().unwrap()
+    code == HC_ACTION as i32
         && (w_param.0 as u32 == WM_KEYDOWN
             || w_param.0 as u32 == WM_SYSKEYDOWN
             || w_param.0 as u32 == WM_KEYUP
