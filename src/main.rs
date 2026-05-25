@@ -432,6 +432,7 @@ thread_local! {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 struct Config {
+    input: InputConfig,
     key_bindings: Vec<(String, String)>,
     system_bindings: SystemBindings,
     polling_rate: u64,
@@ -466,6 +467,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             key_bindings: default_key_bindings(),
+            input: InputConfig::default(),
             system_bindings: SystemBindings::default(),
             polling_rate: DEFAULT_POLLING_RATE_MS,
             grid_size: GridSize::default(),
@@ -491,6 +493,30 @@ impl Default for Config {
             acceleration: 2,
             acceleration_rate: 1,
             top_speed: 6,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+struct InputConfig {
+    swallow_owned_modifiers: bool,
+    modifier_reconcile_on_tick: bool,
+    modifier_reconcile_interval_ms: u64,
+    stuck_key_timeout_ms: u64,
+    debug_input: bool,
+    shift_can_modify_plain_movement: bool,
+}
+
+impl Default for InputConfig {
+    fn default() -> Self {
+        Self {
+            swallow_owned_modifiers: true,
+            modifier_reconcile_on_tick: true,
+            modifier_reconcile_interval_ms: 50,
+            stuck_key_timeout_ms: 1500,
+            debug_input: false,
+            shift_can_modify_plain_movement: true,
         }
     }
 }
@@ -2263,6 +2289,8 @@ impl Config {
         let mut app_state = APP_STATE.write().unwrap();
         app_state.set_grid_direction_labels(grid_direction_labels);
         app_state.set_bound_chords(key_actions.bound_chords());
+        app_state.set_owned_modifiers(key_actions.owned_modifiers());
+        app_state.set_debug_input(self.input.debug_input);
     }
 
     fn initialize_system_bindings(&self) -> Result<(), Box<dyn Error>> {
@@ -4962,12 +4990,7 @@ mod tests {
         handler.mouse_master.handle_action(Action::ToggleDragMode);
         let mut app_state = AppState::default();
 
-        let _ = apply_loaded_config(
-            &mut handler,
-            &mut app_state,
-            checked_in_config(),
-        )
-        .unwrap();
+        let _ = apply_loaded_config(&mut handler, &mut app_state, checked_in_config()).unwrap();
 
         assert!(handler.active_keys.is_empty());
         assert!(!handler.mouse_master.left_button_held());

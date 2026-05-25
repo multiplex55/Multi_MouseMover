@@ -1,6 +1,7 @@
 use crate::action::Action;
 use crate::app_state::KeyEvent;
 use crate::key_chord::KeyChord;
+use std::collections::HashSet;
 use std::mem::size_of;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
@@ -765,6 +766,29 @@ impl KeyBindings {
     pub fn entries(&self) -> impl Iterator<Item = (KeyChord, &Action)> + '_ {
         self.bindings.iter().map(|(chord, action)| (*chord, action))
     }
+
+    pub fn owned_modifiers(&self) -> HashSet<VirtualKey> {
+        let mut owned = HashSet::new();
+        for (chord, _) in &self.bindings {
+            if chord.right_alt {
+                owned.insert(VirtualKey::RightAlt);
+                owned.insert(VirtualKey::Alt);
+            }
+            if chord.alt {
+                owned.insert(VirtualKey::Alt);
+            }
+            if chord.ctrl {
+                owned.insert(VirtualKey::Ctrl);
+            }
+            if chord.shift {
+                owned.insert(VirtualKey::Shift);
+            }
+            if chord.win {
+                owned.insert(VirtualKey::Win);
+            }
+        }
+        owned
+    }
 }
 
 #[cfg(test)]
@@ -980,5 +1004,22 @@ mod tests {
                 "{key:?}"
             );
         }
+    }
+
+    #[test]
+    fn right_alt_in_chord_marks_right_alt_and_alt_owned() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("RightAlt+W").unwrap(), Action::MoveUp);
+        let owned = bindings.owned_modifiers();
+        assert!(owned.contains(&VirtualKey::RightAlt));
+        assert!(owned.contains(&VirtualKey::Alt));
+    }
+
+    #[test]
+    fn alt_chord_marks_alt_owned() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("Alt+W").unwrap(), Action::MoveUp);
+        let owned = bindings.owned_modifiers();
+        assert!(owned.contains(&VirtualKey::Alt));
     }
 }

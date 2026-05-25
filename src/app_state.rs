@@ -97,6 +97,10 @@ pub struct AppState {
     bound_chords: HashSet<KeyChord>,
     active_keys: HashSet<VirtualKey>,
     active_trigger_chords: HashSet<KeyChord>,
+    owned_modifiers: HashSet<VirtualKey>,
+    held_physical_keys: HashSet<VirtualKey>,
+    swallow_owned_modifiers: bool,
+    debug_input: bool,
     jump: JumpState,
     grid: GridState,
     ui_hints: UiHintState,
@@ -228,6 +232,10 @@ impl Default for AppState {
             bound_chords: HashSet::new(),
             active_keys: HashSet::new(),
             active_trigger_chords: HashSet::new(),
+            owned_modifiers: HashSet::new(),
+            held_physical_keys: HashSet::new(),
+            swallow_owned_modifiers: true,
+            debug_input: false,
             jump: JumpState::Inactive,
             grid: GridState::Inactive,
             ui_hints: UiHintState::Inactive,
@@ -272,6 +280,17 @@ impl AppState {
         I: IntoIterator<Item = KeyChord>,
     {
         self.bound_chords = chords.into_iter().collect();
+    }
+
+    pub fn set_owned_modifiers<I>(&mut self, modifiers: I)
+    where
+        I: IntoIterator<Item = VirtualKey>,
+    {
+        self.owned_modifiers = modifiers.into_iter().collect();
+    }
+
+    pub fn set_debug_input(&mut self, enabled: bool) {
+        self.debug_input = enabled;
     }
 
     pub fn set_active_mode(&mut self, active_mode: bool) {
@@ -338,9 +357,16 @@ impl AppState {
     }
 
     pub fn is_system_binding(&self, event: &KeyEvent) -> bool {
-        self.is_toggle_active_binding(event)
+        let matched = self.is_toggle_active_binding(event)
             || self.is_exit_binding(event)
-            || self.is_panic_reset_binding(event)
+            || self.is_panic_reset_binding(event);
+        if matched && self.debug_input {
+            eprintln!(
+                "[debug-input] system-match key={:?} down={}",
+                event.key, event.is_down
+            );
+        }
+        matched
     }
 
     pub fn is_toggle_active_key_down_event(&self, event: &KeyEvent) -> bool {
@@ -845,19 +871,42 @@ impl AppState {
     }
 
     pub fn should_swallow_key(&self, event: &KeyEvent) -> bool {
+        if self.debug_input {
+            eprintln!(
+                "[debug-input] raw key={:?} down={} mods: alt={} ralt={} ctrl={} shift={} win={}",
+                event.key,
+                event.is_down,
+                event.alt_down,
+                event.right_alt_down,
+                event.ctrl_down,
+                event.shift_down,
+                event.win_down
+            );
+        }
         if self.is_exclusive_mode_active() {
+            self.debug_swallow("exclusive_mode", event, true);
             return true;
         }
 
         if self.is_system_binding(event) {
+            self.debug_swallow("system_binding_match", event, true);
+            return true;
+        }
+
+        if self.active_mode
+            && self.swallow_owned_modifiers
+            && self.owned_modifiers.contains(&event.key)
+        {
+            self.debug_swallow("owned_modifier_active", event, true);
             return true;
         }
 
         if self.is_preserved_shortcut(event) {
+            self.debug_swallow("preserved_shortcut", event, false);
             return false;
         }
 
-        self.active_mode
+        let swallow = self.active_mode
             && (self.bound_chords.iter().any(|chord| {
                 chord.matches_dispatch_event(event)
                     || (!event.is_down && self.active_trigger_chords.contains(chord))
@@ -865,7 +914,9 @@ impl AppState {
                 && self
                     .active_trigger_chords
                     .iter()
-                    .any(|chord| chord.key == event.key)))
+                    .any(|chord| chord.key == event.key)));
+        self.debug_swallow("binding_resolution", event, swallow);
+        swallow
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, action: Option<Action>) {
@@ -996,11 +1047,13 @@ impl AppState {
 
         if event.is_down {
             self.active_keys.insert(event.key);
+            self.held_physical_keys.insert(event.key);
             if action.is_some() {
                 self.track_active_trigger_chord(event);
             }
         } else {
             self.active_keys.remove(&event.key);
+            self.held_physical_keys.remove(&event.key);
         }
 
         if event.is_down && matches!(action.as_ref(), Some(Action::ShowHelp)) {
@@ -1085,6 +1138,9 @@ impl AppState {
         if !event.is_down {
             self.active_trigger_chords
                 .retain(|chord| chord.key != event.key);
+            if self.debug_input {
+                eprintln!("[debug-input] active-trigger remove: {:?}", event.key);
+            }
         }
     }
 
@@ -1177,6 +1233,18 @@ impl AppState {
             .copied()
         {
             self.active_trigger_chords.insert(chord);
+            if self.debug_input {
+                eprintln!("[debug-input] active-trigger add: {:?}", chord);
+            }
+        }
+    }
+
+    fn debug_swallow(&self, reason: &str, event: &KeyEvent, swallow: bool) {
+        if self.debug_input {
+            eprintln!(
+                "[debug-input] swallow={} reason={} key={:?} down={}",
+                swallow, reason, event.key, event.is_down
+            );
         }
     }
 
@@ -1475,6 +1543,38 @@ mod tests {
 
             assert!(state.should_swallow_key(&event), "{key:?}");
         }
+    }
+
+    #[test]
+    fn owned_modifier_swallowed_while_active() {
+        let mut state = AppState::default();
+        state.set_owned_modifiers([VirtualKey::Alt]);
+        state.set_active_mode(true);
+        let event = KeyEvent::new(VirtualKey::Alt, true);
+        assert!(state.should_swallow_key(&event));
+    }
+
+    #[test]
+    fn owned_modifier_not_swallowed_while_idle() {
+        let mut state = AppState::default();
+        state.set_owned_modifiers([VirtualKey::Alt]);
+        state.set_active_mode(false);
+        let event = KeyEvent::new(VirtualKey::Alt, true);
+        assert!(!state.should_swallow_key(&event));
+    }
+
+    #[test]
+    fn exit_binding_matches_with_owned_modifier_held() {
+        let mut state = AppState::default();
+        state.set_owned_modifiers([VirtualKey::Alt]);
+        state.set_system_bindings(RuntimeSystemBindings::new(
+            KeyChord::parse("Ctrl+E").unwrap(),
+            KeyChord::parse("Escape").unwrap(),
+        ));
+        let mut event = KeyEvent::new(VirtualKey::Escape, true);
+        event.alt_down = true;
+        assert!(state.is_system_binding(&event));
+        assert!(state.should_swallow_key(&event));
     }
 
     #[test]
