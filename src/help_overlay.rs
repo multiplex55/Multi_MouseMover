@@ -1,5 +1,6 @@
 use crate::action::{Action, Direction2D, StepMoveTier};
 use crate::action_handler::{RuntimeNotification, RuntimeNotificationKind};
+use crate::app_state::ModeContext;
 use crate::key_chord::KeyChord;
 use crate::TooltipOverlayConfig;
 use std::cell::RefCell;
@@ -65,6 +66,25 @@ pub struct HelpOverlayView {
     pub help_max_bindings: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpSection {
+    General,
+    Jump,
+    Grid,
+    UiHints,
+    Disabled,
+}
+
+pub fn resolve_help_section(mode: ModeContext) -> HelpSection {
+    match mode {
+        ModeContext::Inactive => HelpSection::Disabled,
+        ModeContext::Jump => HelpSection::Jump,
+        ModeContext::Grid => HelpSection::Grid,
+        ModeContext::UiHintQuerying | ModeContext::UiHintActive => HelpSection::UiHints,
+        ModeContext::Active => HelpSection::General,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverlayWarningSeverity {
     Info,
@@ -103,6 +123,7 @@ pub struct HelpRuntimeStats {
     pub wheel_tick_interval_ms: u64,
     pub wheel_vertical_multiplier: i32,
     pub wheel_horizontal_multiplier: i32,
+    pub mode_context: String,
 }
 
 impl Default for HelpRuntimeStats {
@@ -129,6 +150,7 @@ impl Default for HelpRuntimeStats {
             wheel_tick_interval_ms: 0,
             wheel_vertical_multiplier: 1,
             wheel_horizontal_multiplier: 1,
+            mode_context: "general".to_string(),
         }
     }
 }
@@ -419,6 +441,7 @@ fn content_size(content: &HelpOverlayContent) -> (i32, i32) {
 
 fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
     vec![
+        format!("Section: {}", stats.mode_context),
         format!(
             "Mode: {} | Drag: {} | Slow: {} | Jump: {}",
             stats.app_mode,
@@ -997,6 +1020,28 @@ mod tests {
     }
 
     #[test]
+    fn mode_context_maps_to_expected_help_sections() {
+        assert_eq!(
+            resolve_help_section(ModeContext::Inactive),
+            HelpSection::Disabled
+        );
+        assert_eq!(
+            resolve_help_section(ModeContext::Active),
+            HelpSection::General
+        );
+        assert_eq!(resolve_help_section(ModeContext::Jump), HelpSection::Jump);
+        assert_eq!(resolve_help_section(ModeContext::Grid), HelpSection::Grid);
+        assert_eq!(
+            resolve_help_section(ModeContext::UiHintQuerying),
+            HelpSection::UiHints
+        );
+        assert_eq!(
+            resolve_help_section(ModeContext::UiHintActive),
+            HelpSection::UiHints
+        );
+    }
+
+    #[test]
     fn help_lines_include_formatted_action_labels() {
         let view = help_view_from_bindings([
             (KeyChord::from_key(VirtualKey::F), Action::JumpMode),
@@ -1066,6 +1111,7 @@ mod tests {
             wheel_tick_interval_ms: 12,
             wheel_vertical_multiplier: 2,
             wheel_horizontal_multiplier: 4,
+            mode_context: "general".to_string(),
         };
 
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");

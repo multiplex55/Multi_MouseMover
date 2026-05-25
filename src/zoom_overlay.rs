@@ -17,7 +17,11 @@ pub struct SurgicalZoomState {
 
 impl Default for SurgicalZoomState {
     fn default() -> Self {
-        Self { visible: false, x: 0, y: 0 }
+        Self {
+            visible: false,
+            x: 0,
+            y: 0,
+        }
     }
 }
 

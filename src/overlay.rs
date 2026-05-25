@@ -65,10 +65,10 @@ struct OverlayPosition {
     y: i32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct OverlayVisualState {
     snapshot_state: IndicatorState,
-    text: Option<&'static str>,
+    text: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,12 +153,12 @@ impl Default for StatusOverlayConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct OverlayRenderPlan {
     visible: bool,
     width: i32,
     height: i32,
-    text: Option<&'static str>,
+    text: Option<String>,
 }
 
 #[cfg(debug_assertions)]
@@ -218,52 +218,91 @@ fn render_plan(snapshot: &IndicatorSnapshot, config: StatusOverlayConfig) -> Ove
 fn compact_status_text(
     snapshot: &IndicatorSnapshot,
     fields: StatusOverlayFields,
-) -> Option<&'static str> {
-    if fields.final_adjust && snapshot.final_adjust_active {
-        Some("ADJ")
-    } else if fields.jump && snapshot.jump_active {
-        Some("JMP")
-    } else if fields.drag && snapshot.dragging_left {
-        Some("DRG")
-    } else if fields.wheel_speed
-        && matches!(
-            snapshot.state,
-            IndicatorState::WheelScrollingSlow
-                | IndicatorState::WheelScrollingNormal
-                | IndicatorState::WheelScrollingFast
-        )
-    {
-        Some("WHL")
-    } else if fields.mouse_speed
-        && matches!(
-            snapshot.state,
-            IndicatorState::MouseSpeedSlow
-                | IndicatorState::MouseSpeedNormal
-                | IndicatorState::MouseSpeedFast
-        )
-    {
-        Some("MS")
-    } else if fields.slow && snapshot.slow {
-        Some("SLW")
-    } else if fields.active && snapshot.app_active {
-        Some("ON")
-    } else {
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if fields.active {
+        parts.push(
+            if snapshot.app_active {
+                "A:ON"
+            } else {
+                "A:IDLE"
+            }
+            .to_string(),
+        );
+    }
+    if fields.mouse_speed {
+        parts.push(format!(
+            "M:{}/{}",
+            snapshot.mouse_speed, snapshot.default_mouse_speed
+        ));
+    }
+    if fields.wheel_speed {
+        parts.push(format!(
+            "W:{}/{}",
+            snapshot.wheel_speed, snapshot.default_wheel_speed
+        ));
+    }
+    if fields.drag {
+        parts.push(format!(
+            "DRG:{}",
+            if snapshot.dragging_left { "ON" } else { "OFF" }
+        ));
+    }
+    if fields.jump {
+        parts.push(format!(
+            "JMP:{}",
+            if snapshot.jump_active { "ON" } else { "OFF" }
+        ));
+    }
+    if fields.final_adjust {
+        parts.push(format!(
+            "SUR:{}",
+            if snapshot.final_adjust_active {
+                "ON"
+            } else {
+                "OFF"
+            }
+        ));
+    }
+    if fields.slow {
+        parts.push(format!("SLW:{}", if snapshot.slow { "ON" } else { "OFF" }));
+    }
+    if parts.is_empty() {
         None
+    } else {
+        Some(parts.join(" "))
     }
 }
 
 fn detailed_status_text(
     snapshot: &IndicatorSnapshot,
     fields: StatusOverlayFields,
-) -> Option<&'static str> {
+) -> Option<String> {
     if fields.flash && snapshot.flash_reason != IndicatorFlashReason::None {
         match snapshot.flash_reason {
-            IndicatorFlashReason::MouseSpeed => Some("Mouse speed"),
-            IndicatorFlashReason::WheelSpeed => Some("Wheel speed"),
+            IndicatorFlashReason::MouseSpeed => Some("flash:mouse_speed".to_string()),
+            IndicatorFlashReason::WheelSpeed => Some("flash:wheel_speed".to_string()),
             IndicatorFlashReason::None => None,
         }
     } else {
-        compact_status_text(snapshot, fields)
+        compact_status_text(snapshot, fields).map(|compact| {
+            format!(
+                "{} | hint:{} jump:{} grid:{} surgical:{}",
+                compact,
+                if snapshot.app_active { "ON" } else { "OFF" },
+                if snapshot.jump_active { "ON" } else { "OFF" },
+                if matches!(snapshot.state, IndicatorState::JumpMode) {
+                    "ON"
+                } else {
+                    "OFF"
+                },
+                if snapshot.final_adjust_active {
+                    "ON"
+                } else {
+                    "OFF"
+                }
+            )
+        })
     }
 }
 
@@ -852,7 +891,9 @@ mod tests {
         let plan = render_plan(&snapshot_from_state(IndicatorState::JumpMode), config);
 
         assert!(plan.visible);
-        assert_eq!(plan.text, Some("JMP"));
+        let text = plan.text.unwrap_or_default();
+        assert!(text.contains("A:ON"));
+        assert!(text.contains("JMP:ON"));
         assert!(plan.width > super::OVERLAY_WIDTH);
     }
 
