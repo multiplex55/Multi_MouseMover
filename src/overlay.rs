@@ -338,6 +338,7 @@ fn snapshot_from_state(state: IndicatorState) -> IndicatorSnapshot {
         default_wheel_speed: 0,
         flash_reason: IndicatorFlashReason::None,
         final_adjust_active: false,
+        bookmark_mode_active: false,
     }
 }
 

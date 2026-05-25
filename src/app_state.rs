@@ -1675,6 +1675,7 @@ mod tests {
                 default_speed: 3,
             },
             left_button_held: true,
+            bookmark_mode_active: false,
         })
         .state;
 

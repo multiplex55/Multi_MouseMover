@@ -191,6 +191,7 @@ mod tests {
                 default_speed: default_wheel_speed,
             },
             left_button_held,
+            bookmark_mode_active: false,
         })
         .state
     }

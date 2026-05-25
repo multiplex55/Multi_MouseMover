@@ -4354,7 +4354,7 @@ fn print_heartbeat(diagnostics: LoopDiagnostics, hook_diagnostics: HookDiagnosti
     );
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct StartupFeatureBindingSummary {
     surgical_mode: usize,
     scroll_modifier: usize,
@@ -4688,6 +4688,7 @@ fn main() {
                         default_speed: action_handler.mouse_master.config.wheel.default_speed,
                     },
                     left_button_held: action_handler.mouse_master.left_button_held(),
+                    bookmark_mode_active: app_state.is_bookmark_mode_active(),
                 }),
                 action_handler.mouse_master.config.status_overlay,
             )
@@ -5057,6 +5058,7 @@ mod tests {
                 ui_hints_query_fail: true,
                 ui_hints_query_empty: true,
                 ui_hints_query_capped_count: false,
+                bookmarks: true,
             }
         );
     }
@@ -6944,6 +6946,7 @@ enabled = true"#,
                 default_speed: action_handler.mouse_master.config.wheel.default_speed,
             },
             left_button_held: false,
+            bookmark_mode_active: false,
         })
         .state;
 
@@ -6988,6 +6991,7 @@ enabled = true"#,
                 default_speed: action_handler.mouse_master.config.wheel.default_speed,
             },
             left_button_held: false,
+            bookmark_mode_active: false,
         })
         .state;
 
