@@ -2105,7 +2105,9 @@ impl Config {
 
     fn parse_audited_config(config_str: &str) -> Result<Self, Box<dyn Error>> {
         emit_config_audit_warnings(&audit_config_toml(config_str).warnings);
-        toml::from_str::<Self>(config_str)?.normalize()
+        let config = toml::from_str::<Self>(config_str)?.normalize()?;
+        emit_startup_feature_binding_warnings(&config);
+        Ok(config)
     }
 
     fn runtime_system_bindings(&self) -> Result<RuntimeSystemBindings, Box<dyn Error>> {
@@ -2923,14 +2925,22 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
     None
 }
 
-fn maybe_emit_surgical_tooltip<B: MouseBackend>(action_handler: &ActionHandler<B>, app_state: &AppState) {
+fn maybe_emit_surgical_tooltip<B: MouseBackend>(
+    action_handler: &ActionHandler<B>,
+    app_state: &AppState,
+) {
     let surgical_active = action_handler.active_keys.contains(&Action::SurgicalMode);
     let mut previous = LAST_SURGICAL_TOOLTIP_ACTIVE.lock().unwrap();
     if !*previous
         && surgical_active
         && ui_hint_tooltip_event_enabled(
             &action_handler.mouse_master.config.tooltip_overlay,
-            action_handler.mouse_master.config.tooltip_overlay.events.surgical,
+            action_handler
+                .mouse_master
+                .config
+                .tooltip_overlay
+                .events
+                .surgical,
         )
         && !app_state.help_visible()
     {
@@ -3847,6 +3857,67 @@ fn print_heartbeat(diagnostics: LoopDiagnostics, hook_diagnostics: HookDiagnosti
     );
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct StartupFeatureBindingSummary {
+    surgical_mode: usize,
+    scroll_modifier: usize,
+    window_jump: usize,
+    position_history_save: usize,
+    position_history_clear: usize,
+    position_history_mode: usize,
+}
+
+impl StartupFeatureBindingSummary {
+    fn position_history_total(self) -> usize {
+        self.position_history_save + self.position_history_clear + self.position_history_mode
+    }
+}
+
+fn startup_feature_binding_summary(config: &Config) -> StartupFeatureBindingSummary {
+    let mut summary = StartupFeatureBindingSummary::default();
+    for (_, action_str) in &config.key_bindings {
+        let Some(action) = Action::from_string(action_str) else {
+            continue;
+        };
+        match action {
+            Action::SurgicalMode => summary.surgical_mode += 1,
+            Action::ScrollModifier => summary.scroll_modifier += 1,
+            Action::MoveToWindowTopEdge
+            | Action::MoveToWindowBottomEdge
+            | Action::MoveToWindowLeftEdge
+            | Action::MoveToWindowRightEdge
+            | Action::MoveToWindowCenter
+            | Action::MoveToWindowTitlebar => summary.window_jump += 1,
+            Action::SaveMousePosition => summary.position_history_save += 1,
+            Action::ClearMousePositions => summary.position_history_clear += 1,
+            Action::PositionHistoryMode => summary.position_history_mode += 1,
+            _ => {}
+        }
+    }
+    summary
+}
+
+fn emit_startup_feature_binding_warnings(config: &Config) {
+    let bindings = startup_feature_binding_summary(config);
+
+    if config.surgical_mode.enabled && bindings.surgical_mode == 0 {
+        warn_config_normalized(
+            r#"surgical_mode.enabled=true but no key binding targets action "surgical_mode". Add a key_bindings entry like ["RightAlt+S", "surgical_mode"] or disable [surgical_mode].enabled."#,
+        );
+    }
+    if config.scroll_mode.enabled && bindings.scroll_modifier == 0 {
+        warn_config_normalized(
+            r#"scroll_mode.enabled=true but no key binding targets action "scroll_modifier". Add a key_bindings entry like ["LeftAlt", "scroll_modifier"] or disable [scroll_mode].enabled."#,
+        );
+    }
+    if config.window_jump.enabled && bindings.window_jump == 0 {
+        warn_config_normalized("window_jump.enabled=true but no window-jump action bindings were found (move_to_window_top_edge/bottom_edge/left_edge/right_edge/center/titlebar). Add at least one window-jump key_bindings action or disable [window_jump].enabled.");
+    }
+    if config.position_history.enabled && bindings.position_history_total() == 0 {
+        warn_config_normalized("position_history.enabled=true but no position history bindings were found. Add one or more of save_mouse_position, clear_mouse_positions, or position_history_mode to key_bindings, or disable [position_history].enabled.");
+    }
+}
+
 fn startup_summary_line() -> String {
     format!("{APP_DISPLAY_NAME} ({APP_CRATE_ID}) Program Start!")
 }
@@ -3890,6 +3961,29 @@ fn startup_validation_summary(config: &Config, warnings: &[String]) -> String {
             config.jump.profiles.len()
         ),
     ];
+
+    let feature_bindings = startup_feature_binding_summary(config);
+    lines.push("features: [enabled, bindings]".to_string());
+    lines.push(format!(
+        "  surgical_mode: enabled={} bindings={}",
+        config.surgical_mode.enabled, feature_bindings.surgical_mode
+    ));
+    lines.push(format!(
+        "  scroll_mode: enabled={} bindings={}",
+        config.scroll_mode.enabled, feature_bindings.scroll_modifier
+    ));
+    lines.push(format!(
+        "  window_jump: enabled={} bindings={}",
+        config.window_jump.enabled, feature_bindings.window_jump
+    ));
+    lines.push(format!(
+        "  position_history: enabled={} bindings=save:{} clear:{} mode:{} total:{}",
+        config.position_history.enabled,
+        feature_bindings.position_history_save,
+        feature_bindings.position_history_clear,
+        feature_bindings.position_history_mode,
+        feature_bindings.position_history_total()
+    ));
 
     if warnings.is_empty() {
         lines.push("warnings=0".to_string());
@@ -5662,6 +5756,104 @@ mod tests {
     }
 
     #[test]
+    fn feature_binding_validation_warns_when_enabled_features_have_no_bindings() {
+        struct Case {
+            name: &'static str,
+            config_toml: &'static str,
+            expected_substring: &'static str,
+        }
+
+        let cases = [
+            Case {
+                name: "surgical_mode",
+                config_toml: "[surgical_mode]
+enabled = true",
+                expected_substring:
+                    "surgical_mode.enabled=true but no key binding targets action \"surgical_mode\"",
+            },
+            Case {
+                name: "scroll_mode",
+                config_toml: "[scroll_mode]
+enabled = true",
+                expected_substring:
+                    "scroll_mode.enabled=true but no key binding targets action \"scroll_modifier\"",
+            },
+            Case {
+                name: "window_jump",
+                config_toml: "[window_jump]
+enabled = true",
+                expected_substring:
+                    "window_jump.enabled=true but no window-jump action bindings were found",
+            },
+            Case {
+                name: "position_history",
+                config_toml: "[position_history]
+enabled = true",
+                expected_substring:
+                    "position_history.enabled=true but no position history bindings were found",
+            },
+        ];
+
+        for case in cases {
+            let _ = take_config_warnings();
+            let _ = parse_config(case.config_toml);
+            let warnings = take_config_warnings();
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.contains(case.expected_substring)),
+                "expected {} warning, got {:?}",
+                case.name,
+                warnings
+            );
+        }
+    }
+
+    #[test]
+    fn feature_binding_validation_does_not_warn_when_enabled_features_have_bindings() {
+        let _ = take_config_warnings();
+        let _ = parse_config(
+            r#"
+            key_bindings = [
+                ["F13", "surgical_mode"],
+                ["F14", "scroll_modifier"],
+                ["F15", "move_to_window_center"],
+                ["F16", "position_history_mode"]
+            ]
+
+            [surgical_mode]
+            enabled = true
+
+            [scroll_mode]
+            enabled = true
+
+            [window_jump]
+            enabled = true
+
+            [position_history]
+            enabled = true
+            "#,
+        );
+        let warnings = take_config_warnings();
+
+        let blocked = [
+            "surgical_mode.enabled=true but no key binding targets action \"surgical_mode\"",
+            "scroll_mode.enabled=true but no key binding targets action \"scroll_modifier\"",
+            "window_jump.enabled=true but no window-jump action bindings were found",
+            "position_history.enabled=true but no position history bindings were found",
+        ];
+
+        for forbidden in blocked {
+            assert!(
+                warnings.iter().all(|warning| !warning.contains(forbidden)),
+                "unexpected warning matched '{}': {:?}",
+                forbidden,
+                warnings
+            );
+        }
+    }
+
+    #[test]
     fn startup_summary_uses_current_crate_id() {
         let summary = startup_summary_line();
 
@@ -5690,6 +5882,12 @@ mod tests {
         assert!(summary.contains("mouse_speed default=1 range=1..12 step=1 profiles=1"));
         assert!(summary.contains("wheel default=3 range=1..12 step=1 tick=8ms"));
         assert!(summary.contains("slow_mouse strategy=Fixed speed=1 (default 1, range 1..2) acceleration=0 every 1 tick(s)"));
+        assert!(summary.contains("features: [enabled, bindings]"));
+        assert!(summary.contains("surgical_mode: enabled=false bindings=0"));
+        assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
+        assert!(summary.contains("window_jump: enabled=false bindings=0"));
+        assert!(summary
+            .contains("position_history: enabled=false bindings=save:0 clear:0 mode:0 total:0"));
         assert!(summary.contains("warnings=1"));
         assert!(summary.contains("warning: wheel.min_speed clamped"));
     }
