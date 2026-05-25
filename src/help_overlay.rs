@@ -840,7 +840,7 @@ fn format_action(action: &Action) -> String {
         Action::ReloadConfig => "Reload config".to_string(),
         Action::PanicReset => "Panic reset".to_string(),
         Action::SlowMouse => "Slow mouse".to_string(),
-        Action::SurgicalMode => "Surgical mode".to_string(),
+        Action::SurgicalMode => "Held precision modifier (surgical)".to_string(),
         Action::ScrollModifier => "Scroll modifier".to_string(),
         Action::JumpMode => "Jump".to_string(),
         Action::JumpModeProfile(profile) => format!("Jump mode profile: {profile}"),

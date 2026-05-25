@@ -39,6 +39,7 @@ Action bindings run only while active mode is enabled:
 | `S` | Move down |
 | `D` | Move right |
 | `LeftShift` | Slow held movement |
+| `B` | Surgical held precision modifier (hold with movement key) |
 | `SPACE` | Left click |
 | `L` | Right click |
 | `RightShift` | Middle click |
@@ -215,7 +216,7 @@ Limitations and caveats:
 
 ## Overlays
 
-`[status_overlay]` controls the compact persistent status indicator. It can show active/idle, drag, slow movement, jump state, speed flashes, wheel state, and final-adjust state.
+`[status_overlay]` controls the compact persistent status indicator. It can show active/idle, drag, slow movement, surgical held precision state, jump state, speed flashes, wheel state, and final-adjust state.
 
 `[tooltip_overlay]` controls temporary explanatory messages and the larger help panel toggled by `/`. Temporary tooltips are short-lived notices for runtime changes such as mouse speed, wheel speed, profile changes, drag, reload, and panic reset. The help panel does not auto-expire; it shows current runtime stats plus configured keybinds until `/` toggles it again, Escape dismisses it, or the app enters an exclusive mode such as jump.
 
@@ -239,6 +240,7 @@ profile = true
 drag = true
 reload = true
 panic = true
+surgical = true
 ```
 
 The tooltip/help overlay is intentionally separate from `[status_overlay]`: status is a small always-on indicator for current state, while tooltip/help is temporary explanatory text or the explicit Slash panel.

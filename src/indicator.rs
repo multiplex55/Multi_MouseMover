@@ -29,6 +29,7 @@ pub struct IndicatorSnapshot {
     pub app_active: bool,
     pub dragging_left: bool,
     pub slow: bool,
+    pub surgical: bool,
     pub jump_active: bool,
     pub jump_stage: Option<(usize, usize)>,
     pub mouse_speed: i32,
@@ -67,6 +68,7 @@ pub struct IndicatorInput<'a> {
 
 pub fn resolve_indicator_snapshot(input: IndicatorInput<'_>) -> IndicatorSnapshot {
     let slow = input.active_actions.contains(&Action::SlowMouse);
+    let surgical = input.active_actions.contains(&Action::SurgicalMode);
     let wheel_direction_active = input
         .active_actions
         .iter()
@@ -86,6 +88,7 @@ pub fn resolve_indicator_snapshot(input: IndicatorInput<'_>) -> IndicatorSnapsho
         app_active: input.app_active,
         dragging_left: input.left_button_held,
         slow,
+        surgical,
         jump_active: input.jump_active,
         jump_stage: input.jump_stage,
         mouse_speed: input.mouse.current_speed,
@@ -260,6 +263,30 @@ mod tests {
         assert_eq!(snapshot.state, IndicatorState::JumpMode);
         assert!(snapshot.final_adjust_active);
         assert_eq!(snapshot.jump_stage, Some((3, 3)));
+    }
+
+    #[test]
+    fn surgical_action_sets_snapshot_flag() {
+        let active_actions = actions(&[Action::SurgicalMode]);
+        let snapshot = resolve_indicator_snapshot(IndicatorInput {
+            app_active: true,
+            jump_active: false,
+            jump_stage: None,
+            final_adjust_active: false,
+            active_actions: &active_actions,
+            mouse: MouseIndicatorInput {
+                active: false,
+                current_speed: 1,
+                default_speed: 1,
+            },
+            wheel: WheelIndicatorInput {
+                active: false,
+                current_speed: 1,
+                default_speed: 1,
+            },
+            left_button_held: false,
+        });
+        assert!(snapshot.surgical);
     }
 
     #[test]
