@@ -275,6 +275,11 @@ fn is_known_active_path(path: &str) -> bool {
         "wheel_profiles.*.horizontal_multiplier",
         "edge_jump.offset_px",
         "edge_jump.use_work_area",
+        "window_jump.enabled",
+        "window_jump.use_extended_frame_bounds",
+        "window_jump.edge_offset_px",
+        "window_jump.titlebar_y_offset_px",
+        "window_jump.clamp_to_window",
         "final_adjust.enabled",
         "final_adjust.small_step_px",
         "final_adjust.large_step_px",
@@ -788,16 +793,16 @@ mod tests {
     }
     #[test]
     fn audit_accepts_position_history_paths() {
-        let report = audit_config_toml(r#"
+        let report = audit_config_toml(
+            r#"
             [position_history]
             enabled = true
             max_positions = 16
             selection_keys = "ASDF"
             label_length = 2
             show_numbers = false
-        "#);
+        "#,
+        );
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
-
-
 }

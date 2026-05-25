@@ -169,6 +169,11 @@ Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 | `ui_hints.overlay.show_border` | boolean | `true` | Yes | Active | Draws borders around hint labels. |
 | `edge_jump.offset_px` | integer pixels | `1` | Yes | Active | Offset used by edge-jump actions. |
 | `edge_jump.use_work_area` | boolean | `false` | Yes | Active | Uses monitor work area instead of full bounds. |
+| `window_jump.enabled` | boolean | `true` | Yes | Active | Enables foreground-window snap actions. |
+| `window_jump.use_extended_frame_bounds` | boolean | `true` | Yes | Active | Uses DWM extended frame bounds when available. |
+| `window_jump.edge_offset_px` | integer pixels | `1` | Yes | Active | Inset offset for window edge snap targets. |
+| `window_jump.titlebar_y_offset_px` | integer pixels | `10` | Yes | Active | Y offset from window top for titlebar snap target. |
+| `window_jump.clamp_to_window` | boolean | `true` | Yes | Active | Clamps derived targets into foreground window bounds. |
 | `jump.move_cursor_after_each_stage` | boolean | none | Yes | Deprecated alias | Replace with `jump.cursor_between_stages`. `true` maps to `move_to_region_center`; `false` maps to `none`. |
 | `jump.<stage>.preview_margin_percent` | integer percent | none | Yes | Deprecated alias | Replace with `jump.<stage>.visual_context_margin_percent`. Used only when the new field is absent. |
 | `system_bindings.polling_rate` | integer milliseconds | none | No | Legacy | Mis-scoped old path. Move to top-level `polling_rate`. |

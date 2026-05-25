@@ -17,6 +17,7 @@ mod position_history;
 mod screen_capture;
 mod ui_hint_overlay;
 mod ui_hints;
+mod window_geometry;
 mod windows_uia;
 
 use action::*;
@@ -418,6 +419,7 @@ struct Config {
     wheel: WheelConfig,
     wheel_profiles: HashMap<String, WheelProfileConfig>,
     edge_jump: EdgeJumpConfig,
+    window_jump: WindowJumpConfig,
     // Legacy compatibility alias for the movement baseline. New configs should use
     // [mouse_speed].default_speed; normalization keeps starting_speed synchronized.
     starting_speed: i32,
@@ -447,6 +449,7 @@ impl Default for Config {
             wheel: WheelConfig::default(),
             wheel_profiles: HashMap::new(),
             edge_jump: EdgeJumpConfig::default(),
+            window_jump: WindowJumpConfig::default(),
             starting_speed: 1,
             acceleration: 2,
             acceleration_rate: 1,
@@ -568,7 +571,6 @@ pub struct TooltipOverlayConfig {
     pub help_max_bindings: i32,
     pub events: TooltipOverlayEvents,
 }
-
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
@@ -821,6 +823,28 @@ impl Default for FinalAdjustConfig {
 pub struct EdgeJumpConfig {
     offset_px: i32,
     use_work_area: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(default)]
+pub struct WindowJumpConfig {
+    enabled: bool,
+    use_extended_frame_bounds: bool,
+    edge_offset_px: i32,
+    titlebar_y_offset_px: i32,
+    clamp_to_window: bool,
+}
+
+impl Default for WindowJumpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            use_extended_frame_bounds: true,
+            edge_offset_px: 1,
+            titlebar_y_offset_px: 10,
+            clamp_to_window: true,
+        }
+    }
 }
 
 impl Default for EdgeJumpConfig {
@@ -1431,6 +1455,7 @@ impl Config {
         self.normalize_wheel_config();
         self.normalize_runtime_profiles();
         self.normalize_edge_jump_config();
+        self.normalize_window_jump_config();
         self.normalize_tooltip_overlay_config();
         self.normalize_ui_hints_config();
         // Keep the legacy field stable for downstream code and diagnostics after the
@@ -1541,7 +1566,12 @@ impl Config {
             0,
             200,
         );
-        self.ui_hints.min_targets_before_fallback = normalize_i32_range("ui_hints.min_targets_before_fallback", self.ui_hints.min_targets_before_fallback, 1, 5000);
+        self.ui_hints.min_targets_before_fallback = normalize_i32_range(
+            "ui_hints.min_targets_before_fallback",
+            self.ui_hints.min_targets_before_fallback,
+            1,
+            5000,
+        );
         self.ui_hints.query_timeout_ms = self.ui_hints.query_timeout_ms.clamp(100, 30_000);
         self.ui_hints.overlay.font_scale = normalize_f32_range(
             "ui_hints.overlay.font_scale",
@@ -1549,6 +1579,17 @@ impl Config {
             0.25,
             4.0,
         );
+    }
+
+    fn normalize_window_jump_config(&mut self) {
+        self.window_jump.edge_offset_px = self
+            .window_jump
+            .edge_offset_px
+            .clamp(0, MAX_EDGE_JUMP_OFFSET_PX);
+        self.window_jump.titlebar_y_offset_px = self
+            .window_jump
+            .titlebar_y_offset_px
+            .clamp(0, MAX_EDGE_JUMP_OFFSET_PX);
     }
 
     fn normalize_final_adjust_config(&mut self) {
@@ -1589,8 +1630,12 @@ impl Config {
     }
 
     fn normalize_step_move_config(&mut self) {
-        self.step_move.small_step_px =
-            normalize_i32_range("step_move.small_step_px", self.step_move.small_step_px, 1, 5000);
+        self.step_move.small_step_px = normalize_i32_range(
+            "step_move.small_step_px",
+            self.step_move.small_step_px,
+            1,
+            5000,
+        );
         self.step_move.normal_step_px = normalize_i32_range(
             "step_move.normal_step_px",
             self.step_move.normal_step_px,
@@ -3157,7 +3202,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             let query_request = UiHintQueryRequest {
                 query_id: UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1,
                 foreground_hwnd: unsafe {
-                windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize
+                    windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize
                 },
             };
             APP_STATE.write().unwrap().enter_ui_hint_querying(
@@ -3397,7 +3442,13 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     if ui_hints_debug_enabled() {
                         eprintln!("[ui-hints] completion/cancel: completed");
                     }
-                    let config = ACTION_HANDLER.read().unwrap().mouse_master.config.ui_hints.clone();
+                    let config = ACTION_HANDLER
+                        .read()
+                        .unwrap()
+                        .mouse_master
+                        .config
+                        .ui_hints
+                        .clone();
                     let action = resolve_ui_hint_completion_action(&config, &event);
                     {
                         let mut handler = ACTION_HANDLER.write().unwrap();
@@ -3407,26 +3458,40 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                                 && last.action != UiHintCompletionAction::MoveOnly
                                 && Instant::now() <= last.expires_at
                             {
-                                handler.mouse_master.move_mouse_to(last.target_x, last.target_y);
+                                handler
+                                    .mouse_master
+                                    .move_mouse_to(last.target_x, last.target_y);
                                 match last.action {
-                                    UiHintCompletionAction::LeftClick => handler.mouse_master.left_click_once(),
-                                    UiHintCompletionAction::RightClick => handler.mouse_master.right_click_once(),
-                                    UiHintCompletionAction::MiddleClick => handler.mouse_master.middle_click_once(),
+                                    UiHintCompletionAction::LeftClick => {
+                                        handler.mouse_master.left_click_once()
+                                    }
+                                    UiHintCompletionAction::RightClick => {
+                                        handler.mouse_master.right_click_once()
+                                    }
+                                    UiHintCompletionAction::MiddleClick => {
+                                        handler.mouse_master.middle_click_once()
+                                    }
                                     UiHintCompletionAction::MoveOnly => {}
                                 }
                                 replayed = true;
                             }
                         }
                         if !replayed {
-                            handler.mouse_master.move_mouse_to(target.target_x, target.target_y);
+                            handler
+                                .mouse_master
+                                .move_mouse_to(target.target_x, target.target_y);
                             match action {
                                 UiHintCompletionAction::LeftClick => {
                                     if !handler.mouse_master.left_button_held() {
                                         handler.mouse_master.left_click_once();
                                     }
                                 }
-                                UiHintCompletionAction::RightClick => handler.mouse_master.right_click_once(),
-                                UiHintCompletionAction::MiddleClick => handler.mouse_master.middle_click_once(),
+                                UiHintCompletionAction::RightClick => {
+                                    handler.mouse_master.right_click_once()
+                                }
+                                UiHintCompletionAction::MiddleClick => {
+                                    handler.mouse_master.middle_click_once()
+                                }
                                 UiHintCompletionAction::MoveOnly => {}
                             }
                         }
@@ -3435,7 +3500,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                             target_x: target.target_x,
                             target_y: target.target_y,
                             action,
-                            expires_at: Instant::now() + Duration::from_millis(config.repeat_click_window_ms),
+                            expires_at: Instant::now()
+                                + Duration::from_millis(config.repeat_click_window_ms),
                         });
                         if action == UiHintCompletionAction::MoveOnly {
                             let _ = LAST_UI_HINT_COMPLETION.lock().unwrap().take();
@@ -3485,7 +3551,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 min_hint_spacing_px: config.min_hint_spacing_px,
                 target_point: match config.target_point {
                     UiHintTargetPoint::Center => ui_hints::UiHintTargetPoint::Center,
-                    UiHintTargetPoint::ClickablePoint => ui_hints::UiHintTargetPoint::ClickablePoint,
+                    UiHintTargetPoint::ClickablePoint => {
+                        ui_hints::UiHintTargetPoint::ClickablePoint
+                    }
                 },
             };
             let discovered_count = elements.len();
@@ -6203,7 +6271,10 @@ mod tests {
         assert_eq!(config.ui_hints.label_length, 5);
         assert_eq!(config.ui_hints.max_hints, 2000);
         assert_eq!(config.ui_hints.min_hint_spacing_px, 0);
-        assert_eq!(config.ui_hints.overflow_behavior, UiHintOverflowBehavior::Cap);
+        assert_eq!(
+            config.ui_hints.overflow_behavior,
+            UiHintOverflowBehavior::Cap
+        );
         assert_eq!(config.ui_hints.target_point, UiHintTargetPoint::Center);
         assert_eq!(
             config.ui_hints.after_select,
@@ -6221,17 +6292,32 @@ mod tests {
     fn ui_hint_after_select_and_modifier_resolution() {
         let mut cfg = UiHintsConfig::default();
         cfg.after_select = UiHintAfterSelect::MoveAndLeftClick;
-        assert_eq!(resolve_ui_hint_completion_action(&cfg, &KeyEvent::new(VirtualKey::A, true)), UiHintCompletionAction::LeftClick);
+        assert_eq!(
+            resolve_ui_hint_completion_action(&cfg, &KeyEvent::new(VirtualKey::A, true)),
+            UiHintCompletionAction::LeftClick
+        );
 
-        cfg.browse_modifier = Some(UiHintModifierConfig { shift: true, ..UiHintModifierConfig::default() });
+        cfg.browse_modifier = Some(UiHintModifierConfig {
+            shift: true,
+            ..UiHintModifierConfig::default()
+        });
         let mut ev = KeyEvent::new(VirtualKey::A, true);
         ev.shift_down = true;
-        assert_eq!(resolve_ui_hint_completion_action(&cfg, &ev), UiHintCompletionAction::MoveOnly);
+        assert_eq!(
+            resolve_ui_hint_completion_action(&cfg, &ev),
+            UiHintCompletionAction::MoveOnly
+        );
 
-        cfg.right_click_modifier = Some(UiHintModifierConfig { ctrl: true, ..UiHintModifierConfig::default() });
+        cfg.right_click_modifier = Some(UiHintModifierConfig {
+            ctrl: true,
+            ..UiHintModifierConfig::default()
+        });
         let mut ev2 = KeyEvent::new(VirtualKey::A, true);
         ev2.ctrl_down = true;
-        assert_eq!(resolve_ui_hint_completion_action(&cfg, &ev2), UiHintCompletionAction::RightClick);
+        assert_eq!(
+            resolve_ui_hint_completion_action(&cfg, &ev2),
+            UiHintCompletionAction::RightClick
+        );
     }
 
     #[test]

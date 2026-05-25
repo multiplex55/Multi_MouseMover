@@ -423,6 +423,13 @@ ui_hints_query_capped_count = false
 offset_px = 1
 use_work_area = false
 
+[window_jump]
+enabled = true
+use_extended_frame_bounds = true
+edge_offset_px = 1
+titlebar_y_offset_px = 10
+clamp_to_window = true
+
 # ---------------------------------------------------------------------------
 # Profiles
 # ---------------------------------------------------------------------------

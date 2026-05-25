@@ -23,7 +23,11 @@ pub struct PositionHistory {
 
 impl PositionHistory {
     pub fn new(max_positions: usize) -> Self {
-        Self { max_positions: max_positions.max(1), next_id: 1, positions: Vec::new() }
+        Self {
+            max_positions: max_positions.max(1),
+            next_id: 1,
+            positions: Vec::new(),
+        }
     }
 
     pub fn add(&mut self, x: i32, y: i32) -> Vec<PositionHistoryUpdate> {
@@ -32,7 +36,11 @@ impl PositionHistory {
             let removed = self.positions.remove(0);
             updates.push(PositionHistoryUpdate::RemovedOldest(removed));
         }
-        let added = SavedMousePosition { id: self.next_id, x, y };
+        let added = SavedMousePosition {
+            id: self.next_id,
+            x,
+            y,
+        };
         self.next_id += 1;
         self.positions.push(added);
         updates.push(PositionHistoryUpdate::Added(added));
@@ -40,18 +48,42 @@ impl PositionHistory {
     }
 
     pub fn clear(&mut self) -> bool {
-        if self.positions.is_empty() { return false; }
+        if self.positions.is_empty() {
+            return false;
+        }
         self.positions.clear();
         true
     }
 
-    pub fn positions(&self) -> &[SavedMousePosition] { &self.positions }
+    pub fn positions(&self) -> &[SavedMousePosition] {
+        &self.positions
+    }
 
-    pub fn labeled_positions(&self, selection_keys: &[char], label_length: usize, show_numbers: bool) -> Vec<(String, SavedMousePosition)> {
-        let labels = generate_ui_hint_labels(self.positions.len(), selection_keys, label_length, UiHintOverflowBehavior::IncreaseLength, Some(self.positions.len()));
-        self.positions.iter().copied().zip(labels).map(|(p, label)| {
-            if show_numbers { (format!("{}:{}", p.id, label), p) } else { (label, p) }
-        }).collect()
+    pub fn labeled_positions(
+        &self,
+        selection_keys: &[char],
+        label_length: usize,
+        show_numbers: bool,
+    ) -> Vec<(String, SavedMousePosition)> {
+        let labels = generate_ui_hint_labels(
+            self.positions.len(),
+            selection_keys,
+            label_length,
+            UiHintOverflowBehavior::IncreaseLength,
+            Some(self.positions.len()),
+        );
+        self.positions
+            .iter()
+            .copied()
+            .zip(labels)
+            .map(|(p, label)| {
+                if show_numbers {
+                    (format!("{}:{}", p.id, label), p)
+                } else {
+                    (label, p)
+                }
+            })
+            .collect()
     }
 }
 
@@ -75,7 +107,10 @@ mod tests {
         h.add(1, 1);
         h.add(2, 2);
         let updates = h.add(3, 3);
-        assert!(matches!(updates[0], PositionHistoryUpdate::RemovedOldest(_)));
+        assert!(matches!(
+            updates[0],
+            PositionHistoryUpdate::RemovedOldest(_)
+        ));
         assert_eq!(h.positions()[0].x, 2);
         assert_eq!(h.positions()[1].x, 3);
     }

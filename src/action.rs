@@ -25,6 +25,12 @@ pub enum Action {
     MoveToLeftEdge,
     MoveToRightEdge,
     CenterCurrentMonitor,
+    MoveToWindowTopEdge,
+    MoveToWindowBottomEdge,
+    MoveToWindowLeftEdge,
+    MoveToWindowRightEdge,
+    MoveToWindowCenter,
+    MoveToWindowTitlebar,
 
     // Click actions.
     LeftClick,
@@ -150,6 +156,12 @@ impl Action {
             "move_to_left_edge" => Some(Self::MoveToLeftEdge),
             "move_to_right_edge" => Some(Self::MoveToRightEdge),
             "center_current_monitor" | "center_monitor" => Some(Self::CenterCurrentMonitor),
+            "move_to_window_top_edge" => Some(Self::MoveToWindowTopEdge),
+            "move_to_window_bottom_edge" => Some(Self::MoveToWindowBottomEdge),
+            "move_to_window_left_edge" => Some(Self::MoveToWindowLeftEdge),
+            "move_to_window_right_edge" => Some(Self::MoveToWindowRightEdge),
+            "move_to_window_center" => Some(Self::MoveToWindowCenter),
+            "move_to_window_titlebar" => Some(Self::MoveToWindowTitlebar),
             "left_click" => Some(Self::LeftClick),
             "right_click" => Some(Self::RightClick),
             "middle_click" | "middle_mouse" => Some(Self::MiddleClick),
@@ -290,6 +302,12 @@ mod tests {
             ("move_to_bottom_edge", Action::MoveToBottomEdge),
             ("move_to_left_edge", Action::MoveToLeftEdge),
             ("move_to_right_edge", Action::MoveToRightEdge),
+            ("move_to_window_top_edge", Action::MoveToWindowTopEdge),
+            ("move_to_window_bottom_edge", Action::MoveToWindowBottomEdge),
+            ("move_to_window_left_edge", Action::MoveToWindowLeftEdge),
+            ("move_to_window_right_edge", Action::MoveToWindowRightEdge),
+            ("move_to_window_center", Action::MoveToWindowCenter),
+            ("move_to_window_titlebar", Action::MoveToWindowTitlebar),
             ("grid_mode", Action::GridMode),
             ("screen_select", Action::ScreenSelect),
             ("navigate_back", Action::NavigateBack),
@@ -519,7 +537,10 @@ mod tests {
 
     #[test]
     fn ui_hint_mode_parses() {
-        assert_eq!(Action::from_string("ui_hint_mode"), Some(Action::UiHintMode));
+        assert_eq!(
+            Action::from_string("ui_hint_mode"),
+            Some(Action::UiHintMode)
+        );
     }
 
     #[test]
@@ -529,7 +550,10 @@ mod tests {
 
     #[test]
     fn show_ui_hints_parses() {
-        assert_eq!(Action::from_string("show_ui_hints"), Some(Action::UiHintMode));
+        assert_eq!(
+            Action::from_string("show_ui_hints"),
+            Some(Action::UiHintMode)
+        );
     }
 
     #[test]
@@ -613,5 +637,4 @@ impl<B: crate::action_handler::MouseBackend> ActionHandler<B> {
         self.mouse_master
             .tick_movement(&self.active_keys, Duration::from_millis(0))
     }
-
 }
