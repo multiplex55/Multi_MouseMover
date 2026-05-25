@@ -143,6 +143,10 @@ font_scale = 1.0
 [system_bindings]
 toggle_active = "Ctrl+Q"
 exit = "Escape"
+exit_ignore_extra_modifiers = true
+panic_reset = "RightAlt+Escape"
+panic_reset_ignore_extra_modifiers = true
+panic_reset_sets_idle = true
 
 # ---------------------------------------------------------------------------
 # Movement speed and profiles

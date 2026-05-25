@@ -1102,6 +1102,10 @@ impl Default for ScrollModeConfig {
 struct SystemBindings {
     toggle_active: String,
     exit: String,
+    exit_ignore_extra_modifiers: bool,
+    panic_reset: Option<String>,
+    panic_reset_ignore_extra_modifiers: bool,
+    panic_reset_sets_idle: bool,
 }
 
 impl Default for SystemBindings {
@@ -1109,6 +1113,10 @@ impl Default for SystemBindings {
         Self {
             toggle_active: "Ctrl+E".to_string(),
             exit: "Escape".to_string(),
+            exit_ignore_extra_modifiers: true,
+            panic_reset: Some("RightAlt+Escape".to_string()),
+            panic_reset_ignore_extra_modifiers: true,
+            panic_reset_sets_idle: true,
         }
     }
 }
@@ -2200,12 +2208,24 @@ impl Config {
     }
 
     fn runtime_system_bindings(&self) -> Result<RuntimeSystemBindings, Box<dyn Error>> {
-        Ok(RuntimeSystemBindings::new(
-            KeyChord::parse(&self.system_bindings.toggle_active)
+        let panic_reset = self
+            .system_bindings
+            .panic_reset
+            .as_deref()
+            .unwrap_or("RightAlt+Escape");
+        Ok(RuntimeSystemBindings {
+            toggle_active: KeyChord::parse(&self.system_bindings.toggle_active)
                 .map_err(|e| format!("system_bindings.toggle_active: {e}"))?,
-            KeyChord::parse(&self.system_bindings.exit)
+            exit: KeyChord::parse(&self.system_bindings.exit)
                 .map_err(|e| format!("system_bindings.exit: {e}"))?,
-        ))
+            exit_ignore_extra_modifiers: self.system_bindings.exit_ignore_extra_modifiers,
+            panic_reset: KeyChord::parse(panic_reset)
+                .map_err(|e| format!("system_bindings.panic_reset: {e}"))?,
+            panic_reset_ignore_extra_modifiers: self
+                .system_bindings
+                .panic_reset_ignore_extra_modifiers,
+            panic_reset_sets_idle: self.system_bindings.panic_reset_sets_idle,
+        })
     }
 
     fn initialize_bindings(&self) {
@@ -3397,6 +3417,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::Exit => {
             exit_ui_hint_mode(UiHintExitReason::Exit);
+            let _ = panic_reset();
             ACTION_HANDLER.write().unwrap().mouse_master.exit();
         }
         AppCommand::ReloadConfig => {

@@ -94,6 +94,15 @@ impl KeyChord {
             && self.win == event.win_down
     }
 
+    pub fn matches_event_ignoring_extra_modifiers(&self, event: &KeyEvent) -> bool {
+        self.key == event.key
+            && (!self.ctrl || event.ctrl_down || is_ctrl_key(self.key))
+            && (!self.alt || event.alt_down || is_alt_key(self.key))
+            && (!self.right_alt || event.right_alt_down)
+            && (!self.shift || event.shift_down || is_shift_key(self.key))
+            && (!self.win || event.win_down)
+    }
+
     pub fn matches_event_allowing_shift_modifier(&self, event: &KeyEvent) -> bool {
         self.key == event.key
             && self.is_unmodified()
@@ -150,6 +159,10 @@ fn is_alt_key(key: VirtualKey) -> bool {
 pub struct RuntimeSystemBindings {
     pub toggle_active: KeyChord,
     pub exit: KeyChord,
+    pub exit_ignore_extra_modifiers: bool,
+    pub panic_reset: KeyChord,
+    pub panic_reset_ignore_extra_modifiers: bool,
+    pub panic_reset_sets_idle: bool,
 }
 
 impl RuntimeSystemBindings {
@@ -157,6 +170,7 @@ impl RuntimeSystemBindings {
         Self {
             toggle_active,
             exit,
+            ..Self::default()
         }
     }
 }
@@ -180,6 +194,17 @@ impl Default for RuntimeSystemBindings {
                 shift: false,
                 win: false,
             },
+            exit_ignore_extra_modifiers: true,
+            panic_reset: KeyChord {
+                key: VirtualKey::Escape,
+                ctrl: false,
+                alt: true,
+                right_alt: true,
+                shift: false,
+                win: false,
+            },
+            panic_reset_ignore_extra_modifiers: true,
+            panic_reset_sets_idle: true,
         }
     }
 }
@@ -262,6 +287,29 @@ mod tests {
             KeyChord::parse("Escape").unwrap(),
             chord(VirtualKey::Escape, false, false, false, false, false)
         );
+    }
+
+    #[test]
+    fn matches_event_ignoring_extra_modifiers_escape_matches_alt_escape() {
+        let chord = KeyChord::parse("Escape").unwrap();
+        let mut event = KeyEvent::new(VirtualKey::Escape, true);
+        event.alt_down = true;
+        assert!(chord.matches_event_ignoring_extra_modifiers(&event));
+    }
+
+    #[test]
+    fn matches_event_escape_does_not_match_alt_escape_without_ignore_extra() {
+        let chord = KeyChord::parse("Escape").unwrap();
+        let mut event = KeyEvent::new(VirtualKey::Escape, true);
+        event.alt_down = true;
+        assert!(!chord.matches_event(&event));
+    }
+
+    #[test]
+    fn matches_event_ignoring_extra_modifiers_still_requires_required_modifier() {
+        let chord = KeyChord::parse("Ctrl+Q").unwrap();
+        let event = KeyEvent::new(VirtualKey::Q, true);
+        assert!(!chord.matches_event_ignoring_extra_modifiers(&event));
     }
 
     #[test]
