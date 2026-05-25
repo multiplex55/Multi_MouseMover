@@ -9,7 +9,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
-    IUIAutomationElementArray, TreeScope_Descendants,
+    IUIAutomationElementArray, TreeScope_Children, TreeScope_Descendants,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
@@ -56,7 +56,7 @@ pub fn find_ui_hint_targets_for_window(
     let condition = build_interactive_condition(&automation)?;
     let mut raw = Vec::new();
     for hwnd in windows {
-        let mut elements = collect_window_elements(&automation, hwnd, &condition)?;
+        let mut elements = collect_window_elements(&automation, hwnd, &condition, &config)?;
         raw.append(&mut elements);
     }
 
@@ -89,6 +89,15 @@ fn build_interactive_condition(
             .CreateTrueCondition()
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)
     }
+}
+
+fn should_fallback_to_descendants(
+    strategy: crate::UiHintQueryStrategy,
+    child_count: i32,
+    min_targets_before_fallback: i32,
+) -> bool {
+    matches!(strategy, crate::UiHintQueryStrategy::ChildrenThenDescendants)
+        && child_count < min_targets_before_fallback
 }
 
 fn discover_windows_in_scope(
@@ -161,17 +170,36 @@ fn collect_window_elements(
     automation: &IUIAutomation,
     hwnd: HWND,
     condition: &IUIAutomationCondition,
+    config: &UiHintsConfig,
 ) -> Result<Vec<RawUiElement>, UiHintQueryError> {
     unsafe {
         let root = automation
             .ElementFromHandle(hwnd)
             .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
-        let arr: IUIAutomationElementArray = root
-            .FindAll(TreeScope_Descendants, condition)
-            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
-        let len = arr
-            .Length()
-            .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+        let arr: IUIAutomationElementArray = match config.query_strategy {
+            crate::UiHintQueryStrategy::Descendants => root
+                .FindAll(TreeScope_Descendants, condition)
+                .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?,
+            crate::UiHintQueryStrategy::ChildrenThenDescendants => {
+                let children = root
+                    .FindAll(TreeScope_Children, condition)
+                    .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+                let child_len = children
+                    .Length()
+                    .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
+                if !should_fallback_to_descendants(
+                    config.query_strategy,
+                    child_len,
+                    config.min_targets_before_fallback,
+                ) {
+                    children
+                } else {
+                    root.FindAll(TreeScope_Descendants, condition)
+                        .map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?
+                }
+            }
+        };
+        let len = arr.Length().map_err(|_| UiHintQueryError::UiAutomationQueryFailed)?;
         let mut out = Vec::new();
         for i in 0..len {
             if let Ok(el) = arr.GetElement(i) {
@@ -305,5 +333,24 @@ mod tests {
             name: String::new(),
             control_type: String::new()
         }));
+    }
+
+    #[test]
+    fn strategy_fallback_threshold_behavior() {
+        assert!(should_fallback_to_descendants(
+            crate::UiHintQueryStrategy::ChildrenThenDescendants,
+            2,
+            3
+        ));
+        assert!(!should_fallback_to_descendants(
+            crate::UiHintQueryStrategy::ChildrenThenDescendants,
+            3,
+            3
+        ));
+        assert!(!should_fallback_to_descendants(
+            crate::UiHintQueryStrategy::Descendants,
+            0,
+            3
+        ));
     }
 }
