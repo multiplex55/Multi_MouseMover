@@ -2693,7 +2693,7 @@ fn sync_jump_overlay(resolution: JumpOverlayResolution) {
 
 fn runtime_notification_enabled(
     notification: &RuntimeNotification,
-    config: TooltipOverlayConfig,
+    config: &TooltipOverlayConfig,
     help_visible: bool,
 ) -> bool {
     if help_visible {
@@ -2717,12 +2717,12 @@ fn runtime_notification_enabled(
     }
 }
 
-fn ui_hint_tooltip_event_enabled(config: TooltipOverlayConfig, event_enabled: bool) -> bool {
+fn ui_hint_tooltip_event_enabled(config: &TooltipOverlayConfig, event_enabled: bool) -> bool {
     config.enabled && config.show_temporary_tooltips && event_enabled
 }
 
 fn drain_runtime_notifications<B: MouseBackend>(action_handler: &mut ActionHandler<B>) {
-    let config = action_handler.mouse_master.config.tooltip_overlay;
+    let config = &action_handler.mouse_master.config.tooltip_overlay;
     let Some(notification) = action_handler.mouse_master.take_notifications().pop() else {
         return;
     };
@@ -2964,7 +2964,7 @@ fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
         (
             action_handler.mouse_master.runtime_snapshot(),
             action_handler.active_keys.contains(&Action::SlowMouse),
-            action_handler.mouse_master.config.tooltip_overlay,
+            action_handler.mouse_master.config.tooltip_overlay.clone(),
         )
     };
     let jump_active = APP_STATE.read().unwrap().is_jump_active();
@@ -3136,7 +3136,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .unwrap()
                 .mouse_master
                 .config
-                .tooltip_overlay;
+                .tooltip_overlay
+                .clone();
             if !help_config.enabled || !help_config.show_help {
                 APP_STATE.write().unwrap().hide_help();
                 help_overlay::hide_help_overlay();
@@ -3250,9 +3251,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     .unwrap()
                     .mouse_master
                     .config
-                    .tooltip_overlay;
+                    .tooltip_overlay
+                    .clone();
                 if ui_hint_tooltip_event_enabled(
-                    tooltip_cfg,
+                    &tooltip_cfg,
                     tooltip_cfg.events.ui_hints_query_fail,
                 ) {
                     help_overlay::show_temporary_tooltip(
@@ -3272,7 +3274,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .unwrap()
                 .mouse_master
                 .config
-                .tooltip_overlay;
+                .tooltip_overlay
+                .clone();
             clear_help_for_exclusive_mode(&mut APP_STATE.write().unwrap());
             APP_STATE
                 .write()
@@ -3285,7 +3288,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 overlay.render(&loading);
                 overlay.show();
             });
-            if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_start) {
+            if ui_hint_tooltip_event_enabled(&tooltip_cfg, tooltip_cfg.events.ui_hints_query_start) {
                 help_overlay::show_temporary_tooltip(
                     "UI Hints",
                     "Finding controls...",
@@ -3678,9 +3681,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .unwrap()
                 .mouse_master
                 .config
-                .tooltip_overlay;
+                .tooltip_overlay
+                .clone();
             if ui_hint_tooltip_event_enabled(
-                tooltip_cfg,
+                &tooltip_cfg,
                 tooltip_cfg.events.ui_hints_query_capped_count,
             ) && discovered_count > targets.len()
             {
@@ -3692,7 +3696,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
             if targets.is_empty() {
                 if ui_hint_tooltip_event_enabled(
-                    tooltip_cfg,
+                    &tooltip_cfg,
                     tooltip_cfg.events.ui_hints_query_empty,
                 ) {
                     help_overlay::show_temporary_tooltip(
@@ -3746,8 +3750,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .unwrap()
                 .mouse_master
                 .config
-                .tooltip_overlay;
-            if ui_hint_tooltip_event_enabled(tooltip_cfg, tooltip_cfg.events.ui_hints_query_fail) {
+                .tooltip_overlay
+                .clone();
+            if ui_hint_tooltip_event_enabled(&tooltip_cfg, tooltip_cfg.events.ui_hints_query_fail) {
                 help_overlay::show_temporary_tooltip(
                     "UI Hints",
                     "Query failed",
@@ -6023,8 +6028,8 @@ mod tests {
             duration_ms: 700,
         };
 
-        assert!(runtime_notification_enabled(&notification, config, false));
-        assert!(!runtime_notification_enabled(&notification, config, true));
+        assert!(runtime_notification_enabled(&notification, &config, false));
+        assert!(!runtime_notification_enabled(&notification, &config, true));
     }
 
     #[test]
