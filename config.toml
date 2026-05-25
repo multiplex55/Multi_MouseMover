@@ -506,9 +506,9 @@ label_length = 2
 show_numbers = false
 
 [surgical_mode]
-enabled = false
+enabled = true
 speed_px = 1
-zoom_enabled = false
+zoom_enabled = true
 # Experimental: zoom fields are parsed and tracked, but no full rendered
 # zoom viewport is shown unless a complete overlay implementation is enabled.
 zoom_scale = 2.0
