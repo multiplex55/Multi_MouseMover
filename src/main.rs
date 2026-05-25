@@ -1,6 +1,7 @@
 mod action;
 mod action_handler;
 mod app_state;
+mod bookmarks;
 mod config_audit;
 mod grid_session;
 mod help_overlay;
