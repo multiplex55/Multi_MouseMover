@@ -812,7 +812,7 @@ mod tests {
         should_repaint, snapshot_from_state, IndicatorVisual, OverlayPosition, OverlayVisualState,
         StatusOverlayConfig, StatusOverlayMode, RGB,
     };
-    use crate::indicator::IndicatorState;
+    use crate::indicator::{IndicatorFlashReason, IndicatorState};
     use windows::Win32::UI::WindowsAndMessaging::{
         WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     };
