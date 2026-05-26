@@ -368,9 +368,6 @@ impl<B: MouseBackend> MouseMaster<B> {
             | Action::NavigateForward
             | Action::ShowHelp
             | Action::UiHintMode
-            | Action::SaveMousePosition
-            | Action::ClearMousePositions
-            | Action::PositionHistoryMode
             | Action::BookmarkMode
             | Action::BookmarkSlot(_)
             | Action::ClearBookmarkSlot(_)

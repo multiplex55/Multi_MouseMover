@@ -887,9 +887,6 @@ fn format_action(action: &Action) -> String {
         Action::Disable => "Disable".to_string(),
         Action::ShowHelp => "Hints / Help".to_string(),
         Action::UiHintMode => "UI Hints".to_string(),
-        Action::SaveMousePosition => "Save mouse position".to_string(),
-        Action::ClearMousePositions => "Clear saved mouse positions".to_string(),
-        Action::PositionHistoryMode => "Position history mode".to_string(),
         Action::BookmarkMode => "Bookmark mode".to_string(),
         Action::BookmarkSlot(slot) => format!("Jump to bookmark slot {slot}"),
         Action::ClearBookmarkSlot(slot) => format!("Clear bookmark slot {slot}"),
@@ -961,10 +958,7 @@ fn action_section(action: &Action) -> HelpBindingSection {
         | Action::ScreenSelect
         | Action::NavigateBack
         | Action::NavigateForward
-        | Action::UiHintMode
-        | Action::SaveMousePosition
-        | Action::ClearMousePositions
-        | Action::PositionHistoryMode => HelpBindingSection::JumpGrid,
+        | Action::UiHintMode => HelpBindingSection::JumpGrid,
         Action::BookmarkMode
         | Action::BookmarkSlot(_)
         | Action::ClearBookmarkSlot(_)
@@ -995,7 +989,6 @@ fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
                     | Action::Disable
                     | Action::ShowHelp
                     | Action::UiHintMode
-                    | Action::PositionHistoryMode
             )
         }
         ModeContext::Bookmark => matches!(
@@ -1485,13 +1478,22 @@ mod tests {
     }
 
     #[test]
-    fn help_output_does_not_include_position_history_symbol_name() {
-        let view = help_view_from_bindings(
-            [(KeyChord::from_key(VirtualKey::P), Action::PositionHistoryMode)],
-            ModeContext::Active,
-        );
+    fn removed_position_history_action_strings_are_not_shown_in_help() {
+        let parsed = [
+            "save_mouse_position",
+            "clear_mouse_positions",
+            "position_history_mode",
+        ]
+        .into_iter()
+        .filter_map(Action::from_string)
+        .map(|action| (KeyChord::from_key(VirtualKey::P), action));
+
+        let view = help_view_from_bindings(parsed, ModeContext::Active);
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
-        assert!(!lines.contains("PositionHistory"));
+
+        assert!(!lines.contains("save_mouse_position"));
+        assert!(!lines.contains("clear_mouse_positions"));
+        assert!(!lines.contains("position_history_mode"));
     }
 
     #[test]
