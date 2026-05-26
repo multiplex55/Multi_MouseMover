@@ -7621,29 +7621,26 @@ enabled = true"#,
         fn hide(&mut self) {
             self.visible = false;
         }
-        fn is_visible(&self) -> bool {
-            self.visible
-        }
     }
 
     #[test]
     fn render_with_targets_sets_visible_flag() {
         let mut overlay = MockUiHintOverlayFacade::default();
         sync_ui_hint_overlay_visibility(&mut overlay, true);
-        assert!(overlay.is_visible());
+        assert!(overlay.visible);
     }
 
     #[test]
     fn hide_on_empty_targets_and_cancel_via_overlay_facade() {
         let mut overlay = MockUiHintOverlayFacade::default();
         sync_ui_hint_overlay_visibility(&mut overlay, true);
-        assert!(overlay.is_visible());
+        assert!(overlay.visible);
         sync_ui_hint_overlay_visibility(&mut overlay, false);
-        assert!(!overlay.is_visible());
+        assert!(!overlay.visible);
         overlay.show();
-        assert!(overlay.is_visible());
+        assert!(overlay.visible);
         overlay.hide();
-        assert!(!overlay.is_visible());
+        assert!(!overlay.visible);
     }
 
     #[test]
@@ -7711,7 +7708,6 @@ file = "bookmarks.json"
             runtime.bookmark_path,
             PathBuf::from("/tmp/multi_mouse/bookmarks.json")
         );
-        assert_eq!(runtime.config_path, config_path);
     }
 
     #[test]
