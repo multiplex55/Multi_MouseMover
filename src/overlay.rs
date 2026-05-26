@@ -247,7 +247,7 @@ fn compact_status_text(
     }
     if fields.wheel_speed {
         parts.push(format!(
-            "W:{}/{}",
+            "WL:{}/{}",
             snapshot.wheel_speed, snapshot.default_wheel_speed
         ));
     }
@@ -296,7 +296,7 @@ fn detailed_status_text(
     if fields.flash && snapshot.flash_reason != IndicatorFlashReason::None {
         match snapshot.flash_reason {
             IndicatorFlashReason::MouseSpeed => Some("flash:mouse_speed".to_string()),
-            IndicatorFlashReason::WheelSpeed => Some("flash:wheel_speed".to_string()),
+            IndicatorFlashReason::WheelSpeed => Some("flash:wheel_level".to_string()),
             IndicatorFlashReason::None => None,
         }
     } else {
@@ -912,6 +912,30 @@ mod tests {
         assert!(text.contains("A:ON"));
         assert!(text.contains("JMP:ON"));
         assert!(plan.width > super::OVERLAY_WIDTH);
+    }
+
+    #[test]
+    fn compact_render_plan_uses_wheel_level_copy() {
+        let mut config = StatusOverlayConfig::default();
+        config.mode = StatusOverlayMode::Compact;
+        let mut snapshot = snapshot_from_state(IndicatorState::WheelScrollingNormal);
+        snapshot.wheel_speed = 1;
+        snapshot.default_wheel_speed = 10;
+
+        let plan = render_plan(&snapshot, config);
+        let text = plan.text.unwrap_or_default();
+        assert!(text.contains("WL:1/10"));
+    }
+
+    #[test]
+    fn detailed_flash_copy_uses_wheel_level_term() {
+        let mut config = StatusOverlayConfig::default();
+        config.mode = StatusOverlayMode::Detailed;
+        let mut snapshot = snapshot_from_state(IndicatorState::WheelScrollingNormal);
+        snapshot.flash_reason = IndicatorFlashReason::WheelSpeed;
+
+        let plan = render_plan(&snapshot, config);
+        assert_eq!(plan.text.as_deref(), Some("flash:wheel_level"));
     }
 
     #[test]
