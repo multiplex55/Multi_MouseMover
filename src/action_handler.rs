@@ -157,11 +157,20 @@ pub struct MouseMaster<B: MouseBackend = EnigoMouseBackend> {
     pub left_button_held: bool,
     pub surgical_zoom_state: SurgicalZoomState,
     last_wheel_tick: Option<Instant>,
+    last_wheel_direction: Option<WheelDirection>,
     mouse_speed_flash_until: Option<Instant>,
     wheel_speed_flash_until: Option<Instant>,
     pending_notifications: VecDeque<RuntimeNotification>,
     monitor_rects_provider: fn(bool) -> Vec<MonitorRect>,
     window_snap_points_provider: fn(bool, i32, i32, bool) -> Option<WindowSnapPoints>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WheelDirection {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,6 +223,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             left_button_held: false,
             surgical_zoom_state: SurgicalZoomState::default(),
             last_wheel_tick: None,
+            last_wheel_direction: None,
             mouse_speed_flash_until: None,
             wheel_speed_flash_until: None,
             pending_notifications: VecDeque::new(),
@@ -472,32 +482,40 @@ impl<B: MouseBackend> MouseMaster<B> {
         }
     }
 
+    fn wheel_units_for_direction(&self, direction: WheelDirection) -> i32 {
+        let axis_multiplier = match direction {
+            WheelDirection::Up | WheelDirection::Down => self.effective_wheel.vertical_multiplier,
+            WheelDirection::Left | WheelDirection::Right => self.effective_wheel.horizontal_multiplier,
+        };
+        let signed_multiplier = match direction {
+            WheelDirection::Up | WheelDirection::Left => -axis_multiplier,
+            WheelDirection::Down | WheelDirection::Right => axis_multiplier,
+        };
+        self.current_wheel_speed.saturating_mul(signed_multiplier)
+    }
+
+    fn dispatch_wheel_direction(&mut self, direction: WheelDirection) {
+        let axis = match direction {
+            WheelDirection::Up | WheelDirection::Down => Axis::Vertical,
+            WheelDirection::Left | WheelDirection::Right => Axis::Horizontal,
+        };
+        self.scroll_wheel(self.wheel_units_for_direction(direction), axis);
+    }
+
     pub fn wheel_up(&mut self) {
-        self.scroll_wheel(
-            -self.current_wheel_speed * self.effective_wheel.vertical_multiplier,
-            Axis::Vertical,
-        );
+        self.dispatch_wheel_direction(WheelDirection::Up);
     }
 
     pub fn wheel_down(&mut self) {
-        self.scroll_wheel(
-            self.current_wheel_speed * self.effective_wheel.vertical_multiplier,
-            Axis::Vertical,
-        );
+        self.dispatch_wheel_direction(WheelDirection::Down);
     }
 
     pub fn wheel_left(&mut self) {
-        self.scroll_wheel(
-            -self.current_wheel_speed * self.effective_wheel.horizontal_multiplier,
-            Axis::Horizontal,
-        );
+        self.dispatch_wheel_direction(WheelDirection::Left);
     }
 
     pub fn wheel_right(&mut self) {
-        self.scroll_wheel(
-            self.current_wheel_speed * self.effective_wheel.horizontal_multiplier,
-            Axis::Horizontal,
-        );
+        self.dispatch_wheel_direction(WheelDirection::Right);
     }
 
     pub fn increase_wheel_speed(&mut self) {
@@ -663,16 +681,26 @@ impl<B: MouseBackend> MouseMaster<B> {
         effective
     }
     fn tick_wheel(&mut self, active_actions: &HashSet<Action>) {
+        self.tick_wheel_at(active_actions, Instant::now());
+    }
+
+    fn tick_wheel_at(&mut self, active_actions: &HashSet<Action>, now: Instant) {
         let Some(wheel_action) = active_actions
             .iter()
             .find(|action| action.is_wheel_direction())
             .cloned()
         else {
             self.last_wheel_tick = None;
+            self.last_wheel_direction = None;
             return;
         };
-
-        let now = Instant::now();
+        let direction = wheel_direction_for_action(wheel_action);
+        if self.last_wheel_direction != Some(direction) {
+            self.last_wheel_direction = Some(direction);
+            self.last_wheel_tick = Some(now);
+            self.handle_action(wheel_action);
+            return;
+        }
         let interval = Duration::from_millis(self.effective_wheel.tick_interval);
         if self
             .last_wheel_tick
@@ -828,6 +856,7 @@ impl<B: MouseBackend> MouseMaster<B> {
     pub fn reset_speed(&mut self) {
         self.reset_acceleration_to_baseline();
         self.last_wheel_tick = None;
+        self.last_wheel_direction = None;
     }
 
     fn reset_acceleration_to_baseline(&mut self) {
@@ -1017,6 +1046,7 @@ impl<B: MouseBackend> MouseMaster<B> {
         self.effective_wheel = settings;
         self.current_wheel_speed = settings.default_speed;
         self.last_wheel_tick = None;
+        self.last_wheel_direction = None;
         self.flash_wheel_speed_indicator();
         true
     }
@@ -1165,6 +1195,16 @@ fn debug_diagnostics_enabled() -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+fn wheel_direction_for_action(action: Action) -> WheelDirection {
+    match action {
+        Action::WheelUp => WheelDirection::Up,
+        Action::WheelDown => WheelDirection::Down,
+        Action::WheelLeft => WheelDirection::Left,
+        Action::WheelRight => WheelDirection::Right,
+        _ => unreachable!("non-wheel action passed to wheel_direction_for_action"),
+    }
 }
 
 pub(crate) fn effective_slow_speed(config: &Config, baseline_speed: i32) -> i32 {
@@ -1965,6 +2005,60 @@ mod tests {
         assert!(!mouse.select_wheel_profile("missing"));
         assert_eq!(mouse.active_wheel_profile.as_deref(), Some("horizontal"));
         assert_eq!(mouse.current_wheel_speed, 4);
+    }
+
+    #[test]
+    fn wheel_delta_math_uses_speed_multiplier_and_direction_sign() {
+        let mut up_config = test_config();
+        up_config.wheel.default_speed = 1;
+        up_config.wheel.vertical_multiplier = 1;
+        let mut up_mouse = MouseMaster::new_with_backend(up_config, FakeBackend::default());
+        up_mouse.wheel_up();
+        assert_eq!(up_mouse.backend.scrolls, vec![(-1, Axis::Vertical)]);
+
+        let mut down_config = test_config();
+        down_config.wheel.default_speed = 10;
+        down_config.wheel.vertical_multiplier = 1;
+        let mut down_mouse = MouseMaster::new_with_backend(down_config, FakeBackend::default());
+        down_mouse.wheel_down();
+        assert_eq!(down_mouse.backend.scrolls, vec![(10, Axis::Vertical)]);
+
+        let mut horizontal_config = test_config();
+        horizontal_config.wheel.default_speed = 3;
+        horizontal_config.wheel.horizontal_multiplier = 2;
+        let mut horizontal_mouse =
+            MouseMaster::new_with_backend(horizontal_config, FakeBackend::default());
+        horizontal_mouse.wheel_right();
+        horizontal_mouse.wheel_left();
+        assert_eq!(
+            horizontal_mouse.backend.scrolls,
+            vec![(6, Axis::Horizontal), (-6, Axis::Horizontal)]
+        );
+    }
+
+    #[test]
+    fn wheel_repeat_timing_handles_initial_repeat_direction_change_and_release() {
+        let mut config = test_config();
+        config.wheel.tick_interval = 120;
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        let base = Instant::now();
+
+        mouse.tick_wheel_at(&actions(&[Action::WheelUp]), base);
+        assert_eq!(mouse.backend.scrolls, vec![(-1, Axis::Vertical)]);
+
+        mouse.tick_wheel_at(&actions(&[Action::WheelUp]), base + Duration::from_millis(50));
+        assert_eq!(mouse.backend.scrolls.len(), 1);
+
+        mouse.tick_wheel_at(&actions(&[Action::WheelUp]), base + Duration::from_millis(140));
+        assert_eq!(mouse.backend.scrolls.len(), 2);
+
+        mouse.tick_wheel_at(&actions(&[Action::WheelDown]), base + Duration::from_millis(150));
+        assert_eq!(mouse.backend.scrolls.len(), 3);
+        assert_eq!(mouse.backend.scrolls[2], (1, Axis::Vertical));
+
+        mouse.tick_wheel_at(&HashSet::new(), base + Duration::from_millis(160));
+        assert_eq!(mouse.last_wheel_tick, None);
+        assert_eq!(mouse.last_wheel_direction, None);
     }
 
     #[test]
