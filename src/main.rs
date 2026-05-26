@@ -95,7 +95,6 @@ fn exit_ui_hint_mode(reason: UiHintExitReason) {
 trait UiHintOverlayFacade {
     fn show(&mut self);
     fn hide(&mut self);
-    fn is_visible(&self) -> bool;
 }
 
 impl UiHintOverlayFacade for UiHintOverlay {
@@ -104,9 +103,6 @@ impl UiHintOverlayFacade for UiHintOverlay {
     }
     fn hide(&mut self) {
         let _ = UiHintOverlay::hide(self);
-    }
-    fn is_visible(&self) -> bool {
-        UiHintOverlay::is_visible(self)
     }
 }
 
@@ -152,7 +148,6 @@ struct LoadedConfig {
 
 #[derive(Debug, Clone)]
 struct BookmarkRuntime {
-    config_path: PathBuf,
     bookmark_path: PathBuf,
     store: BookmarkStore,
 }
@@ -2350,7 +2345,6 @@ fn load_bookmark_runtime(
         eprintln!("[bookmarks] {}", w.message);
     }
     Ok(BookmarkRuntime {
-        config_path: config_path.to_path_buf(),
         bookmark_path,
         store,
     })
@@ -3332,13 +3326,6 @@ fn help_stats_from_snapshot(
         mode_context: format!("{:?}", help_overlay::resolve_help_section(mode_context))
             .to_lowercase(),
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum RecallResolution {
-    Empty { tooltip: String },
-    Jump { x: i32, y: i32, tooltip: String },
-    Blocked { tooltip: String },
 }
 
 fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32, i32) {

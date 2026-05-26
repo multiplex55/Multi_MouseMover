@@ -166,6 +166,7 @@ pub struct RuntimeSystemBindings {
 }
 
 impl RuntimeSystemBindings {
+    #[allow(dead_code)]
     pub fn new(toggle_active: KeyChord, exit: KeyChord) -> Self {
         Self {
             toggle_active,

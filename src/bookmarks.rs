@@ -66,6 +66,7 @@ impl BookmarkStore {
         }
     }
 
+    #[allow(dead_code)]
     pub fn slot_count(&self) -> u8 {
         self.slot_count
     }
@@ -103,6 +104,7 @@ impl BookmarkStore {
         self.slots.clear();
     }
 
+    #[allow(dead_code)]
     pub fn occupied_slots(&self) -> Vec<u8> {
         self.slots.keys().copied().collect()
     }

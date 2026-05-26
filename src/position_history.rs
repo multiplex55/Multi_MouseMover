@@ -10,6 +10,7 @@ pub struct SavedMousePosition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PositionHistoryUpdate {
     Added(SavedMousePosition),
+    #[allow(dead_code)]
     Cleared,
     RemovedOldest(SavedMousePosition),
 }
@@ -55,6 +56,7 @@ impl PositionHistory {
         true
     }
 
+    #[allow(dead_code)]
     pub fn positions(&self) -> &[SavedMousePosition] {
         &self.positions
     }
@@ -66,6 +68,7 @@ impl PositionHistory {
         }
     }
 
+    #[allow(dead_code)]
     pub fn index_for_label(
         &self,
         label: &str,

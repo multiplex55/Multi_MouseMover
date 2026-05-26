@@ -214,6 +214,7 @@ impl UiHintOverlay {
         hidden
     }
 
+    #[allow(dead_code)]
     pub fn is_visible(&self) -> bool {
         self.visible
     }
@@ -351,7 +352,7 @@ extern "system" fn ui_hint_overlay_proc(
         WM_PAINT => unsafe {
             let mut ps = PAINTSTRUCT::default();
             let _ = BeginPaint(hwnd, &mut ps);
-            EndPaint(hwnd, &ps);
+            let _ = EndPaint(hwnd, &ps);
             LRESULT(0)
         },
         WM_ERASEBKGND => LRESULT(1),

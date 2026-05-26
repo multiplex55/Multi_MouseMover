@@ -131,6 +131,7 @@ pub enum UiHintState {
         foreground_hwnd: isize,
     },
     Active {
+        #[allow(dead_code)]
         activation_key: VirtualKey,
         query_id: u64,
         foreground_hwnd: isize,
@@ -147,7 +148,9 @@ pub enum PositionHistoryState {
 pub enum BookmarkModeState {
     Inactive,
     Active {
+        #[allow(dead_code)]
         activation_key: VirtualKey,
+        #[allow(dead_code)]
         activation_key_released: bool,
         clear_modifier_held: bool,
     },
@@ -520,6 +523,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_ui_hint_active_or_querying(&self) -> bool {
         self.is_ui_hint_active() || self.is_ui_hint_querying()
     }

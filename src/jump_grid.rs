@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Jump-grid labels use fixed-width, zero-based base-N.
 ///
 /// This is intentionally not spreadsheet style. For a one-letter axis, labels
