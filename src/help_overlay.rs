@@ -459,22 +459,25 @@ fn help_stats_lines(stats: &HelpRuntimeStats) -> Vec<String> {
             on_off(stats.jump_active)
         ),
         format!(
-            "Movement profile: {} | Speed: {} (default {}, range {}..{}, step {})",
+            "Movement profile: {} | Level {} / {} (default {}, range {}..{}, step {})",
             stats.movement_profile,
             stats.mouse_speed.current,
+            stats.mouse_speed.max,
             stats.mouse_speed.default,
             stats.mouse_speed.min,
             stats.mouse_speed.max,
             stats.mouse_speed.step
         ),
         format!(
-            "Wheel profile: {} | Speed: {} (default {}, range {}..{}, step {})",
+            "Wheel profile: {} | Level {} / {} (default {}, range {}..{}, step {}) | Repeat {}ms",
             stats.wheel_profile,
             stats.wheel_speed.current,
+            stats.wheel_speed.max,
             stats.wheel_speed.default,
             stats.wheel_speed.min,
             stats.wheel_speed.max,
-            stats.wheel_speed.step
+            stats.wheel_speed.step,
+            stats.wheel_tick_interval_ms
         ),
         format!(
             "Slow: {} | Speed: {} (range {}..{}) | Acceleration: {} every {} tick(s)",
@@ -573,20 +576,22 @@ pub fn format_tooltip_message(
 ) -> TooltipMessage {
     match notification.kind {
         RuntimeNotificationKind::MouseSpeed => TooltipMessage {
-            title: "Mouse speed".to_string(),
+            title: "Mouse level".to_string(),
             body: format!(
-                "Speed {} (default {}, range {}..{})",
+                "Level {} / {} (default {}, range {}..{})",
                 stats.mouse_speed.current,
+                stats.mouse_speed.max,
                 stats.mouse_speed.default,
                 stats.mouse_speed.min,
                 stats.mouse_speed.max
             ),
         },
         RuntimeNotificationKind::WheelSpeed => TooltipMessage {
-            title: "Wheel speed".to_string(),
+            title: "Wheel level".to_string(),
             body: format!(
-                "Speed {} (default {}, range {}..{})",
+                "Level {} / {} (default {}, range {}..{})",
                 stats.wheel_speed.current,
+                stats.wheel_speed.max,
                 stats.wheel_speed.default,
                 stats.wheel_speed.min,
                 stats.wheel_speed.max
@@ -598,7 +603,13 @@ pub fn format_tooltip_message(
         },
         RuntimeNotificationKind::WheelProfile => TooltipMessage {
             title: "Wheel profile".to_string(),
-            body: stats.wheel_profile.clone(),
+            body: format!(
+                "{} | Level {} / {} | Repeat {}ms",
+                stats.wheel_profile,
+                stats.wheel_speed.current,
+                stats.wheel_speed.max,
+                stats.wheel_tick_interval_ms
+            ),
         },
         RuntimeNotificationKind::Drag => TooltipMessage {
             title: "Drag".to_string(),
@@ -849,9 +860,9 @@ fn format_action(action: &Action) -> String {
         Action::WheelDown => "Wheel down".to_string(),
         Action::WheelLeft => "Wheel left".to_string(),
         Action::WheelRight => "Wheel right".to_string(),
-        Action::WheelSpeedUp => "Wheel speed up".to_string(),
-        Action::WheelSpeedDown => "Wheel speed down".to_string(),
-        Action::WheelSpeedReset => "Reset wheel speed".to_string(),
+        Action::WheelSpeedUp => "Wheel level up".to_string(),
+        Action::WheelSpeedDown => "Wheel level down".to_string(),
+        Action::WheelSpeedReset => "Reset wheel level".to_string(),
         Action::WheelProfileNext => "Next wheel profile".to_string(),
         Action::WheelProfilePrevious => "Previous wheel profile".to_string(),
         Action::WheelProfileSelect(profile) => format!("Wheel profile: {profile}"),
@@ -1188,10 +1199,12 @@ mod tests {
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
 
         assert!(lines.contains("Mode: active | Drag: on | Slow: on | Jump: on"));
-        assert!(
-            lines.contains("Movement profile: fast | Speed: 7 (default 5, range 2..12, step 2)")
-        );
-        assert!(lines.contains("Wheel profile: precise | Speed: 4 (default 3, range 1..9, step 1)"));
+        assert!(lines.contains(
+            "Movement profile: fast | Level 7 / 12 (default 5, range 2..12, step 2)"
+        ));
+        assert!(lines.contains(
+            "Wheel profile: precise | Level 4 / 9 (default 3, range 1..9, step 1) | Repeat 12ms"
+        ));
         assert!(
             lines.contains("Slow: fixed | Speed: 1 (range 1..2) | Acceleration: 0 every 1 tick(s)")
         );
@@ -1399,13 +1412,13 @@ mod tests {
         let cases = [
             (
                 RuntimeNotificationKind::MouseSpeed,
-                "Mouse speed",
-                "Speed 6",
+                "Mouse level",
+                "Level 6 / 9",
             ),
             (
                 RuntimeNotificationKind::WheelSpeed,
-                "Wheel speed",
-                "Speed 5",
+                "Wheel level",
+                "Level 5 / 8",
             ),
             (
                 RuntimeNotificationKind::MovementProfile,
@@ -1415,7 +1428,7 @@ mod tests {
             (
                 RuntimeNotificationKind::WheelProfile,
                 "Wheel profile",
-                "precise",
+                "precise | Level 5 / 8 | Repeat 0ms",
             ),
             (RuntimeNotificationKind::Drag, "Drag", "held"),
             (
@@ -1469,6 +1482,16 @@ mod tests {
 
         assert!(on.body.contains("held"));
         assert!(off.body.contains("released"));
+    }
+
+    #[test]
+    fn help_output_does_not_include_position_history_symbol_name() {
+        let view = help_view_from_bindings(
+            [(KeyChord::from_key(VirtualKey::P), Action::PositionHistoryMode)],
+            ModeContext::Active,
+        );
+        let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
+        assert!(!lines.contains("PositionHistory"));
     }
 
     #[test]
