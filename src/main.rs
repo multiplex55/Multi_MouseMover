@@ -14,7 +14,6 @@ mod key_chord;
 mod keyboard;
 mod monitor;
 mod overlay;
-mod position_history;
 mod screen_capture;
 mod ui_hint_overlay;
 mod ui_hints;
@@ -45,7 +44,6 @@ use key_chord::{KeyChord, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::{StatusOverlayConfig, OVERLAY};
-use position_history::PositionHistory;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -187,9 +185,6 @@ static UI_HINT_QUERY_ID: AtomicU64 = AtomicU64::new(0);
 lazy_static! {
     static ref LAST_UI_HINT_COMPLETION: Mutex<Option<UiHintCompletionState>> = Mutex::new(None);
     static ref LAST_SURGICAL_TOOLTIP_ACTIVE: Mutex<bool> = Mutex::new(false);
-    static ref POSITION_HISTORY_STORE: Mutex<PositionHistory> = Mutex::new(PositionHistory::new(
-        PositionHistoryConfig::default().max_positions
-    ));
     static ref UI_HINT_QUERY_DEADLINE: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
 }
 
@@ -440,7 +435,6 @@ struct Config {
     status_overlay: StatusOverlayConfig,
     tooltip_overlay: TooltipOverlayConfig,
     ui_hints: UiHintsConfig,
-    position_history: PositionHistoryConfig,
     bookmarks: BookmarksConfig,
     mouse_speed: MouseSpeedConfig,
     slow_mouse: SlowMouseConfig,
@@ -474,7 +468,6 @@ impl Default for Config {
             status_overlay: StatusOverlayConfig::default(),
             tooltip_overlay: TooltipOverlayConfig::default(),
             ui_hints: UiHintsConfig::default(),
-            position_history: PositionHistoryConfig::default(),
             bookmarks: BookmarksConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             slow_mouse: SlowMouseConfig::default(),
@@ -650,15 +643,6 @@ pub struct TooltipOverlayConfig {
     pub events: TooltipOverlayEvents,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
-#[serde(default)]
-pub struct PositionHistoryConfig {
-    pub enabled: bool,
-    pub max_positions: usize,
-    pub selection_keys: String,
-    pub label_length: i32,
-    pub show_numbers: bool,
-}
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
@@ -692,17 +676,6 @@ impl Default for BookmarksConfig {
     }
 }
 
-impl Default for PositionHistoryConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_positions: 20,
-            selection_keys: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string(),
-            label_length: 2,
-            show_numbers: false,
-        }
-    }
-}
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UiHintOverflowBehavior {
@@ -3246,10 +3219,6 @@ fn reload_config() -> Result<(), Box<dyn Error>> {
     };
     config.initialize_bindings();
     config.initialize_system_bindings()?;
-    POSITION_HISTORY_STORE
-        .lock()
-        .unwrap()
-        .reset_with_max_positions(config.position_history.max_positions);
     sync_jump_overlay(resolution);
     let bookmark_runtime = load_bookmark_runtime(&config, &loaded.path)?;
     *BOOKMARK_RUNTIME.lock().unwrap() = Some(bookmark_runtime);
@@ -4634,8 +4603,6 @@ fn main() {
         eprintln!("❌ System Binding Initialization Failed: {e}");
         std::process::exit(1);
     }
-    *POSITION_HISTORY_STORE.lock().unwrap() =
-        PositionHistory::new(config.position_history.max_positions);
     let bookmark_runtime = match load_bookmark_runtime(&config, &loaded.path) {
         Ok(runtime) => runtime,
         Err(e) => {
