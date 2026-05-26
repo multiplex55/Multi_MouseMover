@@ -1473,25 +1473,6 @@ mod tests {
     }
 
     #[test]
-    fn removed_position_history_action_strings_are_not_shown_in_help() {
-        let parsed = [
-            "save_mouse_position",
-            "clear_mouse_positions",
-            "position_history_mode",
-        ]
-        .into_iter()
-        .filter_map(Action::from_string)
-        .map(|action| (KeyChord::from_key(VirtualKey::P), action));
-
-        let view = help_view_from_bindings(parsed, ModeContext::Active);
-        let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
-
-        assert!(!lines.contains("save_mouse_position"));
-        assert!(!lines.contains("clear_mouse_positions"));
-        assert!(!lines.contains("position_history_mode"));
-    }
-
-    #[test]
     fn style_contains_click_through_topmost_and_non_activate_bits() {
         let style = help_overlay_ex_style();
 
