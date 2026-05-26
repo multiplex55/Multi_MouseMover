@@ -20,19 +20,6 @@ acceleration = 2
 acceleration_rate = 1
 top_speed = 6
 
-# Input ownership/reconciliation controls.
-[input]
-swallow_owned_modifiers = true
-modifier_reconcile_on_tick = true
-modifier_reconcile_interval_ms = 50
-# Stale-key recovery: if a tracked held key has not produced expected transitions
-# for this timeout window, it may be treated as stuck and reconciled against
-# current OS modifier state. Reconciliation cadence is max(interval, timeout), so
-# this timeout effectively gates how often stale key recovery checks can run.
-stuck_key_timeout_ms = 10000
-debug_input = false
-shift_can_modify_plain_movement = true
-
 # ---------------------------------------------------------------------------
 # Key and system bindings
 # ---------------------------------------------------------------------------
@@ -121,6 +108,19 @@ key_bindings = [
     ["RightAlt+F14", "clear_mouse_positions"],
     ["RightAlt+F15", "position_history_mode"]
 ]
+
+# Input ownership/reconciliation controls.
+[input]
+swallow_owned_modifiers = true
+modifier_reconcile_on_tick = true
+modifier_reconcile_interval_ms = 50
+# Stale-key recovery: if a tracked held key has not produced expected transitions
+# for this timeout window, it may be treated as stuck and reconciled against
+# current OS modifier state. Reconciliation cadence is max(interval, timeout), so
+# this timeout effectively gates how often stale key recovery checks can run.
+stuck_key_timeout_ms = 10000
+debug_input = false
+shift_can_modify_plain_movement = true
 
 [ui_hints]
 enabled = true
