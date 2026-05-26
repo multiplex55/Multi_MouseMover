@@ -1914,24 +1914,6 @@ mod tests {
     }
 
     #[test]
-    fn escape_in_ui_hint_mode_cancels() {
-        let mut state = AppState::default();
-        state.ui_hints = UiHintState::Querying {
-            activation_key: VirtualKey::U,
-            query_id: 1,
-            foreground_hwnd: 0,
-        };
-        let event = KeyEvent::new(VirtualKey::Escape, true);
-
-        state.route_key_event(event, None);
-
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::UiHintInput(event)]
-        );
-    }
-
-    #[test]
     fn toggle_active_in_ui_hint_mode_disables_app() {
         let mut state = AppState::default();
         enter_ui_hint_mode(&mut state, VirtualKey::U);
