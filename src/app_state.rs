@@ -66,11 +66,6 @@ pub enum AppCommand {
     JumpInput(KeyEvent, Option<Action>),
     GridInput(KeyEvent, Option<Action>),
     UiHintInput(KeyEvent),
-    SaveMousePosition,
-    ClearMousePositions,
-    EnterPositionHistoryMode {
-        activation_key: VirtualKey,
-    },
     EnterBookmarkMode {
         activation_key: VirtualKey,
     },
@@ -79,7 +74,6 @@ pub enum AppCommand {
     ClearBookmarkSlot(u8),
     ClearAllBookmarks,
     CancelBookmarkMode,
-    PositionHistoryInput(KeyEvent),
     UiHintQueryCompleted {
         query_id: u64,
         elements: Vec<crate::windows_uia::RawUiElement>,
@@ -105,7 +99,6 @@ pub struct AppState {
     jump: JumpState,
     grid: GridState,
     ui_hints: UiHintState,
-    position_history: PositionHistoryState,
     bookmark_mode: BookmarkModeState,
     active_mode: bool,
     preserve_global_shortcuts: bool,
@@ -136,12 +129,6 @@ pub enum UiHintState {
         query_id: u64,
         foreground_hwnd: isize,
     },
-}
-
-#[derive(Debug)]
-pub enum PositionHistoryState {
-    Inactive,
-    Active { activation_key: VirtualKey },
 }
 
 #[derive(Debug)]
@@ -191,7 +178,6 @@ pub enum ModeContext {
     Grid,
     UiHintQuerying,
     UiHintActive,
-    PositionHistory,
     Bookmark,
 }
 
@@ -253,7 +239,6 @@ impl Default for AppState {
             jump: JumpState::Inactive,
             grid: GridState::Inactive,
             ui_hints: UiHintState::Inactive,
-            position_history: PositionHistoryState::Inactive,
             bookmark_mode: BookmarkModeState::Inactive,
             active_mode: true,
             preserve_global_shortcuts: true,
@@ -374,7 +359,6 @@ impl AppState {
         self.exit_jump_mode();
         self.exit_grid_mode();
         self.exit_ui_hint_mode();
-        self.exit_position_history_mode();
         self.exit_bookmark_mode();
     }
 
@@ -451,18 +435,6 @@ impl AppState {
 
     pub fn is_ui_hint_querying(&self) -> bool {
         matches!(self.ui_hints, UiHintState::Querying { .. })
-    }
-
-    pub fn is_position_history_active(&self) -> bool {
-        matches!(self.position_history, PositionHistoryState::Active { .. })
-    }
-
-    pub fn enter_position_history_mode(&mut self, activation_key: VirtualKey) {
-        self.position_history = PositionHistoryState::Active { activation_key };
-    }
-
-    pub fn exit_position_history_mode(&mut self) {
-        self.position_history = PositionHistoryState::Inactive;
     }
 
     pub fn exit_ui_hint_mode(&mut self) {
@@ -545,7 +517,6 @@ impl AppState {
         self.exit_jump_mode();
         self.exit_grid_mode();
         self.exit_ui_hint_mode();
-        self.exit_position_history_mode();
         self.bookmark_mode = BookmarkModeState::Active {
             activation_key,
             activation_key_released: false,
@@ -580,9 +551,6 @@ impl AppState {
     pub fn mode_context(&self) -> ModeContext {
         if !self.active_mode {
             return ModeContext::Inactive;
-        }
-        if self.is_position_history_active() {
-            return ModeContext::PositionHistory;
         }
         if self.is_bookmark_mode_active() {
             return ModeContext::Bookmark;
@@ -991,7 +959,6 @@ impl AppState {
 
         if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
             self.exit_ui_hint_mode();
-            self.exit_position_history_mode();
             self.exit_bookmark_mode();
             self.enqueue_command(AppCommand::SetActiveMode { active: false });
             return;
@@ -1026,18 +993,9 @@ impl AppState {
             ) && event.is_down
             {
                 self.exit_ui_hint_mode();
-                self.exit_position_history_mode();
                 self.exit_bookmark_mode();
             }
             self.enqueue_command(AppCommand::UiHintInput(event));
-            return;
-        }
-
-        if self.is_position_history_active() {
-            if self.is_position_history_activation_key_event(&event) {
-                return;
-            }
-            self.enqueue_command(AppCommand::PositionHistoryInput(event));
             return;
         }
 
@@ -1131,7 +1089,6 @@ impl AppState {
 
         if event.is_down && matches!(action.as_ref(), Some(Action::ReloadConfig)) {
             self.exit_ui_hint_mode();
-            self.exit_position_history_mode();
             self.exit_bookmark_mode();
             self.enqueue_command(AppCommand::ReloadConfig);
             return;
@@ -1168,16 +1125,6 @@ impl AppState {
             return;
         }
 
-        if event.is_down && matches!(action.as_ref(), Some(Action::SaveMousePosition)) {
-            self.enqueue_command(AppCommand::SaveMousePosition);
-            return;
-        }
-
-        if event.is_down && matches!(action.as_ref(), Some(Action::ClearMousePositions)) {
-            self.enqueue_command(AppCommand::ClearMousePositions);
-            return;
-        }
-
         if event.is_down && matches!(action.as_ref(), Some(Action::BookmarkMode)) {
             self.enqueue_command(AppCommand::EnterBookmarkMode {
                 activation_key: event.key,
@@ -1189,13 +1136,6 @@ impl AppState {
             if let Some(Action::BookmarkSlot(slot)) = action {
                 self.enqueue_command(AppCommand::RecallBookmarkSlot(slot));
             }
-            return;
-        }
-
-        if event.is_down && matches!(action.as_ref(), Some(Action::PositionHistoryMode)) {
-            self.enqueue_command(AppCommand::EnterPositionHistoryMode {
-                activation_key: event.key,
-            });
             return;
         }
 
@@ -1248,14 +1188,6 @@ impl AppState {
         }
 
         false
-    }
-
-    fn is_position_history_activation_key_event(&mut self, event: &KeyEvent) -> bool {
-        let PositionHistoryState::Active { activation_key } = &self.position_history else {
-            return false;
-        };
-
-        event.key == *activation_key
     }
 
     fn is_grid_activation_key_event(&mut self, event: &KeyEvent) -> bool {
@@ -2956,8 +2888,6 @@ mod tests {
         assert!(state.activate_ui_hint_if_querying(1));
         assert_eq!(state.mode_context(), ModeContext::UiHintActive);
         state.exit_ui_hint_mode();
-        state.enter_position_history_mode(VirtualKey::P);
-        assert_eq!(state.mode_context(), ModeContext::PositionHistory);
 
         state.set_active_mode(false);
         assert_eq!(state.mode_context(), ModeContext::Inactive);
@@ -3223,39 +3153,20 @@ mod tests {
         );
     }
     #[test]
-    fn position_history_actions_route_to_explicit_commands() {
+    fn mode_context_precedence_remains_stable_for_existing_modes() {
         let mut state = AppState::default();
-        state.set_bound_keys([VirtualKey::M, VirtualKey::J, VirtualKey::Backspace]);
+        assert_eq!(state.mode_context(), ModeContext::Active);
 
-        state.route_key_event(
-            KeyEvent::new(VirtualKey::M, true),
-            Some(Action::SaveMousePosition),
-        );
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::SaveMousePosition]
-        );
+        state.enter_bookmark_mode(VirtualKey::B);
+        assert_eq!(state.mode_context(), ModeContext::Bookmark);
 
-        state.route_key_event(
-            KeyEvent::new(VirtualKey::Backspace, true),
-            Some(Action::ClearMousePositions),
-        );
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::ClearMousePositions]
-        );
+        enter_ui_hint_mode(&mut state, VirtualKey::U);
+        assert_eq!(state.mode_context(), ModeContext::Bookmark);
 
-        state.route_key_event(
-            KeyEvent::new(VirtualKey::J, true),
-            Some(Action::PositionHistoryMode),
-        );
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::EnterPositionHistoryMode {
-                activation_key: VirtualKey::J
-            }]
-        );
+        state.exit_bookmark_mode();
+        assert_eq!(state.mode_context(), ModeContext::UiHintActive);
     }
+
     #[test]
     fn bookmark_mode_routes_recall_and_set_and_clear() {
         let mut state = AppState::default();
