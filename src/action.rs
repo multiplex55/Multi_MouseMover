@@ -73,9 +73,6 @@ pub enum Action {
     Disable,
     ShowHelp,
     UiHintMode,
-    SaveMousePosition,
-    ClearMousePositions,
-    PositionHistoryMode,
     BookmarkMode,
     BookmarkSlot(u8),
     ClearBookmarkSlot(u8),
@@ -206,9 +203,6 @@ impl Action {
             "disable" | "disable_app" | "idle_mode" => Some(Self::Disable),
             "show_help" | "help" | "toggle_help" | "hints" | "show_hints" => Some(Self::ShowHelp),
             "ui_hint_mode" | "ui_hints" | "show_ui_hints" | "hint_mode" => Some(Self::UiHintMode),
-            "save_mouse_position" => Some(Self::SaveMousePosition),
-            "clear_mouse_positions" => Some(Self::ClearMousePositions),
-            "position_history_mode" => Some(Self::PositionHistoryMode),
             "bookmark_mode" => Some(Self::BookmarkMode),
             "clear_all_bookmarks" => Some(Self::ClearAllBookmarks),
             action if action.starts_with("bookmark_slot_") => action
@@ -614,19 +608,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_position_history_actions() {
-        assert_eq!(
-            Action::from_string("save_mouse_position"),
-            Some(Action::SaveMousePosition)
-        );
-        assert_eq!(
-            Action::from_string("clear_mouse_positions"),
-            Some(Action::ClearMousePositions)
-        );
-        assert_eq!(
-            Action::from_string("position_history_mode"),
-            Some(Action::PositionHistoryMode)
-        );
+    fn removed_position_history_actions_do_not_parse() {
+        assert_eq!(Action::from_string("save_mouse_position"), None);
+        assert_eq!(Action::from_string("clear_mouse_positions"), None);
+        assert_eq!(Action::from_string("position_history_mode"), None);
     }
 
     #[test]
