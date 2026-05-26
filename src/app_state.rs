@@ -3298,6 +3298,23 @@ mod tests {
             vec![AppCommand::ClearBookmarkSlot(1)]
         );
     }
+
+    #[test]
+    fn enter_bookmark_mode_sets_active_flag() {
+        let mut state = AppState::default();
+        assert!(!state.is_bookmark_mode_active());
+        state.enter_bookmark_mode(VirtualKey::B);
+        assert!(state.is_bookmark_mode_active());
+    }
+
+    #[test]
+    fn exit_bookmark_mode_clears_active_flag() {
+        let mut state = AppState::default();
+        state.enter_bookmark_mode(VirtualKey::B);
+        assert!(state.is_bookmark_mode_active());
+        state.exit_bookmark_mode();
+        assert!(!state.is_bookmark_mode_active());
+    }
     #[test]
     fn exit_routed_before_bookmark_mode_cancel() {
         let mut state = AppState::default();

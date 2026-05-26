@@ -609,17 +609,29 @@ pub enum TooltipOverlayPositioning {
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct TooltipOverlayEvents {
+    #[serde(default)]
     pub mouse: bool,
+    #[serde(default)]
     pub wheel: bool,
+    #[serde(default)]
     pub profile: bool,
+    #[serde(default)]
     pub drag: bool,
+    #[serde(default)]
     pub reload: bool,
+    #[serde(default)]
     pub panic: bool,
+    #[serde(default)]
     pub surgical: bool,
+    #[serde(default)]
     pub ui_hints_query_start: bool,
+    #[serde(default)]
     pub ui_hints_query_fail: bool,
+    #[serde(default)]
     pub ui_hints_query_empty: bool,
+    #[serde(default)]
     pub ui_hints_query_capped_count: bool,
+    #[serde(default)]
     pub bookmarks: bool,
 }
 
@@ -3360,9 +3372,17 @@ fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32
 }
 
 fn show_bookmark_tooltip(config: &Config, body: String) {
-    if config.bookmarks.show_tooltips && config.tooltip_overlay.events.bookmarks {
+    if bookmark_tooltip_events_enabled(config) {
         help_overlay::show_temporary_tooltip("Bookmarks", &body, Duration::from_millis(900));
     }
+}
+
+fn bookmark_mode_entry_tooltip_body() -> String {
+    "Bookmark mode — press 1-9 to save, Backspace+1-9 to clear, Esc to cancel".to_string()
+}
+
+fn bookmark_tooltip_events_enabled(config: &Config) -> bool {
+    config.bookmarks.show_tooltips && config.tooltip_overlay.events.bookmarks
 }
 
 fn evaluate_focus_attempt(result: FocusAnchorResult) -> (bool, Option<String>) {
@@ -3921,10 +3941,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             *UI_HINT_SESSION.lock().unwrap() = Some(session);
         }
         AppCommand::EnterBookmarkMode { activation_key } => {
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
             APP_STATE
                 .write()
                 .unwrap()
                 .enter_bookmark_mode(activation_key);
+            show_bookmark_tooltip(&config, bookmark_mode_entry_tooltip_body());
         }
         AppCommand::RecallBookmarkSlot(slot) => {
             let cfg = ACTION_HANDLER
@@ -5283,6 +5305,28 @@ mod tests {
                 bookmarks: true,
             }
         );
+    }
+
+    #[test]
+    fn bookmark_tooltip_event_toggle_defaults_to_enabled_when_missing() {
+        let config = parse_config(
+            r#"
+            [tooltip_overlay.events]
+            mouse = false
+            "#,
+        );
+        assert!(config.tooltip_overlay.events.bookmarks);
+    }
+
+    #[test]
+    fn bookmark_tooltip_event_toggle_can_be_disabled() {
+        let config = parse_config(
+            r#"
+            [tooltip_overlay.events]
+            bookmarks = false
+            "#,
+        );
+        assert!(!bookmark_tooltip_events_enabled(&config));
     }
 
     #[test]

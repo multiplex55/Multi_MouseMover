@@ -106,15 +106,25 @@ pub enum StatusOverlayPositioning {
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(default)]
 pub struct StatusOverlayFields {
+    #[serde(default)]
     pub active: bool,
+    #[serde(default)]
     pub drag: bool,
+    #[serde(default)]
     pub slow: bool,
+    #[serde(default)]
     pub surgical: bool,
+    #[serde(default)]
     pub jump: bool,
+    #[serde(default)]
     pub mouse_speed: bool,
+    #[serde(default)]
     pub wheel_speed: bool,
+    #[serde(default)]
     pub flash: bool,
+    #[serde(default)]
     pub final_adjust: bool,
+    #[serde(default)]
     pub bookmark_mode: bool,
 }
 
@@ -910,6 +920,21 @@ mod tests {
         assert!(text.contains("A:ON"));
         assert!(text.contains("JMP:ON"));
         assert!(plan.width > super::OVERLAY_WIDTH);
+    }
+
+    #[test]
+    fn compact_render_plan_shows_bookmark_mode_indicator_when_enabled() {
+        let mut config = StatusOverlayConfig::default();
+        config.mode = StatusOverlayMode::Compact;
+        config.fields.bookmark_mode = true;
+        let mut snapshot = snapshot_from_state(IndicatorState::ActiveNormal);
+        snapshot.bookmark_mode_active = true;
+
+        let plan = render_plan(&snapshot, config);
+        assert_eq!(
+            plan.text.as_deref(),
+            Some("BOOKMARK MODE | Press 1-9 to save | Esc cancel")
+        );
     }
 
     #[test]
