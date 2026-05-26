@@ -6803,7 +6803,7 @@ enabled = true"#,
 
         assert!(summary.contains("polling_rate=8ms"));
         assert!(summary.contains("mouse_speed default=1 range=1..12 step=1 profiles=1"));
-        assert!(summary.contains("wheel default=3 range=1..12 step=1 tick=8ms"));
+        assert!(summary.contains("wheel default=1 range=1..10 step=1 tick=120ms"));
         assert!(summary.contains("slow_mouse strategy=Fixed speed=1 (default 1, range 1..2) acceleration=0 every 1 tick(s)"));
         assert!(summary.contains("features: [enabled, bindings]"));
         assert!(summary.contains("surgical_mode: enabled=false bindings=0"));
