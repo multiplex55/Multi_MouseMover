@@ -88,7 +88,6 @@ pub fn resolve_help_section(mode: ModeContext) -> HelpSection {
         ModeContext::Jump => HelpSection::Jump,
         ModeContext::Grid => HelpSection::Grid,
         ModeContext::UiHintQuerying | ModeContext::UiHintActive => HelpSection::UiHints,
-        ModeContext::PositionHistory => HelpSection::UiHints,
         ModeContext::Bookmark => HelpSection::Bookmarks,
         ModeContext::Active => HelpSection::General,
     }
@@ -982,13 +981,10 @@ fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
                 | Action::JumpMode
                 | Action::GridMode
         ),
-        ModeContext::UiHintQuerying | ModeContext::UiHintActive | ModeContext::PositionHistory => {
+        ModeContext::UiHintQuerying | ModeContext::UiHintActive => {
             matches!(
                 action,
-                Action::NavigateBack
-                    | Action::Disable
-                    | Action::ShowHelp
-                    | Action::UiHintMode
+                Action::NavigateBack | Action::Disable | Action::ShowHelp | Action::UiHintMode
             )
         }
         ModeContext::Bookmark => matches!(
@@ -1192,9 +1188,8 @@ mod tests {
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
 
         assert!(lines.contains("Mode: active | Drag: on | Slow: on | Jump: on"));
-        assert!(lines.contains(
-            "Movement profile: fast | Level 7 / 12 (default 5, range 2..12, step 2)"
-        ));
+        assert!(lines
+            .contains("Movement profile: fast | Level 7 / 12 (default 5, range 2..12, step 2)"));
         assert!(lines.contains(
             "Wheel profile: precise | Level 4 / 9 (default 3, range 1..9, step 1) | Repeat 12ms"
         ));

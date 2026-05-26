@@ -1803,10 +1803,8 @@ impl Config {
             self.input.modifier_reconcile_interval_ms =
                 InputConfig::default().modifier_reconcile_interval_ms;
         }
-        self.input.modifier_reconcile_interval_ms = self
-            .input
-            .modifier_reconcile_interval_ms
-            .clamp(10, 5_000);
+        self.input.modifier_reconcile_interval_ms =
+            self.input.modifier_reconcile_interval_ms.clamp(10, 5_000);
 
         if self.input.stuck_key_timeout_ms == 0 {
             warn_config_normalized("input.stuck_key_timeout_ms is 0; using default");
@@ -3255,7 +3253,6 @@ fn reload_config() -> Result<(), Box<dyn Error>> {
         .lock()
         .unwrap()
         .reset_with_max_positions(config.position_history.max_positions);
-    APP_STATE.write().unwrap().exit_position_history_mode();
     sync_jump_overlay(resolution);
     let bookmark_runtime = load_bookmark_runtime(&config, &loaded.path)?;
     *BOOKMARK_RUNTIME.lock().unwrap() = Some(bookmark_runtime);
@@ -3445,11 +3442,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     action
                 )
             }
-            AppCommand::SaveMousePosition => println!("[command] SaveMousePosition"),
-            AppCommand::ClearMousePositions => println!("[command] ClearMousePositions"),
-            AppCommand::EnterPositionHistoryMode { activation_key } => {
-                println!("[command] EnterPositionHistoryMode key={activation_key:?}")
-            }
             AppCommand::EnterBookmarkMode { activation_key } => {
                 println!("[command] EnterBookmarkMode key={activation_key:?}")
             }
@@ -3462,13 +3454,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
             AppCommand::ClearAllBookmarks => println!("[command] ClearAllBookmarks"),
             AppCommand::CancelBookmarkMode => println!("[command] CancelBookmarkMode"),
-            AppCommand::PositionHistoryInput(event) => {
-                println!(
-                    "[command] PositionHistoryInput key={:?} state={}",
-                    event.key,
-                    if event.is_down { "down" } else { "up" }
-                )
-            }
             AppCommand::UiHintInput(event) => {
                 println!(
                     "[command] UiHintInput key={:?} state={}",
@@ -3884,60 +3869,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 None => {}
             }
         }
-        AppCommand::SaveMousePosition => {
-            let handler = ACTION_HANDLER.write().unwrap();
-            let cfg = handler.mouse_master.config.position_history.clone();
-            if !cfg.enabled {
-                return;
-            }
-            if let Ok((x, y)) = handler.mouse_master.backend.location() {
-                POSITION_HISTORY_STORE.lock().unwrap().add(x, y);
-            }
-        }
-        AppCommand::ClearMousePositions => {
-            POSITION_HISTORY_STORE.lock().unwrap().clear();
-            APP_STATE.write().unwrap().exit_position_history_mode();
-            UI_HINT_OVERLAY.with(|overlay| {
-                let _ = overlay.borrow_mut().hide();
-            });
-        }
-        AppCommand::EnterPositionHistoryMode { activation_key } => {
-            let cfg = ACTION_HANDLER
-                .read()
-                .unwrap()
-                .mouse_master
-                .config
-                .position_history
-                .clone();
-            if !cfg.enabled {
-                return;
-            }
-            let selection_keys: Vec<char> = cfg.selection_keys.chars().collect();
-            let entries = POSITION_HISTORY_STORE.lock().unwrap().labeled_positions(
-                &selection_keys,
-                cfg.label_length as usize,
-                cfg.show_numbers,
-            );
-            let targets: Vec<ui_hints::UiHintTarget> = entries
-                .into_iter()
-                .map(|(label, p)| ui_hints::UiHintTarget {
-                    id: p.id,
-                    label,
-                    bounds: (p.x - 2, p.y - 2, p.x + 2, p.y + 2),
-                    target_x: p.x,
-                    target_y: p.y,
-                    metadata: Some("history".to_string()),
-                })
-                .collect();
-            let Some(session) = UiHintSession::new(targets, selection_keys) else {
-                return;
-            };
-            APP_STATE
-                .write()
-                .unwrap()
-                .enter_position_history_mode(activation_key);
-            *UI_HINT_SESSION.lock().unwrap() = Some(session);
-        }
         AppCommand::EnterBookmarkMode { activation_key } => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
             APP_STATE
@@ -4146,40 +4077,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::CancelBookmarkMode => {
             APP_STATE.write().unwrap().exit_bookmark_mode();
-        }
-        AppCommand::PositionHistoryInput(event) => {
-            if !event.is_down {
-                return;
-            }
-            let update = {
-                let mut guard = UI_HINT_SESSION.lock().unwrap();
-                let Some(session) = guard.as_mut() else {
-                    return;
-                };
-                session.handle_key(event.key)
-            };
-            match update {
-                UiHintInputUpdate::Completed { target } => {
-                    ACTION_HANDLER
-                        .write()
-                        .unwrap()
-                        .mouse_master
-                        .move_mouse_to(target.target_x, target.target_y);
-                    APP_STATE.write().unwrap().exit_position_history_mode();
-                    UI_HINT_OVERLAY.with(|overlay| {
-                        let _ = overlay.borrow_mut().hide();
-                    });
-                }
-                UiHintInputUpdate::Cancelled => {
-                    APP_STATE.write().unwrap().exit_position_history_mode();
-                    UI_HINT_OVERLAY.with(|overlay| {
-                        let _ = overlay.borrow_mut().hide();
-                    });
-                }
-                UiHintInputUpdate::Consumed
-                | UiHintInputUpdate::Invalid
-                | UiHintInputUpdate::PrefixChanged => {}
-            }
         }
         AppCommand::UiHintInput(event) => {
             if !event.is_down {
@@ -4520,17 +4417,8 @@ struct StartupFeatureBindingSummary {
     surgical_mode: usize,
     scroll_modifier: usize,
     window_jump: usize,
-    position_history_save: usize,
-    position_history_clear: usize,
-    position_history_mode: usize,
     bookmark_mode: usize,
     bookmark_slots: Vec<u8>,
-}
-
-impl StartupFeatureBindingSummary {
-    fn position_history_total(&self) -> usize {
-        self.position_history_save + self.position_history_clear + self.position_history_mode
-    }
 }
 
 fn startup_feature_binding_summary(config: &Config) -> StartupFeatureBindingSummary {
@@ -4548,9 +4436,6 @@ fn startup_feature_binding_summary(config: &Config) -> StartupFeatureBindingSumm
             | Action::MoveToWindowRightEdge
             | Action::MoveToWindowCenter
             | Action::MoveToWindowTitlebar => summary.window_jump += 1,
-            Action::SaveMousePosition => summary.position_history_save += 1,
-            Action::ClearMousePositions => summary.position_history_clear += 1,
-            Action::PositionHistoryMode => summary.position_history_mode += 1,
             Action::BookmarkMode => summary.bookmark_mode += 1,
             Action::BookmarkSlot(slot) => summary.bookmark_slots.push(slot),
             _ => {}
@@ -4575,9 +4460,6 @@ fn emit_startup_feature_binding_warnings(config: &Config) {
     }
     if config.window_jump.enabled && bindings.window_jump == 0 {
         warn_config_normalized("window_jump.enabled=true but no window-jump action bindings were found (move_to_window_top_edge/bottom_edge/left_edge/right_edge/center/titlebar). Add at least one window-jump key_bindings action or disable [window_jump].enabled.");
-    }
-    if config.position_history.enabled && bindings.position_history_total() == 0 {
-        warn_config_normalized("position_history.enabled=true but no position history bindings were found. Add one or more of save_mouse_position, clear_mouse_positions, or position_history_mode to key_bindings, or disable [position_history].enabled.");
     }
     if config.bookmarks.enabled {
         if bindings.bookmark_mode == 0 {
@@ -4665,14 +4547,6 @@ fn startup_validation_summary(config: &Config, config_path: &Path, warnings: &[S
     lines.push(format!(
         "  window_jump: enabled={} bindings={}",
         config.window_jump.enabled, feature_bindings.window_jump
-    ));
-    lines.push(format!(
-        "  position_history: enabled={} bindings=save:{} clear:{} mode:{} total:{}",
-        config.position_history.enabled,
-        feature_bindings.position_history_save,
-        feature_bindings.position_history_clear,
-        feature_bindings.position_history_mode,
-        feature_bindings.position_history_total()
     ));
     let bookmark_path = resolve_bookmarks_path(config_path, Path::new(&config.bookmarks.file));
     lines.push(format!(
@@ -6876,8 +6750,6 @@ enabled = true"#,
         assert!(summary.contains("surgical_mode: enabled=false bindings=0"));
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
         assert!(summary.contains("window_jump: enabled=true bindings=6"));
-        assert!(summary
-            .contains("position_history: enabled=true bindings=save:1 clear:1 mode:1 total:3"));
         assert!(summary.contains("warnings=1"));
         assert!(summary.contains("warning: wheel.min_speed clamped"));
     }

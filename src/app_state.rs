@@ -3153,52 +3153,11 @@ mod tests {
         );
     }
     #[test]
-    fn removed_position_history_actions_do_not_route_to_explicit_commands() {
-        let mut state = AppState::default();
-
-        state.route_key_event(
-            KeyEvent::new(VirtualKey::M, true),
-            Some(Action::SaveMousePosition),
-        );
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::KeyAction {
-                action: Action::SaveMousePosition,
-                is_down: true,
-            }]
-        );
-
-        state.route_key_event(
-            KeyEvent::new(VirtualKey::Backspace, true),
-            Some(Action::ClearMousePositions),
-        );
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::KeyAction {
-                action: Action::ClearMousePositions,
-                is_down: true,
-            }]
-        );
-
-        state.route_key_event(
-            KeyEvent::new(VirtualKey::J, true),
-            Some(Action::PositionHistoryMode),
-        );
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::KeyAction {
-                action: Action::PositionHistoryMode,
-                is_down: true,
-            }]
-        );
-    }
-
-    #[test]
     fn mode_context_precedence_remains_stable_for_existing_modes() {
         let mut state = AppState::default();
         assert_eq!(state.mode_context(), ModeContext::Active);
 
-        enter_bookmark_mode(&mut state, VirtualKey::B);
+        state.enter_bookmark_mode(VirtualKey::B);
         assert_eq!(state.mode_context(), ModeContext::Bookmark);
 
         enter_ui_hint_mode(&mut state, VirtualKey::U);
