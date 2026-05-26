@@ -763,17 +763,6 @@ impl KeyBindings {
             });
         }
 
-        if let Some((chord, action)) = self
-            .bindings
-            .iter()
-            .find(|(chord, _)| chord.matches_key_down_event(event))
-        {
-            return Some(ResolvedBinding {
-                chord: *chord,
-                action: action.clone(),
-            });
-        }
-
         if !shift_can_modify_plain_movement {
             return None;
         }

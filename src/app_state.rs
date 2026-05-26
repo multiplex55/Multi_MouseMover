@@ -944,6 +944,7 @@ impl AppState {
         if self.active_mode
             && self.swallow_owned_modifiers
             && self.owned_modifiers.contains(&event.key)
+            && self.held_physical_keys.contains(&event.key)
         {
             self.debug_swallow("owned_modifier_active", event, true);
             return true;
@@ -998,13 +999,6 @@ impl AppState {
 
         if self.is_toggle_active_key_down_event(&event) {
             self.enqueue_command(AppCommand::ToggleActiveMode);
-            return;
-        }
-
-        if event.is_down
-            && (self.is_exit_binding(&event) || matches!(action.as_ref(), Some(Action::Exit)))
-        {
-            self.enqueue_command(AppCommand::Exit);
             return;
         }
 
@@ -1089,6 +1083,13 @@ impl AppState {
             }
 
             self.enqueue_command(AppCommand::GridInput(event, action));
+            return;
+        }
+
+        if event.is_down
+            && (self.is_exit_binding(&event) || matches!(action.as_ref(), Some(Action::Exit)))
+        {
+            self.enqueue_command(AppCommand::Exit);
             return;
         }
 
