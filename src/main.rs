@@ -6782,15 +6782,6 @@ enabled = true"#,
                 expected_substring:
                     "window_jump.enabled=true but no window-jump action bindings were found",
             },
-            Case {
-                name: "position_history",
-                config_toml: r#"key_bindings = []
-
-[position_history]
-enabled = true"#,
-                expected_substring:
-                    "position_history.enabled=true but no position history bindings were found",
-            },
         ];
 
         for case in cases {
@@ -6817,7 +6808,6 @@ enabled = true"#,
                 ["F13", "surgical_mode"],
                 ["F14", "scroll_modifier"],
                 ["F15", "move_to_window_center"],
-                ["F16", "position_history_mode"]
             ]
 
             [surgical_mode]
@@ -6829,8 +6819,6 @@ enabled = true"#,
             [window_jump]
             enabled = true
 
-            [position_history]
-            enabled = true
             "#,
         );
         let warnings = take_config_warnings();
@@ -6839,7 +6827,6 @@ enabled = true"#,
             "surgical_mode.enabled=true but no key binding targets action \"surgical_mode\"",
             "scroll_mode.enabled=true but no key binding targets action \"scroll_modifier\"",
             "window_jump.enabled=true but no window-jump action bindings were found",
-            "position_history.enabled=true but no position history bindings were found",
         ];
 
         for forbidden in blocked {
