@@ -95,7 +95,6 @@ fn exit_ui_hint_mode(reason: UiHintExitReason) {
 trait UiHintOverlayFacade {
     fn show(&mut self);
     fn hide(&mut self);
-    fn is_visible(&self) -> bool;
 }
 
 impl UiHintOverlayFacade for UiHintOverlay {
@@ -104,9 +103,6 @@ impl UiHintOverlayFacade for UiHintOverlay {
     }
     fn hide(&mut self) {
         let _ = UiHintOverlay::hide(self);
-    }
-    fn is_visible(&self) -> bool {
-        UiHintOverlay::is_visible(self)
     }
 }
 
@@ -152,7 +148,6 @@ struct LoadedConfig {
 
 #[derive(Debug, Clone)]
 struct BookmarkRuntime {
-    config_path: PathBuf,
     bookmark_path: PathBuf,
     store: BookmarkStore,
 }
@@ -2350,7 +2345,6 @@ fn load_bookmark_runtime(
         eprintln!("[bookmarks] {}", w.message);
     }
     Ok(BookmarkRuntime {
-        config_path: config_path.to_path_buf(),
         bookmark_path,
         store,
     })
@@ -3334,13 +3328,6 @@ fn help_stats_from_snapshot(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum RecallResolution {
-    Empty { tooltip: String },
-    Jump { x: i32, y: i32, tooltip: String },
-    Blocked { tooltip: String },
-}
-
 fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32, i32) {
     let (mut x, mut y) = (record.x, record.y);
     match cfg.coordinate_policy.as_str() {
@@ -3360,9 +3347,17 @@ fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32
 }
 
 fn show_bookmark_tooltip(config: &Config, body: String) {
-    if config.bookmarks.show_tooltips && config.tooltip_overlay.events.bookmarks {
+    if bookmark_tooltip_events_enabled(config) {
         help_overlay::show_temporary_tooltip("Bookmarks", &body, Duration::from_millis(900));
     }
+}
+
+fn bookmark_mode_entry_tooltip_body() -> String {
+    "Bookmark mode — press 1-9 to save, Backspace+1-9 to clear, Esc to cancel".to_string()
+}
+
+fn bookmark_tooltip_events_enabled(config: &Config) -> bool {
+    config.bookmarks.show_tooltips && config.tooltip_overlay.events.bookmarks
 }
 
 fn evaluate_focus_attempt(result: FocusAnchorResult) -> (bool, Option<String>) {
@@ -3921,10 +3916,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             *UI_HINT_SESSION.lock().unwrap() = Some(session);
         }
         AppCommand::EnterBookmarkMode { activation_key } => {
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
             APP_STATE
                 .write()
                 .unwrap()
                 .enter_bookmark_mode(activation_key);
+            show_bookmark_tooltip(&config, bookmark_mode_entry_tooltip_body());
         }
         AppCommand::RecallBookmarkSlot(slot) => {
             let cfg = ACTION_HANDLER
@@ -5283,6 +5280,28 @@ mod tests {
                 bookmarks: true,
             }
         );
+    }
+
+    #[test]
+    fn bookmark_tooltip_event_toggle_defaults_to_enabled_when_missing() {
+        let config = parse_config(
+            r#"
+            [tooltip_overlay.events]
+            mouse = false
+            "#,
+        );
+        assert!(config.tooltip_overlay.events.bookmarks);
+    }
+
+    #[test]
+    fn bookmark_tooltip_event_toggle_can_be_disabled() {
+        let config = parse_config(
+            r#"
+            [tooltip_overlay.events]
+            bookmarks = false
+            "#,
+        );
+        assert!(!bookmark_tooltip_events_enabled(&config));
     }
 
     #[test]
@@ -7602,29 +7621,26 @@ enabled = true"#,
         fn hide(&mut self) {
             self.visible = false;
         }
-        fn is_visible(&self) -> bool {
-            self.visible
-        }
     }
 
     #[test]
     fn render_with_targets_sets_visible_flag() {
         let mut overlay = MockUiHintOverlayFacade::default();
         sync_ui_hint_overlay_visibility(&mut overlay, true);
-        assert!(overlay.is_visible());
+        assert!(overlay.visible);
     }
 
     #[test]
     fn hide_on_empty_targets_and_cancel_via_overlay_facade() {
         let mut overlay = MockUiHintOverlayFacade::default();
         sync_ui_hint_overlay_visibility(&mut overlay, true);
-        assert!(overlay.is_visible());
+        assert!(overlay.visible);
         sync_ui_hint_overlay_visibility(&mut overlay, false);
-        assert!(!overlay.is_visible());
+        assert!(!overlay.visible);
         overlay.show();
-        assert!(overlay.is_visible());
+        assert!(overlay.visible);
         overlay.hide();
-        assert!(!overlay.is_visible());
+        assert!(!overlay.visible);
     }
 
     #[test]
@@ -7692,7 +7708,6 @@ file = "bookmarks.json"
             runtime.bookmark_path,
             PathBuf::from("/tmp/multi_mouse/bookmarks.json")
         );
-        assert_eq!(runtime.config_path, config_path);
     }
 
     #[test]

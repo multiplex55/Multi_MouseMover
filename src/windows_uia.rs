@@ -228,6 +228,7 @@ fn or_conditions(
     Ok(acc)
 }
 
+#[allow(dead_code)]
 fn choose_query_scope(strategy: crate::UiHintQueryStrategy, should_fallback: bool) -> i32 {
     match strategy {
         crate::UiHintQueryStrategy::Descendants => TreeScope_Descendants.0,

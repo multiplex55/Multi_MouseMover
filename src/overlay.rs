@@ -913,6 +913,21 @@ mod tests {
     }
 
     #[test]
+    fn compact_render_plan_shows_bookmark_mode_indicator_when_enabled() {
+        let mut config = StatusOverlayConfig::default();
+        config.mode = StatusOverlayMode::Compact;
+        config.fields.bookmark_mode = true;
+        let mut snapshot = snapshot_from_state(IndicatorState::ActiveNormal);
+        snapshot.bookmark_mode_active = true;
+
+        let plan = render_plan(&snapshot, config);
+        assert_eq!(
+            plan.text.as_deref(),
+            Some("BOOKMARK MODE | Press 1-9 to save | Esc cancel")
+        );
+    }
+
+    #[test]
     fn active_slow_and_jump_states_render_distinct_colors() {
         assert_ne!(
             indicator_visual(IndicatorState::ActiveNormal).base_color,

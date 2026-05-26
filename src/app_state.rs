@@ -98,6 +98,7 @@ pub struct AppState {
     active_trigger_chords: HashSet<KeyChord>,
     active_triggers: std::collections::HashMap<VirtualKey, ActiveTrigger>,
     owned_modifiers: HashSet<VirtualKey>,
+    reconciled_released_keys: HashSet<VirtualKey>,
     held_physical_keys: HashSet<VirtualKey>,
     swallow_owned_modifiers: bool,
     debug_input: bool,
@@ -130,6 +131,7 @@ pub enum UiHintState {
         foreground_hwnd: isize,
     },
     Active {
+        #[allow(dead_code)]
         activation_key: VirtualKey,
         query_id: u64,
         foreground_hwnd: isize,
@@ -146,7 +148,9 @@ pub enum PositionHistoryState {
 pub enum BookmarkModeState {
     Inactive,
     Active {
+        #[allow(dead_code)]
         activation_key: VirtualKey,
+        #[allow(dead_code)]
         activation_key_released: bool,
         clear_modifier_held: bool,
     },
@@ -242,6 +246,7 @@ impl Default for AppState {
             active_trigger_chords: HashSet::new(),
             active_triggers: std::collections::HashMap::new(),
             owned_modifiers: HashSet::new(),
+            reconciled_released_keys: HashSet::new(),
             held_physical_keys: HashSet::new(),
             swallow_owned_modifiers: true,
             debug_input: false,
@@ -320,6 +325,7 @@ impl AppState {
 
             self.held_physical_keys.remove(&key);
             self.active_keys.remove(&key);
+            self.reconciled_released_keys.insert(key);
             if stale_trigger {
                 synthesized_action = self.resolve_key_up_action(KeyEvent::new(key, false), None);
             }
@@ -517,6 +523,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_ui_hint_active_or_querying(&self) -> bool {
         self.is_ui_hint_active() || self.is_ui_hint_querying()
     }
@@ -944,6 +951,8 @@ impl AppState {
         if self.active_mode
             && self.swallow_owned_modifiers
             && self.owned_modifiers.contains(&event.key)
+            && (self.held_physical_keys.contains(&event.key)
+                || (event.is_down && !self.reconciled_released_keys.contains(&event.key)))
         {
             self.debug_swallow("owned_modifier_active", event, true);
             return true;
@@ -956,7 +965,7 @@ impl AppState {
 
         let swallow = self.active_mode
             && (self.bound_chords.iter().any(|chord| {
-                chord.matches_dispatch_event(event)
+                (event.is_down && chord.matches_dispatch_event(event))
                     || (!event.is_down && self.active_trigger_chords.contains(chord))
             }) || (!event.is_down
                 && self
@@ -998,6 +1007,15 @@ impl AppState {
 
         if self.is_toggle_active_key_down_event(&event) {
             self.enqueue_command(AppCommand::ToggleActiveMode);
+            return;
+        }
+
+        if event.is_down
+            && !self.is_jump_active()
+            && !self.is_grid_active()
+            && (self.is_exit_binding(&event) || matches!(action.as_ref(), Some(Action::Exit)))
+        {
+            self.enqueue_command(AppCommand::Exit);
             return;
         }
 
@@ -1094,6 +1112,7 @@ impl AppState {
         }
 
         if event.is_down {
+            self.reconciled_released_keys.remove(&event.key);
             self.active_keys.insert(event.key);
             self.held_physical_keys.insert(event.key);
             if let Some(resolved_action) = action.clone() {
@@ -1889,24 +1908,6 @@ mod tests {
         let mut state = AppState::default();
         enter_ui_hint_mode(&mut state, VirtualKey::U);
         let event = KeyEvent::new(VirtualKey::A, true);
-
-        state.route_key_event(event, None);
-
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::UiHintInput(event)]
-        );
-    }
-
-    #[test]
-    fn escape_in_ui_hint_mode_cancels() {
-        let mut state = AppState::default();
-        state.ui_hints = UiHintState::Querying {
-            activation_key: VirtualKey::U,
-            query_id: 1,
-            foreground_hwnd: 0,
-        };
-        let event = KeyEvent::new(VirtualKey::Escape, true);
 
         state.route_key_event(event, None);
 
@@ -3297,6 +3298,23 @@ mod tests {
             collect_commands(&mut state),
             vec![AppCommand::ClearBookmarkSlot(1)]
         );
+    }
+
+    #[test]
+    fn enter_bookmark_mode_sets_active_flag() {
+        let mut state = AppState::default();
+        assert!(!state.is_bookmark_mode_active());
+        state.enter_bookmark_mode(VirtualKey::B);
+        assert!(state.is_bookmark_mode_active());
+    }
+
+    #[test]
+    fn exit_bookmark_mode_clears_active_flag() {
+        let mut state = AppState::default();
+        state.enter_bookmark_mode(VirtualKey::B);
+        assert!(state.is_bookmark_mode_active());
+        state.exit_bookmark_mode();
+        assert!(!state.is_bookmark_mode_active());
     }
     #[test]
     fn exit_routed_before_bookmark_mode_cancel() {

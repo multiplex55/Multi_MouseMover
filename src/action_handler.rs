@@ -727,6 +727,7 @@ impl<B: MouseBackend> MouseMaster<B> {
         }
     }
 
+    #[allow(dead_code)]
     fn window_snap_for_action(action: &Action, points: WindowSnapPoints) -> Option<(i32, i32)> {
         match action {
             Action::MoveToWindowTopEdge => Some(points.top_edge),

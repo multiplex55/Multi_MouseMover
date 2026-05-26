@@ -57,6 +57,7 @@ Action bindings run only while active mode is enabled:
 | `RightAlt+Backspace` | Clear saved cursor positions (session only) |
 | `RightAlt+J` | Enter position-history selection mode |
 | `Shift+B` | Enter bookmark mode |
+| `Shift+Ctrl+B` | Clear all bookmarks |
 | `1` | Select bookmark slot 1 (in bookmark mode) |
 | `2` | Select bookmark slot 2 (in bookmark mode) |
 | `3` | Select bookmark slot 3 (in bookmark mode) |
