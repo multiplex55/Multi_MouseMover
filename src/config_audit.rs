@@ -449,11 +449,6 @@ fn is_known_active_path(path: &str) -> bool {
         "ui_hints.overlay.dim_non_matching",
         "ui_hints.overlay.show_background",
         "ui_hints.overlay.show_border",
-        "position_history.enabled",
-        "position_history.max_positions",
-        "position_history.selection_keys",
-        "position_history.label_length",
-        "position_history.show_numbers",
         "bookmarks.enabled",
         "bookmarks.file",
         "bookmarks.slot_count",
@@ -970,7 +965,7 @@ mod tests {
         assert!(warning.message.contains("could not be parsed"));
     }
     #[test]
-    fn audit_accepts_position_history_paths() {
+    fn audit_flags_legacy_position_history_paths_as_unknown() {
         let report = audit_config_toml(
             r#"
             [position_history]
@@ -981,6 +976,19 @@ mod tests {
             show_numbers = false
         "#,
         );
-        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+        let legacy_paths = [
+            "position_history.enabled",
+            "position_history.max_positions",
+            "position_history.selection_keys",
+            "position_history.label_length",
+            "position_history.show_numbers",
+        ];
+
+        for path in legacy_paths {
+            let warning = warning_for(&report, path);
+            assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
+            assert!(warning.message.contains("Unknown config path"));
+        }
     }
 }
