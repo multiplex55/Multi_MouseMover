@@ -25,7 +25,6 @@ pub struct KeyEvent {
 }
 
 impl KeyEvent {
-    #[cfg(test)]
     pub fn new(key: VirtualKey, is_down: bool) -> Self {
         Self {
             key,
@@ -301,6 +300,44 @@ impl AppState {
 
     pub fn set_debug_input(&mut self, enabled: bool) {
         self.debug_input = enabled;
+    }
+
+    pub fn reconcile_stale_keys<F>(&mut self, mut is_key_physically_down: F)
+    where
+        F: FnMut(VirtualKey) -> bool,
+    {
+        let stale_keys: Vec<VirtualKey> = self
+            .held_physical_keys
+            .iter()
+            .copied()
+            .filter(|key| !is_key_physically_down(*key))
+            .collect();
+
+        for key in stale_keys {
+            let stale_owned_modifier = self.owned_modifiers.contains(&key);
+            let stale_trigger = self.active_triggers.contains_key(&key);
+            let mut synthesized_action = None;
+
+            self.held_physical_keys.remove(&key);
+            self.active_keys.remove(&key);
+            if stale_trigger {
+                synthesized_action = self.resolve_key_up_action(KeyEvent::new(key, false), None);
+            }
+
+            if let Some(action) = synthesized_action {
+                self.enqueue_command(AppCommand::KeyAction {
+                    action,
+                    is_down: false,
+                });
+            }
+
+            if self.debug_input {
+                eprintln!(
+                    "[debug-input] reconciled stale key={:?} trigger={} owned_modifier={}",
+                    key, stale_trigger, stale_owned_modifier
+                );
+            }
+        }
     }
 
     pub fn set_active_mode(&mut self, active_mode: bool) {
@@ -3316,5 +3353,67 @@ mod tests {
             collect_commands(&mut state),
             vec![AppCommand::CancelBookmarkMode]
         );
+    }
+
+    #[test]
+    fn reconcile_releases_stale_move_trigger() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        assert_eq!(collect_commands(&mut state).len(), 1);
+
+        state.reconcile_stale_keys(|_| false);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveUp,
+                is_down: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn reconcile_releases_stale_slow_mouse_trigger() {
+        let mut state = state_with_bound_key(VirtualKey::LeftShift);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::LeftShift, true),
+            Some(Action::SlowMouse),
+        );
+        assert_eq!(collect_commands(&mut state).len(), 1);
+
+        state.reconcile_stale_keys(|_| false);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::SlowMouse,
+                is_down: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn reconcile_clears_owned_modifier_when_physically_up() {
+        let mut state = AppState::default();
+        state.set_owned_modifiers([VirtualKey::RightAlt]);
+        state.route_key_event(KeyEvent::new(VirtualKey::RightAlt, true), None);
+        state.route_key_event(KeyEvent::new(VirtualKey::A, true), Some(Action::MoveLeft));
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
+
+        state.reconcile_stale_keys(|key| key != VirtualKey::RightAlt);
+
+        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
+    }
+
+    #[test]
+    fn reconcile_removes_active_trigger_for_stale_key() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        let up = KeyEvent::new(VirtualKey::E, false);
+        assert!(state.should_swallow_key(&up));
+
+        state.reconcile_stale_keys(|_| false);
+
+        assert!(!state.should_swallow_key(&up));
     }
 }

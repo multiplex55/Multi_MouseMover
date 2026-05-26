@@ -2686,6 +2686,19 @@ fn modifier_down(vk_code: i32) -> bool {
     unsafe { (GetAsyncKeyState(vk_code) & i16::MIN) != 0 }
 }
 
+fn should_run_modifier_reconcile(
+    config: &InputConfig,
+    elapsed_since_last_reconcile: Duration,
+) -> bool {
+    if !config.modifier_reconcile_on_tick {
+        return false;
+    }
+    let cadence_ms = config
+        .modifier_reconcile_interval_ms
+        .max(config.stuck_key_timeout_ms);
+    elapsed_since_last_reconcile >= Duration::from_millis(cadence_ms)
+}
+
 fn decode_key_event(w_param: WPARAM, kbd: KBDLLHOOKSTRUCT) -> Option<KeyEvent> {
     let key = VirtualKey::from_vk_code(kbd.vkCode)?;
     let is_down = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
@@ -4769,6 +4782,7 @@ fn main() {
     let (ui_query_tx, ui_query_rx) = mpsc::channel::<UiHintQueryResult>();
     *UI_HINT_QUERY_TX.lock().unwrap() = Some(ui_query_tx);
     *UI_HINT_QUERY_RX.lock().unwrap() = Some(ui_query_rx);
+    let mut last_modifier_reconcile = Instant::now();
 
     loop {
         let mut loop_diagnostics = LoopDiagnostics {
@@ -4780,6 +4794,16 @@ fn main() {
         process_ui_hint_query_timeout();
         process_ui_hint_query_results();
         loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
+
+        if should_run_modifier_reconcile(&config.input, last_modifier_reconcile.elapsed()) {
+            APP_STATE
+                .write()
+                .unwrap()
+                .reconcile_stale_keys(|key| modifier_down(key.to_vk_code() as i32));
+            last_modifier_reconcile = Instant::now();
+            loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
+        }
+
         {
             let mut action_handler = ACTION_HANDLER.write().unwrap();
             drain_runtime_notifications(&mut action_handler);
@@ -7800,5 +7824,38 @@ mod bookmark_runtime_logic_tests {
         c.desktop_behavior = "focus_anchor_window".into();
         let (x, y) = resolve_recall_target(&record, &c);
         assert_eq!((x, y), (42, 24));
+    }
+
+    #[test]
+    fn modifier_reconcile_is_cadence_gated() {
+        let mut input = InputConfig::default();
+        input.modifier_reconcile_on_tick = true;
+        input.modifier_reconcile_interval_ms = 50;
+        input.stuck_key_timeout_ms = 1500;
+
+        assert!(!should_run_modifier_reconcile(
+            &input,
+            Duration::from_millis(1499)
+        ));
+        assert!(should_run_modifier_reconcile(
+            &input,
+            Duration::from_millis(1500)
+        ));
+
+        input.stuck_key_timeout_ms = 10;
+        assert!(!should_run_modifier_reconcile(
+            &input,
+            Duration::from_millis(49)
+        ));
+        assert!(should_run_modifier_reconcile(
+            &input,
+            Duration::from_millis(50)
+        ));
+
+        input.modifier_reconcile_on_tick = false;
+        assert!(!should_run_modifier_reconcile(
+            &input,
+            Duration::from_millis(5000)
+        ));
     }
 }
