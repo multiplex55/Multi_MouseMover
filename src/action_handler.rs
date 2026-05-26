@@ -2382,13 +2382,11 @@ mod tests {
         handler.clear_runtime_input_state();
 
         assert!(!handler.mouse_master.left_button_held());
-        assert!(
-            handler
-                .mouse_master
-                .backend
-                .button_ups
-                .contains(&Button::Left)
-        );
+        assert!(handler
+            .mouse_master
+            .backend
+            .button_ups
+            .contains(&Button::Left));
     }
 
     #[test]
