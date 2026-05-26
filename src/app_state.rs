@@ -98,6 +98,7 @@ pub struct AppState {
     active_trigger_chords: HashSet<KeyChord>,
     active_triggers: std::collections::HashMap<VirtualKey, ActiveTrigger>,
     owned_modifiers: HashSet<VirtualKey>,
+    reconciled_released_keys: HashSet<VirtualKey>,
     held_physical_keys: HashSet<VirtualKey>,
     swallow_owned_modifiers: bool,
     debug_input: bool,
@@ -242,6 +243,7 @@ impl Default for AppState {
             active_trigger_chords: HashSet::new(),
             active_triggers: std::collections::HashMap::new(),
             owned_modifiers: HashSet::new(),
+            reconciled_released_keys: HashSet::new(),
             held_physical_keys: HashSet::new(),
             swallow_owned_modifiers: true,
             debug_input: false,
@@ -320,6 +322,7 @@ impl AppState {
 
             self.held_physical_keys.remove(&key);
             self.active_keys.remove(&key);
+            self.reconciled_released_keys.insert(key);
             if stale_trigger {
                 synthesized_action = self.resolve_key_up_action(KeyEvent::new(key, false), None);
             }
@@ -944,7 +947,8 @@ impl AppState {
         if self.active_mode
             && self.swallow_owned_modifiers
             && self.owned_modifiers.contains(&event.key)
-            && (event.is_down || self.held_physical_keys.contains(&event.key))
+            && (self.held_physical_keys.contains(&event.key)
+                || (event.is_down && !self.reconciled_released_keys.contains(&event.key)))
         {
             self.debug_swallow("owned_modifier_active", event, true);
             return true;
@@ -1002,15 +1006,6 @@ impl AppState {
             return;
         }
 
-        if event.is_down
-            && !self.is_jump_active()
-            && !self.is_grid_active()
-            && (self.is_exit_binding(&event) || matches!(action.as_ref(), Some(Action::Exit)))
-        {
-            self.enqueue_command(AppCommand::Exit);
-            return;
-        }
-
         if self.is_ui_hint_active() || self.is_ui_hint_querying() {
             if matches!(
                 action.as_ref(),
@@ -1022,6 +1017,15 @@ impl AppState {
                 self.exit_bookmark_mode();
             }
             self.enqueue_command(AppCommand::UiHintInput(event));
+            return;
+        }
+
+        if event.is_down
+            && !self.is_jump_active()
+            && !self.is_grid_active()
+            && (self.is_exit_binding(&event) || matches!(action.as_ref(), Some(Action::Exit)))
+        {
+            self.enqueue_command(AppCommand::Exit);
             return;
         }
 
@@ -1104,6 +1108,7 @@ impl AppState {
         }
 
         if event.is_down {
+            self.reconciled_released_keys.remove(&event.key);
             self.active_keys.insert(event.key);
             self.held_physical_keys.insert(event.key);
             if let Some(resolved_action) = action.clone() {
