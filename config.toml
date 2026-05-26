@@ -267,41 +267,61 @@ show_direction_labels = true
 # Wheel speed and profiles
 # ---------------------------------------------------------------------------
 [wheel]
-default_speed = 3
+# Wheel level semantics:
+# - level 1 is roughly one wheel notch/event in many apps.
+# - higher levels increase per-event scroll distance (up to max_speed).
+# - level 10 is intentionally high and often page-like, depending on app behavior.
+default_speed = 1
 min_speed = 1
-max_speed = 12
+max_speed = 10
 speed_step = 1
-tick_interval = 8
+# tick_interval controls held-key repeat cadence for wheel actions (milliseconds).
+tick_interval = 120
 speed_indicator_ms = 700
 vertical_multiplier = 1
 horizontal_multiplier = 1
 
 # Preset examples. Cycle them with RightAlt+V / RightAlt+B or bind
 # wheel_profile:<name> directly.
-[wheel_profiles.fast]
-default_speed = 6
-min_speed = 1
-max_speed = 18
-speed_step = 2
-tick_interval = 8
-speed_indicator_ms = 700
-vertical_multiplier = 1
-horizontal_multiplier = 1
-
 [wheel_profiles.precise]
 default_speed = 1
 min_speed = 1
-max_speed = 5
+max_speed = 4
 speed_step = 1
-tick_interval = 12
+tick_interval = 180
 speed_indicator_ms = 700
 vertical_multiplier = 1
 horizontal_multiplier = 1
 
-[wheel_profiles.horizontal]
-default_speed = 3
-horizontal_multiplier = 3
+[wheel_profiles.normal]
+default_speed = 1
+min_speed = 1
+max_speed = 10
+speed_step = 1
+tick_interval = 120
+speed_indicator_ms = 700
 vertical_multiplier = 1
+horizontal_multiplier = 1
+
+[wheel_profiles.fast]
+default_speed = 3
+min_speed = 1
+max_speed = 10
+speed_step = 1
+tick_interval = 80
+speed_indicator_ms = 700
+vertical_multiplier = 1
+horizontal_multiplier = 1
+
+[wheel_profiles.page]
+default_speed = 10
+min_speed = 4
+max_speed = 10
+speed_step = 1
+tick_interval = 100
+speed_indicator_ms = 700
+vertical_multiplier = 1
+horizontal_multiplier = 1
 
 # ---------------------------------------------------------------------------
 # Jump mode, stages, visuals, and labels

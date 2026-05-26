@@ -1070,11 +1070,11 @@ pub struct WheelConfig {
 impl Default for WheelConfig {
     fn default() -> Self {
         Self {
-            default_speed: 3,
+            default_speed: 1,
             min_speed: 1,
-            max_speed: 12,
+            max_speed: 10,
             speed_step: 1,
-            tick_interval: DEFAULT_POLLING_RATE_MS,
+            tick_interval: 120,
             speed_indicator_ms: DEFAULT_WHEEL_SPEED_INDICATOR_MS,
             vertical_multiplier: 1,
             horizontal_multiplier: 1,
@@ -6305,6 +6305,93 @@ mod tests {
     }
 
     #[test]
+    fn wheel_defaults_match_config_defaults() {
+        let config = parse_config("");
+
+        assert_eq!(config.wheel.default_speed, 1);
+        assert_eq!(config.wheel.min_speed, 1);
+        assert_eq!(config.wheel.max_speed, 10);
+        assert_eq!(config.wheel.speed_step, 1);
+        assert_eq!(config.wheel.tick_interval, 120);
+    }
+
+    #[test]
+    fn wheel_profile_resolution_inherits_base_and_applies_overrides() {
+        let config = parse_config(
+            r#"
+            [wheel]
+            default_speed = 2
+            min_speed = 1
+            max_speed = 10
+            speed_step = 1
+            tick_interval = 120
+            speed_indicator_ms = 700
+            vertical_multiplier = 2
+            horizontal_multiplier = 3
+
+            [wheel_profiles.precise]
+            max_speed = 4
+            tick_interval = 180
+
+            [wheel_profiles.fast]
+            default_speed = 5
+            tick_interval = 80
+
+            [wheel_profiles.page]
+            default_speed = 10
+            min_speed = 4
+            tick_interval = 100
+            "#,
+        );
+
+        let precise = config.resolved_wheel_profile(Some("precise")).unwrap();
+        assert_eq!(precise.default_speed, 2);
+        assert_eq!(precise.min_speed, 1);
+        assert_eq!(precise.max_speed, 4);
+        assert_eq!(precise.tick_interval, 180);
+        assert_eq!(precise.vertical_multiplier, 2);
+        assert_eq!(precise.horizontal_multiplier, 3);
+
+        let fast = config.resolved_wheel_profile(Some("fast")).unwrap();
+        assert_eq!(fast.default_speed, 5);
+        assert_eq!(fast.min_speed, 1);
+        assert_eq!(fast.max_speed, 10);
+        assert_eq!(fast.tick_interval, 80);
+        assert_eq!(fast.vertical_multiplier, 2);
+        assert_eq!(fast.horizontal_multiplier, 3);
+
+        let page = config.resolved_wheel_profile(Some("page")).unwrap();
+        assert_eq!(page.default_speed, 10);
+        assert_eq!(page.min_speed, 4);
+        assert_eq!(page.max_speed, 10);
+        assert_eq!(page.tick_interval, 100);
+        assert_eq!(page.vertical_multiplier, 2);
+        assert_eq!(page.horizontal_multiplier, 3);
+    }
+
+    #[test]
+    fn wheel_default_speed_is_clamped_after_profile_min_max_overrides() {
+        let config = parse_config(
+            r#"
+            [wheel]
+            default_speed = 6
+            min_speed = 1
+            max_speed = 10
+            speed_step = 1
+            tick_interval = 120
+
+            [wheel_profiles.precise]
+            min_speed = 7
+            max_speed = 8
+            "#,
+        );
+
+        let precise = config.resolved_wheel_profile(Some("precise")).unwrap();
+        assert_eq!(precise.default_speed, 7);
+        assert_eq!(precise.min_speed, 7);
+        assert_eq!(precise.max_speed, 8);
+    }
+
     fn wheel_config_parses_and_normalizes_bounds() {
         let config = parse_config(
             r#"
