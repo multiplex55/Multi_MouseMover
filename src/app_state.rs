@@ -97,6 +97,7 @@ pub struct AppState {
     bound_chords: HashSet<KeyChord>,
     active_keys: HashSet<VirtualKey>,
     active_trigger_chords: HashSet<KeyChord>,
+    active_triggers: std::collections::HashMap<VirtualKey, ActiveTrigger>,
     owned_modifiers: HashSet<VirtualKey>,
     held_physical_keys: HashSet<VirtualKey>,
     swallow_owned_modifiers: bool,
@@ -111,6 +112,14 @@ pub struct AppState {
     system_bindings: RuntimeSystemBindings,
     help_visible: bool,
     grid_direction_labels: GridDirectionLabels,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveTrigger {
+    pub trigger_key: VirtualKey,
+    pub resolved_chord: KeyChord,
+    pub resolved_action: Action,
+    pub is_continuous: bool,
 }
 
 #[derive(Debug)]
@@ -232,6 +241,7 @@ impl Default for AppState {
             bound_chords: HashSet::new(),
             active_keys: HashSet::new(),
             active_trigger_chords: HashSet::new(),
+            active_triggers: std::collections::HashMap::new(),
             owned_modifiers: HashSet::new(),
             held_physical_keys: HashSet::new(),
             swallow_owned_modifiers: true,
@@ -313,6 +323,7 @@ impl AppState {
     pub fn clear_active_action_keys(&mut self) {
         self.active_keys.clear();
         self.active_trigger_chords.clear();
+        self.active_triggers.clear();
     }
 
     pub fn clear_active_action_keys_and_exit_exclusive_modes(&mut self) {
@@ -919,7 +930,7 @@ impl AppState {
         swallow
     }
 
-    pub fn route_key_event(&mut self, event: KeyEvent, action: Option<Action>) {
+    pub fn route_key_event(&mut self, event: KeyEvent, mut action: Option<Action>) {
         if self.help_visible && event.is_down && event.key == VirtualKey::Escape {
             self.enqueue_command(AppCommand::HideHelp);
             return;
@@ -1048,12 +1059,13 @@ impl AppState {
         if event.is_down {
             self.active_keys.insert(event.key);
             self.held_physical_keys.insert(event.key);
-            if action.is_some() {
-                self.track_active_trigger_chord(event);
+            if let Some(resolved_action) = action.clone() {
+                self.track_active_trigger(event, resolved_action);
             }
         } else {
             self.active_keys.remove(&event.key);
             self.held_physical_keys.remove(&event.key);
+            action = self.resolve_key_up_action(event, action);
         }
 
         if event.is_down && matches!(action.as_ref(), Some(Action::ShowHelp)) {
@@ -1133,14 +1145,6 @@ impl AppState {
 
         for command in self.commands_for_active_keys(event, action) {
             self.enqueue_command(command);
-        }
-
-        if !event.is_down {
-            self.active_trigger_chords
-                .retain(|chord| chord.key != event.key);
-            if self.debug_input {
-                eprintln!("[debug-input] active-trigger remove: {:?}", event.key);
-            }
         }
     }
 
@@ -1224,7 +1228,7 @@ impl AppState {
         false
     }
 
-    fn track_active_trigger_chord(&mut self, event: KeyEvent) {
+    fn track_active_trigger(&mut self, event: KeyEvent, action: Action) {
         if let Some(chord) = self
             .bound_chords
             .iter()
@@ -1232,11 +1236,42 @@ impl AppState {
             .max_by_key(|chord| chord.specificity())
             .copied()
         {
+            self.active_triggers.insert(
+                event.key,
+                ActiveTrigger {
+                    trigger_key: event.key,
+                    resolved_chord: chord,
+                    resolved_action: action.clone(),
+                    is_continuous: action.is_continuous(),
+                },
+            );
             self.active_trigger_chords.insert(chord);
             if self.debug_input {
                 eprintln!("[debug-input] active-trigger add: {:?}", chord);
             }
         }
+    }
+
+    fn resolve_key_up_action(
+        &mut self,
+        event: KeyEvent,
+        fallback: Option<Action>,
+    ) -> Option<Action> {
+        if let Some(active_trigger) = self.active_triggers.remove(&event.key) {
+            self.active_trigger_chords
+                .remove(&active_trigger.resolved_chord);
+            if self.debug_input {
+                eprintln!(
+                    "[debug-input] active-trigger remove: {:?}",
+                    active_trigger.resolved_chord
+                );
+            }
+            if active_trigger.is_continuous {
+                return Some(active_trigger.resolved_action);
+            }
+            return None;
+        }
+        fallback
     }
 
     fn debug_swallow(&self, reason: &str, event: &KeyEvent, swallow: bool) {

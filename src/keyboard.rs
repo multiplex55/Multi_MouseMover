@@ -696,6 +696,12 @@ pub struct KeyBindings {
     bindings: Vec<(KeyChord, Action)>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedBinding {
+    pub chord: KeyChord,
+    pub action: Action,
+}
+
 impl KeyBindings {
     /// Create a new KeyBindings instance
     pub fn new() -> Self {
@@ -737,26 +743,58 @@ impl KeyBindings {
             .find_map(|(bound_chord, action)| (*bound_chord == chord).then_some(action))
     }
 
-    pub fn get_action_for_event(&self, event: &KeyEvent) -> Option<Action> {
-        if let Some(action) = self
-            .bindings
-            .iter()
-            .find_map(|(chord, action)| chord.matches_event(event).then(|| action.clone()))
-        {
-            return Some(action);
+    pub fn resolve_for_key_down_event(
+        &self,
+        event: &KeyEvent,
+        shift_can_modify_plain_movement: bool,
+    ) -> Option<ResolvedBinding> {
+        if !event.is_down {
+            return None;
         }
 
-        if event.is_down {
-            return self.bindings.iter().find_map(|(chord, action)| {
-                chord
-                    .matches_event_allowing_shift_modifier(event)
-                    .then(|| action.clone())
+        if let Some((chord, action)) = self
+            .bindings
+            .iter()
+            .find(|(chord, _)| chord.matches_event(event))
+        {
+            return Some(ResolvedBinding {
+                chord: *chord,
+                action: action.clone(),
             });
         }
 
-        self.bindings
+        if let Some((chord, action)) = self
+            .bindings
             .iter()
-            .find_map(|(chord, action)| (chord.key == event.key).then(|| action.clone()))
+            .find(|(chord, _)| chord.matches_key_down_event(event))
+        {
+            return Some(ResolvedBinding {
+                chord: *chord,
+                action: action.clone(),
+            });
+        }
+
+        if !shift_can_modify_plain_movement {
+            return None;
+        }
+
+        self.bindings.iter().find_map(|(chord, action)| {
+            chord
+                .matches_event_allowing_shift_modifier(event)
+                .then(|| ResolvedBinding {
+                    chord: *chord,
+                    action: action.clone(),
+                })
+        })
+    }
+
+    pub fn get_action_for_event(
+        &self,
+        event: &KeyEvent,
+        shift_can_modify_plain_movement: bool,
+    ) -> Option<Action> {
+        self.resolve_for_key_down_event(event, shift_can_modify_plain_movement)
+            .map(|resolved| resolved.action)
     }
 
     pub fn bound_chords(&self) -> impl Iterator<Item = KeyChord> + '_ {
@@ -938,14 +976,17 @@ mod tests {
         event.right_alt_down = true;
 
         assert_eq!(
-            bindings.get_action_for_event(&event),
+            bindings.get_action_for_event(&event, true),
             Some(Action::MoveToTopEdge)
         );
 
         event.alt_down = false;
         event.right_alt_down = false;
 
-        assert_eq!(bindings.get_action_for_event(&event), Some(Action::MoveUp));
+        assert_eq!(
+            bindings.get_action_for_event(&event, true),
+            Some(Action::MoveUp)
+        );
     }
 
     #[test]
@@ -956,7 +997,10 @@ mod tests {
         let mut event = KeyEvent::new(VirtualKey::W, true);
         event.shift_down = true;
 
-        assert_eq!(bindings.get_action_for_event(&event), Some(Action::MoveUp));
+        assert_eq!(
+            bindings.get_action_for_event(&event, true),
+            Some(Action::MoveUp)
+        );
     }
 
     #[test]
@@ -973,7 +1017,7 @@ mod tests {
         event.right_alt_down = true;
 
         assert_eq!(
-            bindings.get_action_for_event(&event),
+            bindings.get_action_for_event(&event, true),
             Some(Action::MoveToTopEdge)
         );
     }
@@ -986,7 +1030,82 @@ mod tests {
         let mut event = KeyEvent::new(VirtualKey::W, true);
         event.ctrl_down = true;
 
-        assert_eq!(bindings.get_action_for_event(&event), None);
+        assert_eq!(bindings.get_action_for_event(&event, true), None);
+    }
+
+    #[test]
+    fn shift_exact_binding_wins_over_plain_binding() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("E").unwrap(), Action::MoveRight);
+        bindings.add_chord_binding(KeyChord::parse("Shift+E").unwrap(), Action::MoveLeft);
+
+        let mut event = KeyEvent::new(VirtualKey::E, true);
+        event.shift_down = true;
+
+        assert_eq!(
+            bindings
+                .resolve_for_key_down_event(&event, true)
+                .map(|r| r.action),
+            Some(Action::MoveLeft)
+        );
+    }
+
+    #[test]
+    fn shift_falls_back_to_plain_when_enabled_and_shift_binding_absent() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("E").unwrap(), Action::MoveRight);
+        let mut event = KeyEvent::new(VirtualKey::E, true);
+        event.shift_down = true;
+        assert_eq!(
+            bindings
+                .resolve_for_key_down_event(&event, true)
+                .map(|r| r.action),
+            Some(Action::MoveRight)
+        );
+    }
+
+    #[test]
+    fn shift_does_not_fallback_to_plain_when_disabled() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("E").unwrap(), Action::MoveRight);
+        let mut event = KeyEvent::new(VirtualKey::E, true);
+        event.shift_down = true;
+        assert_eq!(bindings.resolve_for_key_down_event(&event, false), None);
+    }
+
+    #[test]
+    fn right_alt_then_alt_then_plain_precedence() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("W").unwrap(), Action::MoveUp);
+        bindings.add_chord_binding(KeyChord::parse("Alt+W").unwrap(), Action::MoveDown);
+        bindings.add_chord_binding(KeyChord::parse("RightAlt+W").unwrap(), Action::MoveLeft);
+
+        let mut ralt = KeyEvent::new(VirtualKey::W, true);
+        ralt.alt_down = true;
+        ralt.right_alt_down = true;
+        assert_eq!(
+            bindings
+                .resolve_for_key_down_event(&ralt, true)
+                .map(|r| r.action),
+            Some(Action::MoveLeft)
+        );
+
+        let mut alt = KeyEvent::new(VirtualKey::W, true);
+        alt.alt_down = true;
+        assert_eq!(
+            bindings
+                .resolve_for_key_down_event(&alt, true)
+                .map(|r| r.action),
+            Some(Action::MoveDown)
+        );
+
+        let plain = KeyEvent::new(VirtualKey::W, true);
+        assert_eq!(
+            bindings
+                .resolve_for_key_down_event(&plain, true)
+                .map(|r| r.action),
+            Some(Action::MoveUp)
+        );
     }
 
     #[test]
@@ -1000,7 +1119,7 @@ mod tests {
             event.shift_down = true;
 
             assert_eq!(
-                bindings.get_action_for_event(&event),
+                bindings.get_action_for_event(&event, true),
                 Some(Action::SlowMouse),
                 "{key:?}"
             );

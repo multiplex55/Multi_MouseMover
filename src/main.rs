@@ -343,6 +343,7 @@ lazy_static! {
         RwLock::new(handler)
     };
     static ref KEY_ACTIONS: RwLock<KeyBindings> = RwLock::new(KeyBindings::new());
+    static ref SHIFT_CAN_MODIFY_PLAIN_MOVEMENT: RwLock<bool> = RwLock::new(true);
     static ref APP_STATE: RwLock<AppState> = RwLock::new(AppState::default());
     static ref CONFIG_WARNINGS: Mutex<Vec<StoredConfigWarning>> = Mutex::new(Vec::new());
     static ref UI_HINT_QUERY_TX: Mutex<Option<Sender<UiHintQueryResult>>> = Mutex::new(None);
@@ -2291,6 +2292,8 @@ impl Config {
         app_state.set_bound_chords(key_actions.bound_chords());
         app_state.set_owned_modifiers(key_actions.owned_modifiers());
         app_state.set_debug_input(self.input.debug_input);
+        *SHIFT_CAN_MODIFY_PLAIN_MOVEMENT.write().unwrap() =
+            self.input.shift_can_modify_plain_movement;
     }
 
     fn initialize_system_bindings(&self) -> Result<(), Box<dyn Error>> {
@@ -2781,7 +2784,11 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
             break;
         };
 
-        let action = KEY_ACTIONS.read().unwrap().get_action_for_event(&event);
+        let shift_can_modify_plain_movement = *SHIFT_CAN_MODIFY_PLAIN_MOVEMENT.read().unwrap();
+        let action = KEY_ACTIONS
+            .read()
+            .unwrap()
+            .get_action_for_event(&event, shift_can_modify_plain_movement);
 
         if debug_diagnostics && should_log_routing_event(&event, action.clone()) {
             println!(
@@ -5617,7 +5624,7 @@ mod tests {
             (VirtualKey::K, Action::MoveDown),
         ] {
             let event = KeyEvent::new(key, true);
-            let resolved = bindings.get_action_for_event(&event);
+            let resolved = bindings.get_action_for_event(&event, true);
             app_state.route_key_event(event, resolved);
             assert_eq!(
                 app_state.pop_command(),
@@ -5626,7 +5633,7 @@ mod tests {
         }
 
         assert_eq!(
-            bindings.get_action_for_event(&KeyEvent::new(VirtualKey::W, true)),
+            bindings.get_action_for_event(&KeyEvent::new(VirtualKey::W, true), true),
             None
         );
         assert_eq!(
