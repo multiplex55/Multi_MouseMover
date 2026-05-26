@@ -694,7 +694,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             self.last_wheel_direction = None;
             return;
         };
-        let direction = wheel_direction_for_action(wheel_action);
+        let direction = wheel_direction_for_action(&wheel_action);
         if self.last_wheel_direction != Some(direction) {
             self.last_wheel_direction = Some(direction);
             self.last_wheel_tick = Some(now);
@@ -1197,7 +1197,7 @@ fn debug_diagnostics_enabled() -> bool {
         .unwrap_or(false)
 }
 
-fn wheel_direction_for_action(action: Action) -> WheelDirection {
+fn wheel_direction_for_action(action: &Action) -> WheelDirection {
     match action {
         Action::WheelUp => WheelDirection::Up,
         Action::WheelDown => WheelDirection::Down,
