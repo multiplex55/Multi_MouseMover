@@ -106,8 +106,8 @@ key_bindings = [
 | `system_bindings.panic_reset_sets_idle` | boolean | `true` | Yes | Active | When true, panic reset also sets idle mode (`SetActiveMode { active = false }`). |
 | `input.swallow_owned_modifiers` | boolean | `true` | Yes | Active | Swallow app-owned modifier down/up transitions while active mode is enabled. |
 | `input.modifier_reconcile_on_tick` | boolean | `true` | Yes | Active | Enables periodic modifier reconciliation checks. |
-| `input.modifier_reconcile_interval_ms` | integer milliseconds | `50` | Yes | Active | Poll interval for modifier reconciliation. |
-| `input.stuck_key_timeout_ms` | integer milliseconds | `1500` | Yes | Active | Timeout used to classify stale held keys as stuck. |
+| `input.modifier_reconcile_interval_ms` | integer milliseconds | `50` | Yes | Active | Base polling interval for modifier reconciliation; normalized to `10..=5000` and reset to default when `0`. |
+| `input.stuck_key_timeout_ms` | integer milliseconds | `10000` | Yes | Active | Timeout used to classify stale held keys as stuck; normalized to `500..=60000` and reset to default when `0`. |
 | `input.debug_input` | boolean | `false` | Yes | Active | Enables verbose debug-input logs (raw keys, swallow reasons, system matches, trigger tracking). |
 | `input.shift_can_modify_plain_movement` | boolean | `true` | Yes | Active | Keeps shift-relaxed plain-movement matching enabled. |
 | `mouse_speed.default_speed` | integer | `1` | Yes | Active | Normal held-movement speed and replacement for legacy `starting_speed`. |
@@ -381,6 +381,7 @@ font_scale = 1.1
 
 - `selection_keys` removes whitespace, uppercases alpha keys, and removes duplicates while preserving first occurrence order.
 - Values outside supported ranges are normalized and logged as config warnings so the mode remains usable.
+- For input stale-key recovery, reconcile cadence is `max(input.modifier_reconcile_interval_ms, input.stuck_key_timeout_ms)`, so the timeout can effectively gate how often reconcile ticks run.
 - Duplicate and deeply nested UIA controls are common in complex apps; increase `min_hint_spacing_px` to reduce visual crowding.
 - When many controls are visible (for example browsers/Electron apps), results may be capped by `max_hints`; consider larger `selection_keys` and spacing tuning before raising the cap aggressively.
 

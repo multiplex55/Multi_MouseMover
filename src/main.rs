@@ -510,7 +510,7 @@ impl Default for InputConfig {
             swallow_owned_modifiers: true,
             modifier_reconcile_on_tick: true,
             modifier_reconcile_interval_ms: 50,
-            stuck_key_timeout_ms: 1500,
+            stuck_key_timeout_ms: 10_000,
             debug_input: false,
             shift_can_modify_plain_movement: true,
         }
@@ -1632,6 +1632,7 @@ impl Config {
         self.normalize_tooltip_overlay_config();
         self.normalize_ui_hints_config();
         self.normalize_bookmarks_config();
+        self.normalize_input_config();
         // Keep the legacy field stable for downstream code and diagnostics after the
         // modern baseline has won normalization.
         self.starting_speed = self.mouse_speed.default_speed;
@@ -1794,6 +1795,24 @@ impl Config {
             );
             self.bookmarks.desktop_behavior = "focus_anchor_window".to_string();
         }
+    }
+
+    fn normalize_input_config(&mut self) {
+        if self.input.modifier_reconcile_interval_ms == 0 {
+            warn_config_normalized("input.modifier_reconcile_interval_ms is 0; using default");
+            self.input.modifier_reconcile_interval_ms =
+                InputConfig::default().modifier_reconcile_interval_ms;
+        }
+        self.input.modifier_reconcile_interval_ms = self
+            .input
+            .modifier_reconcile_interval_ms
+            .clamp(10, 5_000);
+
+        if self.input.stuck_key_timeout_ms == 0 {
+            warn_config_normalized("input.stuck_key_timeout_ms is 0; using default");
+            self.input.stuck_key_timeout_ms = InputConfig::default().stuck_key_timeout_ms;
+        }
+        self.input.stuck_key_timeout_ms = self.input.stuck_key_timeout_ms.clamp(500, 60_000);
     }
 
     fn normalize_final_adjust_config(&mut self) {
@@ -2687,6 +2706,10 @@ fn should_run_modifier_reconcile(
     if !config.modifier_reconcile_on_tick {
         return false;
     }
+    // Reconciliation must run no faster than either interval:
+    // - modifier_reconcile_interval_ms: regular polling cadence
+    // - stuck_key_timeout_ms: stale key recovery timeout
+    // The max() means stale key timeout effectively gates the cadence.
     let cadence_ms = config
         .modifier_reconcile_interval_ms
         .max(config.stuck_key_timeout_ms);
@@ -6455,6 +6478,63 @@ mod tests {
     }
 
     #[test]
+    fn input_config_default_uses_ten_second_stuck_timeout() {
+        let config = parse_config("");
+        assert_eq!(config.input.stuck_key_timeout_ms, 10_000);
+    }
+
+    #[test]
+    fn input_config_parses_overrides_from_toml() {
+        let config = parse_config(
+            r#"
+            [input]
+            swallow_owned_modifiers = false
+            modifier_reconcile_on_tick = false
+            modifier_reconcile_interval_ms = 250
+            stuck_key_timeout_ms = 12000
+            debug_input = true
+            shift_can_modify_plain_movement = false
+            "#,
+        );
+
+        assert!(!config.input.swallow_owned_modifiers);
+        assert!(!config.input.modifier_reconcile_on_tick);
+        assert_eq!(config.input.modifier_reconcile_interval_ms, 250);
+        assert_eq!(config.input.stuck_key_timeout_ms, 12_000);
+        assert!(config.input.debug_input);
+        assert!(!config.input.shift_can_modify_plain_movement);
+    }
+
+    #[test]
+    fn input_config_normalizes_zero_and_out_of_range_values() {
+        let zero = parse_config(
+            r#"
+            [input]
+            modifier_reconcile_interval_ms = 0
+            stuck_key_timeout_ms = 0
+            "#,
+        );
+        assert_eq!(
+            zero.input.modifier_reconcile_interval_ms,
+            InputConfig::default().modifier_reconcile_interval_ms
+        );
+        assert_eq!(
+            zero.input.stuck_key_timeout_ms,
+            InputConfig::default().stuck_key_timeout_ms
+        );
+
+        let out_of_range = parse_config(
+            r#"
+            [input]
+            modifier_reconcile_interval_ms = 1
+            stuck_key_timeout_ms = 70000
+            "#,
+        );
+        assert_eq!(out_of_range.input.modifier_reconcile_interval_ms, 10);
+        assert_eq!(out_of_range.input.stuck_key_timeout_ms, 60_000);
+    }
+
+    #[test]
     fn slow_mouse_config_parses_from_toml() {
         let fixed = parse_config(
             r#"
@@ -7933,15 +8013,15 @@ mod bookmark_runtime_logic_tests {
         let mut input = InputConfig::default();
         input.modifier_reconcile_on_tick = true;
         input.modifier_reconcile_interval_ms = 50;
-        input.stuck_key_timeout_ms = 1500;
+        input.stuck_key_timeout_ms = 10_000;
 
         assert!(!should_run_modifier_reconcile(
             &input,
-            Duration::from_millis(1499)
+            Duration::from_millis(9_999)
         ));
         assert!(should_run_modifier_reconcile(
             &input,
-            Duration::from_millis(1500)
+            Duration::from_millis(10_000)
         ));
 
         input.stuck_key_timeout_ms = 10;
