@@ -433,18 +433,14 @@ Suggested bindings:
 
 Note: many apps reserve `Alt` accelerators for menu/navigation. If a binding is intercepted, prefer switching to a less contended modifier combo.
 
-### `[position_history]`
 
-Configures saved mouse-position history and selection labels.
 
-```toml
-[position_history]
-enabled = true
-max_positions = 20
-selection_keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-label_length = 2
-show_numbers = false
-```
+### Migration note (removed position history)
+
+`[position_history]` and actions `save_mouse_position`, `clear_mouse_positions`, `position_history_mode` were removed.
+
+- Delete legacy keys from existing config files.
+- Use bookmark slots for saved locations.
 
 ### `[bookmarks]`
 

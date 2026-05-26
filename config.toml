@@ -103,10 +103,6 @@ key_bindings = [
     ["8", "bookmark_slot_8"],
     ["9", "bookmark_slot_9"],
 
-    # Position history (chosen to avoid overlap with existing bindings).
-    ["RightAlt+F13", "save_mouse_position"],
-    ["RightAlt+F14", "clear_mouse_positions"],
-    ["RightAlt+F15", "position_history_mode"]
 ]
 
 # Input ownership/reconciliation controls.
@@ -577,13 +573,6 @@ width = 10
 height = 8
 visual_context_margin_percent = 0
 zoom_scale = 1.0
-
-[position_history]
-enabled = true
-max_positions = 20
-selection_keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-label_length = 2
-show_numbers = false
 
 [bookmarks]
 enabled = true
