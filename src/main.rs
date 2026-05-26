@@ -609,29 +609,17 @@ pub enum TooltipOverlayPositioning {
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct TooltipOverlayEvents {
-    #[serde(default)]
     pub mouse: bool,
-    #[serde(default)]
     pub wheel: bool,
-    #[serde(default)]
     pub profile: bool,
-    #[serde(default)]
     pub drag: bool,
-    #[serde(default)]
     pub reload: bool,
-    #[serde(default)]
     pub panic: bool,
-    #[serde(default)]
     pub surgical: bool,
-    #[serde(default)]
     pub ui_hints_query_start: bool,
-    #[serde(default)]
     pub ui_hints_query_fail: bool,
-    #[serde(default)]
     pub ui_hints_query_empty: bool,
-    #[serde(default)]
     pub ui_hints_query_capped_count: bool,
-    #[serde(default)]
     pub bookmarks: bool,
 }
 

@@ -1001,6 +1001,13 @@ impl AppState {
             return;
         }
 
+        if event.is_down
+            && (self.is_exit_binding(&event) || matches!(action.as_ref(), Some(Action::Exit)))
+        {
+            self.enqueue_command(AppCommand::Exit);
+            return;
+        }
+
         if self.is_ui_hint_active() || self.is_ui_hint_querying() {
             if matches!(
                 action.as_ref(),

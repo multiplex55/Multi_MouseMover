@@ -106,25 +106,15 @@ pub enum StatusOverlayPositioning {
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(default)]
 pub struct StatusOverlayFields {
-    #[serde(default)]
     pub active: bool,
-    #[serde(default)]
     pub drag: bool,
-    #[serde(default)]
     pub slow: bool,
-    #[serde(default)]
     pub surgical: bool,
-    #[serde(default)]
     pub jump: bool,
-    #[serde(default)]
     pub mouse_speed: bool,
-    #[serde(default)]
     pub wheel_speed: bool,
-    #[serde(default)]
     pub flash: bool,
-    #[serde(default)]
     pub final_adjust: bool,
-    #[serde(default)]
     pub bookmark_mode: bool,
 }
 
