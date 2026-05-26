@@ -144,14 +144,16 @@ key_bindings = [
 | `grid_mode.move_cursor_each_step` | boolean | `true` | Yes | Active | Moves cursor as grid-mode selections narrow. |
 | `grid_mode.line_visible` | boolean | `true` | Yes | Active | Shows grid-mode guide line. |
 | `grid_mode.show_direction_labels` | boolean | `true` | Yes | Active | Shows grid-mode direction labels. |
-| `wheel.default_speed` | integer | `3` | Yes | Active | Base wheel speed. |
-| `wheel.min_speed` | integer | `1` | Yes | Active | Lower bound for wheel speed changes. |
-| `wheel.max_speed` | integer | `12` | Yes | Active | Upper bound for wheel speed changes. |
-| `wheel.speed_step` | integer | `1` | Yes | Active | Increment used by wheel speed up/down actions. |
-| `wheel.tick_interval` | integer milliseconds | `8` | Yes | Active | Wheel repeat interval. |
+| `wheel.default_speed` | integer | `1` | Yes | Active | Base wheel level (1 ≈ one notch/event in many apps; 10 is high/page-like in many apps). |
+| `wheel.min_speed` | integer | `1` | Yes | Active | Lower bound for wheel level changes. |
+| `wheel.max_speed` | integer | `10` | Yes | Active | Upper bound for wheel level changes. |
+| `wheel.speed_step` | integer | `1` | Yes | Active | Increment used by wheel level up/down actions. |
+| `wheel.tick_interval` | integer milliseconds | `120` | Yes | Active | Held-key wheel repeat cadence; lower values repeat faster. |
 | `wheel.speed_indicator_ms` | integer milliseconds | `700` | Yes | Active | Duration for wheel-speed feedback. |
 | `wheel.vertical_multiplier` | integer | `1` | Yes | Active | Vertical wheel multiplier. |
 | `wheel.horizontal_multiplier` | integer | `1` | Yes | Active | Horizontal wheel multiplier. |
+
+Wheel levels are interpreted by the target application. Some apps map level changes nearly linearly, while others apply custom acceleration or page-oriented behavior.
 | `wheel_profiles.*.default_speed` | integer | none | Yes | Active | Optional named wheel profile override. |
 | `wheel_profiles.*.min_speed` | integer | none | Yes | Active | Optional named wheel profile override. |
 | `wheel_profiles.*.max_speed` | integer | none | Yes | Active | Optional named wheel profile override. |
