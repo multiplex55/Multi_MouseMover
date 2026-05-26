@@ -27,8 +27,10 @@ lazy_static::lazy_static! {
             None
         }
     }));
+}
 
-    #[cfg(debug_assertions)]
+#[cfg(debug_assertions)]
+lazy_static::lazy_static! {
     static ref PAINT_SMOKE_LOG: Mutex<PaintSmokeLog> = Mutex::new(PaintSmokeLog::new());
 }
 
