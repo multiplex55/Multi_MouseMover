@@ -643,7 +643,6 @@ pub struct TooltipOverlayConfig {
     pub events: TooltipOverlayEvents,
 }
 
-
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct BookmarksConfig {
@@ -2303,7 +2302,7 @@ fn resolve_config_path(path: &str) -> Option<PathBuf> {
             .or_else(|| Some(cwd_path.to_path_buf()));
     }
 
-    let exe_dir_path = env::current_exe().ok().and_then(|mut exe| {
+    env::current_exe().ok().and_then(|mut exe| {
         exe.pop();
         let candidate = exe.join(path);
         if candidate.exists() {
@@ -2311,9 +2310,7 @@ fn resolve_config_path(path: &str) -> Option<PathBuf> {
         } else {
             None
         }
-    });
-
-    exe_dir_path
+    })
 }
 
 fn load_bookmark_runtime(

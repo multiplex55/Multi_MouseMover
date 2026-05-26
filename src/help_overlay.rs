@@ -188,7 +188,7 @@ pub enum HelpOverlayContent {
         expires_at: Instant,
     },
     Help {
-        view: HelpOverlayView,
+        view: Box<HelpOverlayView>,
     },
 }
 
@@ -225,7 +225,9 @@ impl HelpOverlayState {
     }
 
     fn show_help_overlay(&mut self, view: HelpOverlayView) {
-        self.content = HelpOverlayContent::Help { view };
+        self.content = HelpOverlayContent::Help {
+            view: Box::new(view),
+        };
     }
 
     fn hide(&mut self) {
@@ -1139,7 +1141,7 @@ mod tests {
     #[test]
     fn help_content_size_includes_runtime_stats() {
         let size = content_size(&HelpOverlayContent::Help {
-            view: sample_view(),
+            view: Box::new(sample_view()),
         });
 
         assert!(size.1 > PADDING_Y * 2 + LINE_HEIGHT + TITLE_BODY_GAP + LINE_HEIGHT);
@@ -1528,7 +1530,12 @@ mod tests {
         state.show_temporary_tooltip("Speed", "Mouse speed 2", Duration::from_millis(700), now);
         state.show_help_overlay(view.clone());
 
-        assert_eq!(state.content, HelpOverlayContent::Help { view });
+        assert_eq!(
+            state.content,
+            HelpOverlayContent::Help {
+                view: Box::new(view)
+            }
+        );
     }
 
     #[test]
@@ -1540,7 +1547,12 @@ mod tests {
         state.show_help_overlay(view.clone());
         state.show_temporary_tooltip("Speed", "Mouse speed 2", Duration::from_millis(700), now);
 
-        assert_eq!(state.content, HelpOverlayContent::Help { view });
+        assert_eq!(
+            state.content,
+            HelpOverlayContent::Help {
+                view: Box::new(view)
+            }
+        );
     }
 
     #[test]
