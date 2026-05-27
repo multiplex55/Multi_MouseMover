@@ -34,6 +34,7 @@ impl KeyChord {
     }
 
     pub fn parse_with_details(input: &str) -> Result<ParsedKeyChord, KeyChordParseError> {
+        let tokens: Vec<&str> = input.split('+').map(str::trim).collect();
         let mut ctrl = false;
         let mut alt = false;
         let mut right_alt = false;
@@ -42,8 +43,7 @@ impl KeyChord {
         let mut key = None;
         let mut modifiers = ParsedChordModifiers::default();
 
-        for raw_token in input.split('+') {
-            let token = raw_token.trim();
+        for token in tokens.iter().copied() {
             if token.is_empty() {
                 return Err(KeyChordParseError::new(
                     input,
@@ -53,20 +53,20 @@ impl KeyChord {
 
             match token.to_ascii_uppercase().as_str() {
                 "CTRL" | "CONTROL" => set_modifier(input, "Ctrl", &mut ctrl)?,
-                "LEFTCTRL" | "LCTRL" | "LEFT_CTRL" => {
+                "LEFTCTRL" | "LCTRL" | "LEFT_CTRL" if tokens.len() > 1 => {
                     set_modifier(input, "Ctrl", &mut ctrl)?;
                     modifiers.left_ctrl = true;
                 }
-                "RIGHTCTRL" | "RCTRL" | "RIGHT_CTRL" => {
+                "RIGHTCTRL" | "RCTRL" | "RIGHT_CTRL" if tokens.len() > 1 => {
                     set_modifier(input, "Ctrl", &mut ctrl)?;
                     modifiers.right_ctrl = true;
                 }
                 "ALT" => set_modifier(input, "Alt", &mut alt)?,
-                "LEFTALT" | "LALT" | "LEFT_ALT" => {
+                "LEFTALT" | "LALT" | "LEFT_ALT" if tokens.len() > 1 => {
                     set_modifier(input, "Alt", &mut alt)?;
                     modifiers.left_alt = true;
                 }
-                "RIGHTALT" | "RALT" | "RIGHT_ALT" => {
+                "RIGHTALT" | "RALT" | "RIGHT_ALT" if tokens.len() > 1 => {
                     set_modifier(input, "RightAlt", &mut right_alt)?;
                     modifiers.right_alt = true;
                     if !alt {
@@ -74,11 +74,11 @@ impl KeyChord {
                     }
                 }
                 "SHIFT" => set_modifier(input, "Shift", &mut shift)?,
-                "LEFTSHIFT" | "LSHIFT" | "LEFT_SHIFT" => {
+                "LEFTSHIFT" | "LSHIFT" | "LEFT_SHIFT" if tokens.len() > 1 => {
                     set_modifier(input, "Shift", &mut shift)?;
                     modifiers.left_shift = true;
                 }
-                "RIGHTSHIFT" | "RSHIFT" | "RIGHT_SHIFT" => {
+                "RIGHTSHIFT" | "RSHIFT" | "RIGHT_SHIFT" if tokens.len() > 1 => {
                     set_modifier(input, "Shift", &mut shift)?;
                     modifiers.right_shift = true;
                 }
@@ -331,6 +331,10 @@ mod tests {
         assert_eq!(
             KeyChord::parse("Escape").unwrap(),
             chord(VirtualKey::Escape, false, false, false, false, false)
+        );
+        assert_eq!(
+            KeyChord::parse("LeftShift").unwrap(),
+            chord(VirtualKey::LeftShift, false, false, false, false, false)
         );
     }
 
