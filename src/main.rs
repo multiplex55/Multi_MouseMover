@@ -62,6 +62,7 @@ use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use zoom_overlay::{sync_surgical_zoom_overlay, SurgicalZoomConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UiHintExitReason {
@@ -1018,6 +1019,8 @@ pub struct SurgicalModeConfig {
     zoom_size_px: i32,
     overlay_offset_x: i32,
     overlay_offset_y: i32,
+    refresh_interval_ms: u64,
+    center_crosshair: bool,
 }
 
 impl Default for SurgicalModeConfig {
@@ -1030,6 +1033,8 @@ impl Default for SurgicalModeConfig {
             zoom_size_px: 180,
             overlay_offset_x: 24,
             overlay_offset_y: 24,
+            refresh_interval_ms: 16,
+            center_crosshair: true,
         }
     }
 }
@@ -1996,6 +2001,12 @@ impl Config {
         if self.surgical_mode.zoom_size_px < 32 {
             warn_config_normalized("surgical_mode.zoom_size_px is below 32; clamping to 32");
             self.surgical_mode.zoom_size_px = 32;
+        }
+        if self.surgical_mode.refresh_interval_ms > 1000 {
+            warn_config_normalized(
+                "surgical_mode.refresh_interval_ms is above 1000; clamping to 1000",
+            );
+            self.surgical_mode.refresh_interval_ms = 1000;
         }
     }
 
@@ -4855,6 +4866,23 @@ fn main() {
             }
         }
         help_overlay::update_overlay(Instant::now());
+        {
+            let action_handler = ACTION_HANDLER.read().unwrap();
+            let mm = &action_handler.mouse_master;
+            sync_surgical_zoom_overlay(
+                mm.surgical_zoom_state,
+                SurgicalZoomConfig {
+                    enabled: mm.config.surgical_mode.enabled,
+                    zoom_enabled: mm.config.surgical_mode.zoom_enabled,
+                    zoom_scale: mm.config.surgical_mode.zoom_scale,
+                    zoom_size_px: mm.config.surgical_mode.zoom_size_px,
+                    overlay_offset_x: mm.config.surgical_mode.overlay_offset_x,
+                    overlay_offset_y: mm.config.surgical_mode.overlay_offset_y,
+                    refresh_interval_ms: mm.config.surgical_mode.refresh_interval_ms,
+                    center_crosshair: mm.config.surgical_mode.center_crosshair,
+                },
+            );
+        }
 
         if debug_diagnostics {
             let now = Instant::now();

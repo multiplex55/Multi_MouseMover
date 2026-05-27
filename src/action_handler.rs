@@ -7,7 +7,7 @@ use crate::{
     app_state::KeyEvent,
     keyboard::VirtualKey,
     window_geometry::{foreground_window_snap_points, WindowSnapPoints},
-    zoom_overlay::{update_zoom_state, SurgicalZoomConfig, SurgicalZoomState},
+    zoom_overlay::{update_zoom_state, SurgicalZoomConfig, SurgicalZoomState, VirtualScreenBounds},
     Config, FinalAdjustConfig,
 };
 use action::{Action, Direction2D, StepMoveTier};
@@ -15,6 +15,9 @@ use enigo::*;
 use std::collections::{HashSet, VecDeque};
 use std::env;
 use std::time::{Duration, Instant};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+};
 
 const DIAGONAL_NORMALIZATION: f64 = std::f64::consts::FRAC_1_SQRT_2;
 const DEBUG_DIAGNOSTICS_ENV: &str = "MULTI_MOUSEMOVER_DEBUG";
@@ -628,10 +631,18 @@ impl<B: MouseBackend> MouseMaster<B> {
                     zoom_size_px: self.config.surgical_mode.zoom_size_px,
                     overlay_offset_x: self.config.surgical_mode.overlay_offset_x,
                     overlay_offset_y: self.config.surgical_mode.overlay_offset_y,
+                    refresh_interval_ms: self.config.surgical_mode.refresh_interval_ms,
+                    center_crosshair: self.config.surgical_mode.center_crosshair,
                 },
                 surgical_active,
                 x,
                 y,
+                VirtualScreenBounds {
+                    left: unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) },
+                    top: unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) },
+                    width: unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) },
+                    height: unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) },
+                },
             );
         }
 
