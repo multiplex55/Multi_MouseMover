@@ -161,7 +161,7 @@ font_scale = 1.0
 # These bindings remain available in both active and idle mode.
 [system_bindings]
 toggle_active = "Ctrl+Q"
-exit = "Escape"
+exit = "Ctrl+Escape"
 exit_ignore_extra_modifiers = true
 panic_reset = "RightAlt+Escape"
 panic_reset_ignore_extra_modifiers = true

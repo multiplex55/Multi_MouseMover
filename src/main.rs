@@ -650,12 +650,30 @@ pub struct BookmarksConfig {
     pub file: String,
     pub slot_count: u32,
     pub show_tooltips: bool,
-    pub desktop_behavior: String,
+    pub desktop_behavior: BookmarkDesktopBehavior,
     pub desktop_switch_wait_ms: u64,
     pub require_desktop_switch_success: bool,
     pub cancel_key: String,
     pub clear_modifier_key: String,
-    pub coordinate_policy: String,
+    pub coordinate_policy: BookmarkCoordinatePolicy,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BookmarkDesktopBehavior {
+    CurrentOnly,
+    SwitchDesktop,
+    #[default]
+    FocusAnchorWindow,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BookmarkCoordinatePolicy {
+    Exact,
+    ClampToNearestMonitor,
+    #[default]
+    ClampToVirtualScreen,
 }
 
 impl Default for BookmarksConfig {
@@ -665,12 +683,12 @@ impl Default for BookmarksConfig {
             file: "bookmarks.json".to_string(),
             slot_count: 9,
             show_tooltips: true,
-            desktop_behavior: "focus_anchor_window".to_string(),
+            desktop_behavior: BookmarkDesktopBehavior::FocusAnchorWindow,
             desktop_switch_wait_ms: 150,
             require_desktop_switch_success: false,
             cancel_key: "Escape".to_string(),
             clear_modifier_key: "Backspace".to_string(),
-            coordinate_policy: "clamp_to_virtual_screen".to_string(),
+            coordinate_policy: BookmarkCoordinatePolicy::ClampToVirtualScreen,
         }
     }
 }
@@ -1737,7 +1755,7 @@ impl Config {
     }
 
     fn normalize_bookmarks_config(&mut self) {
-        self.bookmarks.slot_count = self.bookmarks.slot_count.clamp(1, 99);
+        self.bookmarks.slot_count = self.bookmarks.slot_count.clamp(1, 9);
         if self.bookmarks.file.trim().is_empty() {
             warn_config_normalized("bookmarks.file is empty; using bookmarks.json");
             self.bookmarks.file = "bookmarks.json".to_string();
@@ -1751,18 +1769,6 @@ impl Config {
         if VirtualKey::from_string(&self.bookmarks.clear_modifier_key).is_none() {
             warn_config_normalized("bookmarks.clear_modifier_key is invalid; using Backspace");
             self.bookmarks.clear_modifier_key = "Backspace".to_string();
-        }
-        if self.bookmarks.coordinate_policy != "clamp_to_virtual_screen" {
-            warn_config_normalized(
-                "bookmarks.coordinate_policy is invalid; using clamp_to_virtual_screen",
-            );
-            self.bookmarks.coordinate_policy = "clamp_to_virtual_screen".to_string();
-        }
-        if self.bookmarks.desktop_behavior != "focus_anchor_window" {
-            warn_config_normalized(
-                "bookmarks.desktop_behavior is invalid; using focus_anchor_window",
-            );
-            self.bookmarks.desktop_behavior = "focus_anchor_window".to_string();
         }
     }
 
@@ -2289,6 +2295,11 @@ impl Config {
             .write()
             .unwrap()
             .set_system_bindings(system_bindings);
+        APP_STATE.write().unwrap().set_bookmark_keys(
+            VirtualKey::from_string(&self.bookmarks.cancel_key).unwrap_or(VirtualKey::Escape),
+            VirtualKey::from_string(&self.bookmarks.clear_modifier_key)
+                .unwrap_or(VirtualKey::Backspace),
+        );
 
         Ok(())
     }
@@ -3313,14 +3324,14 @@ fn help_stats_from_snapshot(
 
 fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32, i32) {
     let (mut x, mut y) = (record.x, record.y);
-    match cfg.coordinate_policy.as_str() {
-        "exact" => {}
-        "clamp_to_nearest_monitor" => {
+    match cfg.coordinate_policy {
+        BookmarkCoordinatePolicy::Exact => {}
+        BookmarkCoordinatePolicy::ClampToNearestMonitor => {
             let mr = &record.monitor_rect;
             x = x.clamp(mr.left, mr.right.saturating_sub(1));
             y = y.clamp(mr.top, mr.bottom.saturating_sub(1));
         }
-        _ => {
+        BookmarkCoordinatePolicy::ClampToVirtualScreen => {
             let vr = virtual_screen_region();
             x = x.clamp(vr.left, (vr.left + vr.width).saturating_sub(1));
             y = y.clamp(vr.top, (vr.top + vr.height).saturating_sub(1));
@@ -3864,15 +3875,15 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
 
             let mut desktop_ok = true;
             let mut desktop_warn: Option<String> = None;
-            match cfg.desktop_behavior.as_str() {
-                "current_only" => {
+            match cfg.desktop_behavior {
+                BookmarkDesktopBehavior::CurrentOnly => {
                     let current = virtual_desktop::current_virtual_desktop_id();
                     if current != record.virtual_desktop_id {
                         desktop_ok = false;
                         desktop_warn = Some("Desktop mismatch".to_string());
                     }
                 }
-                "focus_anchor_window" => {
+                BookmarkDesktopBehavior::FocusAnchorWindow => {
                     let (ok, warn) = evaluate_focus_attempt(virtual_desktop::focus_anchor_window(
                         record.anchor_hwnd,
                     ));
@@ -3881,7 +3892,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         desktop_warn = warn;
                     }
                 }
-                "switch_desktop" => {
+                BookmarkDesktopBehavior::SwitchDesktop => {
                     if let Err(e) =
                         virtual_desktop::switch_to_desktop(record.virtual_desktop_id.as_deref())
                     {
@@ -3889,7 +3900,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         desktop_warn = Some(e);
                     }
                 }
-                _ => {}
             }
             if cfg.desktop_switch_wait_ms > 0 {
                 sleep(Duration::from_millis(cfg.desktop_switch_wait_ms));
@@ -4447,7 +4457,7 @@ fn emit_startup_feature_binding_warnings(config: &Config) {
         if (config.bookmarks.slot_count as usize) > dedup.len() {
             warn_config_normalized("bookmarks.slot_count exceeds number of bound bookmark slots.");
         }
-        if config.bookmarks.desktop_behavior == "switch_desktop" {
+        if config.bookmarks.desktop_behavior == BookmarkDesktopBehavior::SwitchDesktop {
             warn_config_normalized("bookmarks.desktop_behavior=switch_desktop is configured, but desktop switching backend availability is not guaranteed.");
         }
     }
@@ -4513,7 +4523,7 @@ fn startup_validation_summary(config: &Config, config_path: &Path, warnings: &[S
     ));
     let bookmark_path = resolve_bookmarks_path(config_path, Path::new(&config.bookmarks.file));
     lines.push(format!(
-        "  bookmarks: enabled={} file={} mode_bindings={} slots={:?} desktop_behavior={}",
+        "  bookmarks: enabled={} file={} mode_bindings={} slots={:?} desktop_behavior={:?}",
         config.bookmarks.enabled,
         bookmark_path.display(),
         feature_bindings.bookmark_mode,
@@ -7607,13 +7617,13 @@ enabled = true"#,
     }
 
     #[test]
-    fn bookmarks_config_normalizes_invalid_values() {
+    fn bookmark_slot_count_zero_clamps_to_1() {
         let config = parse_config(
             r#"[bookmarks]
 slot_count = 0
 file = ""
-desktop_behavior = "bad"
-coordinate_policy = "bad"
+desktop_behavior = "focus_anchor_window"
+coordinate_policy = "clamp_to_virtual_screen"
 cancel_key = "Nope"
 clear_modifier_key = "Nope"
 desktop_switch_wait_ms = 999999
@@ -7621,10 +7631,10 @@ desktop_switch_wait_ms = 999999
         );
         assert_eq!(config.bookmarks.slot_count, 1);
         assert_eq!(config.bookmarks.file, "bookmarks.json");
-        assert_eq!(config.bookmarks.desktop_behavior, "focus_anchor_window");
+        assert_eq!(config.bookmarks.desktop_behavior, BookmarkDesktopBehavior::FocusAnchorWindow);
         assert_eq!(
             config.bookmarks.coordinate_policy,
-            "clamp_to_virtual_screen"
+            BookmarkCoordinatePolicy::ClampToVirtualScreen
         );
         assert_eq!(config.bookmarks.cancel_key, "Escape");
         assert_eq!(config.bookmarks.clear_modifier_key, "Backspace");
@@ -7632,9 +7642,30 @@ desktop_switch_wait_ms = 999999
     }
 
     #[test]
-    fn bookmarks_slot_count_high_clamps() {
+    fn bookmark_slot_count_above_9_clamps_to_9() {
         let config = parse_config("[bookmarks]\nslot_count = 999\n");
-        assert_eq!(config.bookmarks.slot_count, 99);
+        assert_eq!(config.bookmarks.slot_count, 9);
+    }
+
+    #[test]
+    fn bookmark_desktop_behavior_parses_valid_values() {
+        let cfg = parse_config("[bookmarks]\ndesktop_behavior = \"current_only\"\n");
+        assert_eq!(
+            cfg.bookmarks.desktop_behavior,
+            BookmarkDesktopBehavior::CurrentOnly
+        );
+    }
+
+    #[test]
+    fn bookmark_coordinate_policy_parses_valid_values() {
+        let cfg = parse_config("[bookmarks]\ncoordinate_policy = \"exact\"\n");
+        assert_eq!(cfg.bookmarks.coordinate_policy, BookmarkCoordinatePolicy::Exact);
+    }
+
+    #[test]
+    fn invalid_bookmark_policy_reports_config_error() {
+        let err = parse_config_error("[bookmarks]\ndesktop_behavior = \"bad\"\n");
+        assert!(err.contains("unknown variant"));
     }
 
     #[test]
@@ -7712,9 +7743,9 @@ file = "data/bookmarks.json"
 mod bookmark_runtime_logic_tests {
     use super::*;
 
-    fn cfg(policy: &str) -> BookmarksConfig {
+    fn cfg(policy: BookmarkCoordinatePolicy) -> BookmarksConfig {
         let mut c = BookmarksConfig::default();
-        c.coordinate_policy = policy.to_string();
+        c.coordinate_policy = policy;
         c
     }
 
@@ -7742,7 +7773,7 @@ mod bookmark_runtime_logic_tests {
     #[test]
     fn exact_policy_preserves_coordinate() {
         assert_eq!(
-            resolve_recall_target(&rec(5000, -2000), &cfg("exact")),
+            resolve_recall_target(&rec(5000, -2000), &cfg(BookmarkCoordinatePolicy::Exact)),
             (5000, -2000)
         );
     }
@@ -7750,7 +7781,10 @@ mod bookmark_runtime_logic_tests {
     #[test]
     fn clamp_to_nearest_monitor_clamps_out_of_bounds_target() {
         assert_eq!(
-            resolve_recall_target(&rec(5000, -2000), &cfg("clamp_to_nearest_monitor")),
+            resolve_recall_target(
+                &rec(5000, -2000),
+                &cfg(BookmarkCoordinatePolicy::ClampToNearestMonitor)
+            ),
             (99, 0)
         );
     }
@@ -7765,9 +7799,9 @@ mod bookmark_runtime_logic_tests {
     }
 
     #[test]
-    fn move_without_switch_allows_move_attempt() {
+    fn current_only_allows_move_attempt() {
         let mut c = BookmarksConfig::default();
-        c.desktop_behavior = "move_without_switch".into();
+        c.desktop_behavior = BookmarkDesktopBehavior::CurrentOnly;
         let r = rec(5, 6);
         assert_eq!(resolve_recall_target(&r, &c), (5, 6));
     }
@@ -7799,7 +7833,7 @@ mod bookmark_runtime_logic_tests {
         };
         let mut c = BookmarksConfig::default();
         c.require_desktop_switch_success = false;
-        c.desktop_behavior = "focus_anchor_window".into();
+        c.desktop_behavior = BookmarkDesktopBehavior::FocusAnchorWindow;
         let (x, y) = resolve_recall_target(&record, &c);
         assert_eq!((x, y), (42, 24));
     }

@@ -105,6 +105,8 @@ pub struct AppState {
     system_bindings: RuntimeSystemBindings,
     help_visible: bool,
     grid_direction_labels: GridDirectionLabels,
+    bookmark_cancel_key: VirtualKey,
+    bookmark_clear_modifier_key: VirtualKey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,6 +247,8 @@ impl Default for AppState {
             system_bindings: RuntimeSystemBindings::default(),
             help_visible: false,
             grid_direction_labels: GridDirectionLabels::default(),
+            bookmark_cancel_key: VirtualKey::Escape,
+            bookmark_clear_modifier_key: VirtualKey::Backspace,
         }
     }
 }
@@ -364,6 +368,10 @@ impl AppState {
 
     pub fn set_system_bindings(&mut self, system_bindings: RuntimeSystemBindings) {
         self.system_bindings = system_bindings;
+    }
+    pub fn set_bookmark_keys(&mut self, cancel_key: VirtualKey, clear_modifier_key: VirtualKey) {
+        self.bookmark_cancel_key = cancel_key;
+        self.bookmark_clear_modifier_key = clear_modifier_key;
     }
 
     pub fn set_grid_direction_labels(&mut self, labels: GridDirectionLabels) {
@@ -945,30 +953,21 @@ impl AppState {
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, mut action: Option<Action>) {
-        if self.help_visible && event.is_down && event.key == VirtualKey::Escape {
-            self.enqueue_command(AppCommand::HideHelp);
-            return;
-        }
-
-        if (self.is_jump_active() || self.is_grid_active())
-            && self.is_toggle_active_key_down_event(&event)
-        {
-            self.enqueue_command(AppCommand::ToggleActiveMode);
-            return;
-        }
-
-        if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
-            self.exit_ui_hint_mode();
-            self.exit_bookmark_mode();
-            self.enqueue_command(AppCommand::SetActiveMode { active: false });
-            return;
-        }
-
         if event.is_down && self.is_panic_reset_binding(&event) {
             if self.system_bindings.panic_reset_sets_idle {
                 self.enqueue_command(AppCommand::SetActiveMode { active: false });
             }
             self.enqueue_command(AppCommand::PanicReset);
+            return;
+        }
+        if self.help_visible && event.is_down && event.key == VirtualKey::Escape {
+            self.enqueue_command(AppCommand::HideHelp);
+            return;
+        }
+        if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
+            self.exit_ui_hint_mode();
+            self.exit_bookmark_mode();
+            self.enqueue_command(AppCommand::SetActiveMode { active: false });
             return;
         }
 
@@ -983,6 +982,12 @@ impl AppState {
             && (self.is_exit_binding(&event) || matches!(action.as_ref(), Some(Action::Exit)))
         {
             self.enqueue_command(AppCommand::Exit);
+            return;
+        }
+        if (self.is_jump_active() || self.is_grid_active())
+            && self.is_toggle_active_key_down_event(&event)
+        {
+            self.enqueue_command(AppCommand::ToggleActiveMode);
             return;
         }
 
@@ -1006,13 +1011,13 @@ impl AppState {
                     ..
                 } = &mut self.bookmark_mode
                 {
-                    if event.key == VirtualKey::Backspace {
+                    if event.key == self.bookmark_clear_modifier_key {
                         *clear_modifier_held = false;
                     }
                 }
                 return;
             }
-            if event.key == VirtualKey::Escape {
+            if event.key == self.bookmark_cancel_key {
                 self.exit_bookmark_mode();
                 self.enqueue_command(AppCommand::CancelBookmarkMode);
                 return;
@@ -1022,7 +1027,7 @@ impl AppState {
                 ..
             } = &mut self.bookmark_mode
             {
-                if event.key == VirtualKey::Backspace {
+                if event.key == self.bookmark_clear_modifier_key {
                     *clear_modifier_held = true;
                     return;
                 }
@@ -3281,6 +3286,65 @@ mod tests {
         assert_eq!(
             collect_commands(&mut state),
             vec![AppCommand::CancelBookmarkMode]
+        );
+    }
+
+    #[test]
+    fn bookmark_mode_uses_configured_cancel_key() {
+        let mut state = AppState::default();
+        state.set_bookmark_keys(VirtualKey::Q, VirtualKey::Backspace);
+        state.enter_bookmark_mode(VirtualKey::B);
+        state.route_key_event(KeyEvent::new(VirtualKey::Q, true), None);
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::CancelBookmarkMode]);
+    }
+
+    #[test]
+    fn bookmark_mode_uses_configured_clear_modifier_key() {
+        let mut state = AppState::default();
+        state.set_bookmark_keys(VirtualKey::Escape, VirtualKey::Q);
+        state.enter_bookmark_mode(VirtualKey::B);
+        state.route_key_event(KeyEvent::new(VirtualKey::Q, true), None);
+        state.route_key_event(KeyEvent::new(VirtualKey::Num1, true), Some(Action::BookmarkSlot(1)));
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::ClearBookmarkSlot(1)]);
+    }
+
+    #[test]
+    fn plain_escape_cancels_bookmark_mode_when_exit_is_ctrl_escape() {
+        let mut state = AppState::default();
+        state.set_system_bindings(RuntimeSystemBindings {
+            exit: KeyChord::parse("Ctrl+Escape").unwrap(),
+            ..RuntimeSystemBindings::default()
+        });
+        state.enter_bookmark_mode(VirtualKey::B);
+        state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), None);
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::CancelBookmarkMode]);
+    }
+
+    #[test]
+    fn ctrl_escape_exits_even_when_bookmark_mode_active() {
+        let mut state = AppState::default();
+        state.set_system_bindings(RuntimeSystemBindings {
+            exit: KeyChord::parse("Ctrl+Escape").unwrap(),
+            ..RuntimeSystemBindings::default()
+        });
+        state.enter_bookmark_mode(VirtualKey::B);
+        let mut ev = KeyEvent::new(VirtualKey::Escape, true);
+        ev.ctrl_down = true;
+        state.route_key_event(ev, Some(Action::Exit));
+        assert_eq!(collect_commands(&mut state), vec![AppCommand::Exit]);
+    }
+
+    #[test]
+    fn panic_reset_wins_over_bookmark_cancel() {
+        let mut state = AppState::default();
+        state.enter_bookmark_mode(VirtualKey::B);
+        let mut ev = KeyEvent::new(VirtualKey::Escape, true);
+        ev.alt_down = true;
+        ev.right_alt_down = true;
+        state.route_key_event(ev, Some(Action::PanicReset));
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::SetActiveMode { active: false }, AppCommand::PanicReset]
         );
     }
 
