@@ -144,6 +144,7 @@ pub struct AppState {
     bookmark_mode: BookmarkModeState,
     active_mode: bool,
     preserve_global_shortcuts: bool,
+    right_alt_suppresses_synthetic_ctrl: bool,
     system_bindings: RuntimeSystemBindings,
     help_visible: bool,
     grid_direction_labels: GridDirectionLabels,
@@ -286,6 +287,7 @@ impl Default for AppState {
             bookmark_mode: BookmarkModeState::Inactive,
             active_mode: true,
             preserve_global_shortcuts: true,
+            right_alt_suppresses_synthetic_ctrl: true,
             system_bindings: RuntimeSystemBindings::default(),
             help_visible: false,
             grid_direction_labels: GridDirectionLabels::default(),
@@ -976,22 +978,36 @@ impl AppState {
             return true;
         }
 
+        let has_explicit_binding = self.has_explicit_configured_binding_for_event(event);
+        if has_explicit_binding {
+            self.debug_swallow("explicit_configured_binding", event, true);
+            return true;
+        }
+
         if self.is_preserved_shortcut(event) {
             self.debug_swallow("preserved_shortcut", event, false);
             return false;
         }
 
         let swallow = self.active_mode
-            && (self.bound_chords.iter().any(|chord| {
-                (event.is_down && chord.matches_dispatch_event(event))
-                    || (!event.is_down && self.active_trigger_chords.contains(chord))
-            }) || (!event.is_down
+            && (!event.is_down
                 && self
                     .active_trigger_chords
                     .iter()
-                    .any(|chord| chord.key == event.key)));
+                    .any(|chord| chord.key == event.key));
         self.debug_swallow("binding_resolution", event, swallow);
         swallow
+    }
+
+    pub fn has_explicit_configured_binding_for_event(&self, event: &KeyEvent) -> bool {
+        if !self.active_mode {
+            return false;
+        }
+        let event = self.with_effective_ctrl_state(event);
+        self.bound_chords.iter().any(|chord| {
+            (event.is_down && chord.matches_dispatch_event(&event))
+                || (!event.is_down && self.active_trigger_chords.contains(chord))
+        })
     }
 
     pub fn route_key_event(&mut self, event: KeyEvent, mut action: Option<Action>) {
@@ -1326,6 +1342,7 @@ impl AppState {
         if !self.preserve_global_shortcuts {
             return false;
         }
+        let event = self.with_effective_ctrl_state(event);
 
         event.win_down
             || (event.ctrl_down
@@ -1346,6 +1363,19 @@ impl AppState {
                         | VirtualKey::Z
                 ))
             || (event.alt_down && matches!(event.key, VirtualKey::F4 | VirtualKey::Tab))
+    }
+
+    fn with_effective_ctrl_state(&self, event: &KeyEvent) -> KeyEvent {
+        let mut effective = *event;
+        let synthetic_ctrl = event.ctrl_down && !event.left_ctrl_down && !event.right_ctrl_down;
+        if self.right_alt_suppresses_synthetic_ctrl && event.right_alt_down && synthetic_ctrl {
+            effective.ctrl_down = false;
+        }
+        effective
+    }
+
+    pub fn set_right_alt_suppresses_synthetic_ctrl(&mut self, enabled: bool) {
+        self.right_alt_suppresses_synthetic_ctrl = enabled;
     }
 }
 
@@ -1504,6 +1534,14 @@ mod tests {
 
     fn ctrl_w_down() -> KeyEvent {
         let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.ctrl_down = true;
+        event
+    }
+
+    fn right_alt_e_with_synthetic_ctrl() -> KeyEvent {
+        let mut event = KeyEvent::new(VirtualKey::E, true);
+        event.alt_down = true;
+        event.right_alt_down = true;
         event.ctrl_down = true;
         event
     }
@@ -2525,6 +2563,60 @@ mod tests {
         state.route_key_event(ctrl_w, Some(Action::MoveLeft));
 
         assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn rightalt_e_matches_when_synthetic_ctrl_present() {
+        let state = state_with_bound_chords([KeyChord::parse("RightAlt+E").unwrap()]);
+        let event = right_alt_e_with_synthetic_ctrl();
+
+        assert!(state.has_explicit_configured_binding_for_event(&event));
+        assert!(state.should_swallow_key(&event));
+    }
+
+    #[test]
+    fn rightalt_ctrl_e_requires_physical_ctrl() {
+        let state = state_with_bound_chords([KeyChord::parse("RightAlt+Ctrl+E").unwrap()]);
+        let synthetic = right_alt_e_with_synthetic_ctrl();
+        assert!(!state.has_explicit_configured_binding_for_event(&synthetic));
+
+        let mut physical = synthetic;
+        physical.left_ctrl_down = true;
+        assert!(state.has_explicit_configured_binding_for_event(&physical));
+    }
+
+    #[test]
+    fn ctrl_w_unconfigured_passthrough() {
+        let state = state_with_bound_key(VirtualKey::W);
+        let ctrl_w = ctrl_w_down();
+        assert!(!state.should_swallow_key(&ctrl_w));
+    }
+
+    #[test]
+    fn ctrl_w_configured_swallowed() {
+        let mut state = state_with_bound_key(VirtualKey::W);
+        state.set_system_bindings(RuntimeSystemBindings::new(
+            KeyChord::parse("Ctrl+W").unwrap(),
+            KeyChord::parse("Escape").unwrap(),
+        ));
+        let ctrl_w = ctrl_w_down();
+        assert!(state.should_swallow_key(&ctrl_w));
+    }
+
+    #[test]
+    fn alt_tab_unconfigured_passthrough() {
+        let state = state_with_bound_key(VirtualKey::Tab);
+        let mut event = KeyEvent::new(VirtualKey::Tab, true);
+        event.alt_down = true;
+        assert!(!state.should_swallow_key(&event));
+    }
+
+    #[test]
+    fn alt_f4_unconfigured_passthrough() {
+        let state = state_with_bound_key(VirtualKey::F4);
+        let mut event = KeyEvent::new(VirtualKey::F4, true);
+        event.alt_down = true;
+        assert!(!state.should_swallow_key(&event));
     }
 
     #[test]

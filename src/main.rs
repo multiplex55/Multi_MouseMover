@@ -498,6 +498,7 @@ struct InputConfig {
     stuck_key_timeout_ms: u64,
     debug_input: bool,
     shift_can_modify_plain_movement: bool,
+    right_alt_suppresses_synthetic_ctrl: bool,
 }
 
 impl Default for InputConfig {
@@ -509,6 +510,7 @@ impl Default for InputConfig {
             stuck_key_timeout_ms: 10_000,
             debug_input: false,
             shift_can_modify_plain_movement: true,
+            right_alt_suppresses_synthetic_ctrl: true,
         }
     }
 }
@@ -2323,6 +2325,9 @@ impl Config {
         app_state.set_bound_chords(key_actions.bound_chords());
         app_state.set_owned_modifiers(key_actions.owned_modifiers());
         app_state.set_debug_input(self.input.debug_input);
+        app_state.set_right_alt_suppresses_synthetic_ctrl(
+            self.input.right_alt_suppresses_synthetic_ctrl,
+        );
         *SHIFT_CAN_MODIFY_PLAIN_MOVEMENT.write().unwrap() =
             self.input.shift_can_modify_plain_movement;
     }
