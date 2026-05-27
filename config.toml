@@ -112,6 +112,7 @@ key_bindings = [
     ["7", "bookmark_slot_7"],
     ["8", "bookmark_slot_8"],
     ["9", "bookmark_slot_9"],
+    # ["Shift+L", "show_bookmarks"],
 
 ]
 
@@ -590,12 +591,19 @@ enabled = true
 file = "bookmarks.json"
 slot_count = 9
 show_tooltips = true
+prompt_for_name_on_set = false
+max_name_length = 48
 desktop_behavior = "focus_anchor_window"
 desktop_switch_wait_ms = 150
 require_desktop_switch_success = false
 cancel_key = "Escape"
 clear_modifier_key = "Backspace"
 coordinate_policy = "clamp_to_virtual_screen"
+list_show_coordinates = true
+list_include_empty_slots = true
+list_empty_slot_label = "(empty)"
+list_unnamed_label = "(unnamed)"
+list_tooltip_duration_ms = 1200
 
 [surgical_mode]
 enabled = true

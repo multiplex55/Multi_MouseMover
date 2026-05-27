@@ -69,6 +69,7 @@ pub enum AppCommand {
     EnterBookmarkMode {
         activation_key: VirtualKey,
     },
+    ShowBookmarks,
     RecallBookmarkSlot(u8),
     SetBookmarkSlot(u8),
     ClearBookmarkSlot(u8),
@@ -1134,6 +1135,10 @@ impl AppState {
             self.enqueue_command(AppCommand::EnterBookmarkMode {
                 activation_key: event.key,
             });
+            return;
+        }
+        if event.is_down && matches!(action.as_ref(), Some(Action::ShowBookmarks)) {
+            self.enqueue_command(AppCommand::ShowBookmarks);
             return;
         }
 
@@ -3217,6 +3222,19 @@ mod tests {
     }
 
     #[test]
+    fn show_bookmarks_command_routes_on_keydown() {
+        let mut state = AppState::default();
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::B, true),
+            Some(Action::ShowBookmarks),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ShowBookmarks]
+        );
+    }
+
+    #[test]
     fn enter_bookmark_mode_sets_active_flag() {
         let mut state = AppState::default();
         assert!(!state.is_bookmark_mode_active());
@@ -3295,7 +3313,10 @@ mod tests {
         state.set_bookmark_keys(VirtualKey::Q, VirtualKey::Backspace);
         state.enter_bookmark_mode(VirtualKey::B);
         state.route_key_event(KeyEvent::new(VirtualKey::Q, true), None);
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::CancelBookmarkMode]);
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::CancelBookmarkMode]
+        );
     }
 
     #[test]
@@ -3304,8 +3325,14 @@ mod tests {
         state.set_bookmark_keys(VirtualKey::Escape, VirtualKey::Q);
         state.enter_bookmark_mode(VirtualKey::B);
         state.route_key_event(KeyEvent::new(VirtualKey::Q, true), None);
-        state.route_key_event(KeyEvent::new(VirtualKey::Num1, true), Some(Action::BookmarkSlot(1)));
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::ClearBookmarkSlot(1)]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::Num1, true),
+            Some(Action::BookmarkSlot(1)),
+        );
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::ClearBookmarkSlot(1)]
+        );
     }
 
     #[test]
@@ -3317,7 +3344,10 @@ mod tests {
         });
         state.enter_bookmark_mode(VirtualKey::B);
         state.route_key_event(KeyEvent::new(VirtualKey::Escape, true), None);
-        assert_eq!(collect_commands(&mut state), vec![AppCommand::CancelBookmarkMode]);
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::CancelBookmarkMode]
+        );
     }
 
     #[test]
@@ -3344,7 +3374,10 @@ mod tests {
         state.route_key_event(ev, Some(Action::PanicReset));
         assert_eq!(
             collect_commands(&mut state),
-            vec![AppCommand::SetActiveMode { active: false }, AppCommand::PanicReset]
+            vec![
+                AppCommand::SetActiveMode { active: false },
+                AppCommand::PanicReset
+            ]
         );
     }
 
