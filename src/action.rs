@@ -682,6 +682,14 @@ mod tests {
     }
 
     #[test]
+    fn bookmark_action_parser_rejects_slot_10() {
+        assert_eq!(Action::from_string("bookmark_slot_10"), None);
+        assert_eq!(Action::from_string("bookmark_10"), None);
+        assert_eq!(Action::from_string("jump_to_bookmark_10"), None);
+        assert_eq!(Action::from_string("clear_bookmark_10"), None);
+    }
+
+    #[test]
     fn bookmark_actions_are_one_shot_not_continuous() {
         let actions = [
             Action::BookmarkMode,

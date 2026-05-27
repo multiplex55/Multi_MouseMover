@@ -443,7 +443,7 @@ Configures bookmark mode and bookmark slot behavior. Bookmark JSON path resoluti
 [bookmarks]
 enabled = true
 file = "bookmarks.json"
-slot_count = 9            # clamped to 1..99
+slot_count = 9            # clamped to 1..9
 show_tooltips = true
 desktop_behavior = "focus_anchor_window"
 desktop_switch_wait_ms = 150   # clamped to 0..3000
@@ -482,14 +482,13 @@ Conflict example:
 
 ```toml
 [system_bindings]
-exit = "Escape"
+exit = "Ctrl+Escape"
 
 [bookmark_mode]
 cancel = "Escape" # conceptual mode-local cancel
 ```
 
-Pressing `Escape` dispatches `Exit`, not bookmark cancel, because system bindings have higher priority.
-If you instead set `exit = "Ctrl+Alt+Escape"`, a plain `Escape` can still be consumed by bookmark cancel.
+`Escape` cancels help/exclusive modes before general routing. `Ctrl+Escape` exits the app. `RightAlt+Escape` panic-resets runtime state.
 
 ### Alt / RightAlt ownership caveat
 
