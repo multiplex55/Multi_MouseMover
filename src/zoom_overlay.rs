@@ -13,6 +13,15 @@ thread_local! {
     pub static SURGICAL_ZOOM_OVERLAY: RefCell<SurgicalZoomOverlay> = RefCell::new(SurgicalZoomOverlay::new());
 }
 
+unsafe extern "system" fn surgical_zoom_overlay_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurgicalZoomConfig {
     pub enabled: bool,
@@ -72,7 +81,7 @@ impl SurgicalZoomOverlay {
             let hinstance = GetModuleHandleW(None).ok().unwrap_or_default();
             let class_name = w!("SurgicalZoomOverlayWindowClass");
             let wc = WNDCLASSW {
-                lpfnWndProc: Some(DefWindowProcW),
+                lpfnWndProc: Some(surgical_zoom_overlay_proc),
                 hInstance: hinstance.into(),
                 lpszClassName: class_name,
                 hCursor: LoadCursorW(None, IDC_ARROW).ok().unwrap_or_default(),
@@ -318,7 +327,7 @@ mod tests {
         assert!(!state.visible);
     }
     #[test]
-    fn zoom_refresh_throttles_to_configured_interval() {
+    fn zoom_refresh_interval_predicate() {
         let now = Instant::now();
         assert!(zoom_refresh_throttles_to_configured_interval(None, now, 16));
         assert!(!zoom_refresh_throttles_to_configured_interval(
