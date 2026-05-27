@@ -660,6 +660,7 @@ pub struct BookmarksConfig {
     pub show_tooltips: bool,
     pub prompt_for_name_on_set: bool,
     pub prompt_for_name_on_save: bool,
+    pub allow_name_updates: bool,
     pub name_prompt_timeout_ms: u64,
     pub max_name_length: usize,
     pub desktop_behavior: BookmarkDesktopBehavior,
@@ -702,6 +703,7 @@ impl Default for BookmarksConfig {
             show_tooltips: true,
             prompt_for_name_on_set: false,
             prompt_for_name_on_save: false,
+            allow_name_updates: true,
             name_prompt_timeout_ms: 5000,
             max_name_length: 48,
             desktop_behavior: BookmarkDesktopBehavior::FocusAnchorWindow,
@@ -3408,7 +3410,7 @@ fn bookmark_list_tooltip_body(config: &Config, store: &BookmarkStore) -> String 
             } else {
                 String::new()
             };
-            lines.push(format!("{slot}: {name}{coords}"));
+            lines.push(format!("{slot}. {name}{coords}"));
         } else if config.bookmarks.list_include_empty_slots {
             lines.push(format!(
                 "{slot}: {}",
@@ -4048,8 +4050,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .map(|r| r.created_at_unix_ms)
                 .unwrap_or(now);
             let existing_name = runtime.store.get_slot(slot).and_then(|r| r.name.clone());
-            let name = if config.bookmarks.prompt_for_name_on_save
-                || config.bookmarks.prompt_for_name_on_set
+            let name = if config.bookmarks.allow_name_updates
+                && (config.bookmarks.prompt_for_name_on_save
+                    || config.bookmarks.prompt_for_name_on_set)
             {
                 None
             } else {
@@ -4092,6 +4095,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             };
             APP_STATE.write().unwrap().exit_bookmark_mode();
             if saved_ok
+                && config.bookmarks.allow_name_updates
                 && (config.bookmarks.prompt_for_name_on_save
                     || config.bookmarks.prompt_for_name_on_set)
             {
@@ -4118,8 +4122,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     APP_STATE.write().unwrap().set_name_prompt_active(false);
                 }
                 VirtualKey::Enter => {
-                    let name =
-                        normalize_bookmark_name(&state.buffer, config.bookmarks.max_name_length);
+                    let name = if config.bookmarks.allow_name_updates {
+                        normalize_bookmark_name(&state.buffer, config.bookmarks.max_name_length)
+                    } else {
+                        None
+                    };
                     let slot = state.slot;
                     let mut runtime_guard = BOOKMARK_RUNTIME.lock().unwrap();
                     if let Some(runtime) = runtime_guard.as_mut() {
@@ -8076,16 +8083,25 @@ mod bookmark_runtime_logic_tests {
         let rec = rec(1, 2);
         let mut store = BookmarkStore::new(9);
         store.set_slot(1, rec);
-        let should_prompt =
-            cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set;
+        let should_prompt = cfg.bookmarks.allow_name_updates
+            && (cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set);
         assert!(should_prompt);
     }
 
     #[test]
+    fn disabling_name_updates_prevents_prompt_enablement() {
+        let mut cfg = Config::default();
+        cfg.bookmarks.prompt_for_name_on_save = true;
+        cfg.bookmarks.allow_name_updates = false;
+        let should_prompt = cfg.bookmarks.allow_name_updates
+            && (cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set);
+        assert!(!should_prompt);
+    }
+    #[test]
     fn saving_bookmark_does_not_prompt_when_disabled() {
         let cfg = Config::default();
-        let should_prompt =
-            cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set;
+        let should_prompt = cfg.bookmarks.allow_name_updates
+            && (cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set);
         assert!(!should_prompt);
     }
 
