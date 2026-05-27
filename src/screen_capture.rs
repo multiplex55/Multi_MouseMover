@@ -16,6 +16,12 @@ pub struct ScreenSnapshot {
 }
 
 impl ScreenSnapshot {
+    pub fn hdc(&self) -> HDC {
+        self.hdc
+    }
+}
+
+impl ScreenSnapshot {
     #[cfg(test)]
     pub fn test_bounds(left: i32, top: i32, width: i32, height: i32) -> Self {
         Self {

@@ -62,6 +62,7 @@ use windows::Win32::Foundation::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use zoom_overlay::{sync_surgical_zoom_overlay, SurgicalZoomConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UiHintExitReason {
@@ -4865,6 +4866,23 @@ fn main() {
             }
         }
         help_overlay::update_overlay(Instant::now());
+        {
+            let action_handler = ACTION_HANDLER.read().unwrap();
+            let mm = &action_handler.mouse_master;
+            sync_surgical_zoom_overlay(
+                mm.surgical_zoom_state,
+                SurgicalZoomConfig {
+                    enabled: mm.config.surgical_mode.enabled,
+                    zoom_enabled: mm.config.surgical_mode.zoom_enabled,
+                    zoom_scale: mm.config.surgical_mode.zoom_scale,
+                    zoom_size_px: mm.config.surgical_mode.zoom_size_px,
+                    overlay_offset_x: mm.config.surgical_mode.overlay_offset_x,
+                    overlay_offset_y: mm.config.surgical_mode.overlay_offset_y,
+                    refresh_interval_ms: mm.config.surgical_mode.refresh_interval_ms,
+                    center_crosshair: mm.config.surgical_mode.center_crosshair,
+                },
+            );
+        }
 
         if debug_diagnostics {
             let now = Instant::now();
