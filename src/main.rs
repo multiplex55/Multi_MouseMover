@@ -150,6 +150,21 @@ struct BookmarkRuntime {
     store: BookmarkStore,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeLoopConfig {
+    polling_rate: u64,
+    input: InputConfig,
+}
+
+impl RuntimeLoopConfig {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            polling_rate: config.polling_rate,
+            input: config.input,
+        }
+    }
+}
+
 const DEFAULT_POLLING_RATE_MS: u64 = 8;
 const DEFAULT_WHEEL_SPEED_INDICATOR_MS: u64 = 700;
 const DEFAULT_MOUSE_SPEED_FLASH_MS: u64 = 700;
@@ -340,6 +355,8 @@ lazy_static! {
     static ref UI_HINT_QUERY_RX: Mutex<Option<Receiver<UiHintQueryResult>>> = Mutex::new(None);
     static ref UI_HINT_SESSION: Mutex<Option<UiHintSession>> = Mutex::new(None);
     static ref BOOKMARK_RUNTIME: Mutex<Option<BookmarkRuntime>> = Mutex::new(None);
+    static ref RUNTIME_LOOP_CONFIG: RwLock<RuntimeLoopConfig> =
+        RwLock::new(RuntimeLoopConfig::from_config(&Config::default()));
 }
 
 thread_local! {
@@ -2200,12 +2217,11 @@ impl Config {
             });
         }
 
-        eprintln!("Config file not found, using defaults");
-        let fallback = env::current_dir()?.join(path);
-        Ok(LoadedConfig {
-            config: Self::default().normalize()?,
-            path: fallback,
-        })
+        Err(format!(
+            "config file not found: expected '{}' in current directory or executable directory",
+            path
+        )
+        .into())
     }
 
     fn parse_audited_config(config_str: &str) -> Result<Self, Box<dyn Error>> {
@@ -3201,6 +3217,7 @@ fn apply_loaded_config<B: MouseBackend>(
     action_handler
         .mouse_master
         .push_config_reload_notification();
+    *RUNTIME_LOOP_CONFIG.write().unwrap() = RuntimeLoopConfig::from_config(&config);
     app_state.set_active_mode(active);
     Ok(app_state.resolve_jump_overlay())
 }
@@ -4591,6 +4608,7 @@ fn main() {
         }
     };
     let config = loaded.config.clone();
+    *RUNTIME_LOOP_CONFIG.write().unwrap() = RuntimeLoopConfig::from_config(&config);
     println!("✅ Config Loaded");
     print_startup_validation_summary(&config, &loaded.path);
 
@@ -4650,7 +4668,8 @@ fn main() {
         process_ui_hint_query_results();
         loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
 
-        if should_run_modifier_reconcile(&config.input, last_modifier_reconcile.elapsed()) {
+        let loop_config = *RUNTIME_LOOP_CONFIG.read().unwrap();
+        if should_run_modifier_reconcile(&loop_config.input, last_modifier_reconcile.elapsed()) {
             APP_STATE
                 .write()
                 .unwrap()
@@ -4716,7 +4735,7 @@ fn main() {
             last_heartbeat_sample = now;
         }
 
-        sleep(Duration::from_millis(config.polling_rate));
+        sleep(Duration::from_millis(loop_config.polling_rate));
     }
 }
 
@@ -6827,6 +6846,42 @@ enabled = true"#,
                 .toggle_active,
             old_config.system_bindings.toggle_active
         );
+    }
+
+    #[test]
+    fn missing_config_does_not_silently_use_old_layout() {
+        let err = Config::load_with_resolved_path("definitely_missing_config_file.toml")
+            .expect_err("missing config should return an error");
+        assert!(err.to_string().contains("config file not found"));
+    }
+
+    #[test]
+    fn reload_updates_runtime_loop_config_snapshot() {
+        let mut old_config = Config::default().normalize().unwrap();
+        old_config.polling_rate = 8;
+        old_config.input.modifier_reconcile_on_tick = true;
+        old_config.input.modifier_reconcile_interval_ms = 50;
+        old_config.input.stuck_key_timeout_ms = 10_000;
+        *RUNTIME_LOOP_CONFIG.write().unwrap() = RuntimeLoopConfig::from_config(&old_config);
+
+        let mut new_config = Config::default().normalize().unwrap();
+        new_config.polling_rate = 33;
+        new_config.input.modifier_reconcile_on_tick = false;
+        new_config.input.modifier_reconcile_interval_ms = 300;
+        new_config.input.stuck_key_timeout_ms = 2_000;
+
+        let mut action_handler = ActionHandler::new(MouseMaster::new_with_backend(
+            old_config,
+            FakeBackend::default(),
+        ));
+        let mut app_state = AppState::default();
+        let _ = apply_loaded_config(&mut action_handler, &mut app_state, new_config).unwrap();
+
+        let snapshot = *RUNTIME_LOOP_CONFIG.read().unwrap();
+        assert_eq!(snapshot.polling_rate, 33);
+        assert!(!snapshot.input.modifier_reconcile_on_tick);
+        assert_eq!(snapshot.input.modifier_reconcile_interval_ms, 300);
+        assert_eq!(snapshot.input.stuck_key_timeout_ms, 2_000);
     }
 
     #[test]

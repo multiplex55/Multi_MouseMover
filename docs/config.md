@@ -6,6 +6,11 @@ Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 
 ## Key Binding Example (Wheel + Wheel Speed)
 
+## Config loading and reload expectations
+
+- Startup requires a valid `config.toml`. If the file is missing or invalid, the app exits with a clear error instead of silently falling back to built-in defaults.
+- `reload_config` (`RightAlt+R` by default) re-parses `config.toml` and updates both action behavior and loop-controlled runtime values (for example `polling_rate` and `input.modifier_reconcile_*` fields) immediately.
+
 Example layout using vertical wheel + wheel-speed controls (with horizontal wheel bindings intentionally disabled):
 
 ```toml
