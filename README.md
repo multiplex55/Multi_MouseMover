@@ -53,7 +53,9 @@ Action bindings run only while active mode is enabled:
 | `F` | Jump mode |
 | `G` | Grid mode |
 | `C` | Screen select |
-| `B` | Enter bookmark mode |
+| `Shift+B` | Enter bookmark mode (default binding) |
+| `Shift+Ctrl+B` | Clear all bookmarks (default binding) |
+| `B` | Enter bookmark mode (example ergonomic remap) |
 | `Backspace+1..9` | Clear bookmark slot 1..9 (in bookmark mode) |
 | `1..9` | Save bookmark slot 1..9 (in bookmark mode) / recall slot 1..9 (outside bookmark mode) |
 | `Escape` | Cancel bookmark mode |
