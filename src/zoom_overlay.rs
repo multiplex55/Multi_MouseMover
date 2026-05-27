@@ -8,21 +8,11 @@ pub struct SurgicalZoomConfig {
     pub overlay_offset_y: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SurgicalZoomState {
     pub visible: bool,
     pub x: i32,
     pub y: i32,
-}
-
-impl Default for SurgicalZoomState {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            x: 0,
-            y: 0,
-        }
-    }
 }
 
 pub fn update_zoom_state(

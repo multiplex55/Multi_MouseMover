@@ -435,13 +435,6 @@ Note: many apps reserve `Alt` accelerators for menu/navigation. If a binding is 
 
 
 
-### Migration note (removed position history)
-
-`[position_history]` and actions `save_mouse_position`, `clear_mouse_positions`, `position_history_mode` were removed.
-
-- Delete legacy keys from existing config files.
-- Use bookmark slots for saved locations.
-
 ### `[bookmarks]`
 
 Configures bookmark mode and bookmark slot behavior. Bookmark JSON path resolution is relative to the resolved `config.toml` path when `bookmarks.file` is not absolute.
