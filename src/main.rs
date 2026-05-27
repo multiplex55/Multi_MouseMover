@@ -4084,6 +4084,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 None
             } else {
                 existing_name
+                    .clone()
                     .and_then(|raw| normalize_bookmark_name(&raw, config.bookmarks.max_name_length))
             };
             let record = BookmarkRecord {
