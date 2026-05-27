@@ -405,12 +405,11 @@ impl HelpOverlay {
             match content {
                 HelpOverlayContent::Temporary { message, .. } => {
                     draw_title(hdc, PADDING_X, PADDING_Y, &message.title);
-                    draw_body_line(
-                        hdc,
-                        PADDING_X,
-                        PADDING_Y + LINE_HEIGHT + TITLE_BODY_GAP,
-                        &message.body,
-                    );
+                    let mut y = PADDING_Y + LINE_HEIGHT + TITLE_BODY_GAP;
+                    for line in message.body.lines() {
+                        draw_body_line(hdc, PADDING_X, y, line);
+                        y += LINE_HEIGHT;
+                    }
                 }
                 HelpOverlayContent::Help { view } => {
                     draw_title(hdc, PADDING_X, PADDING_Y, "Multi MouseMover Help");
@@ -440,7 +439,7 @@ fn apply_layered_attributes(hwnd: HWND) {
 fn content_size(content: &HelpOverlayContent) -> (i32, i32) {
     let body_lines = match content {
         HelpOverlayContent::Hidden => 0,
-        HelpOverlayContent::Temporary { .. } => 1,
+        HelpOverlayContent::Temporary { message, .. } => message.body.lines().count().max(1) as i32,
         HelpOverlayContent::Help { view } => format_help_lines(view, view_format_config(view))
             .len()
             .max(1) as i32,
@@ -1488,6 +1487,23 @@ mod tests {
         assert!(style.contains(WS_EX_NOACTIVATE));
     }
 
+    #[test]
+    fn temporary_tooltip_multiline_body_uses_multiple_lines_for_size() {
+        let msg = TemporaryMessage {
+            title: "Bookmarks".to_string(),
+            body: "1. A
+2. B
+3. C"
+                .to_string(),
+        };
+        let content = HelpOverlayContent::Temporary {
+            message: msg,
+            expires_at: Instant::now() + Duration::from_secs(1),
+        };
+        let size = content_size(&content);
+        let expected_height = PADDING_Y * 2 + LINE_HEIGHT + TITLE_BODY_GAP + 3 * LINE_HEIGHT;
+        assert_eq!(size.1, expected_height.min(MAX_OVERLAY_HEIGHT));
+    }
     #[test]
     fn temporary_tooltip_visible_before_expiry() {
         let now = Instant::now();

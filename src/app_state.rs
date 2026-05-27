@@ -75,6 +75,10 @@ pub enum AppCommand {
     ClearBookmarkSlot(u8),
     ClearAllBookmarks,
     CancelBookmarkMode,
+    ApplyBookmarkName {
+        slot: u8,
+        name: Option<String>,
+    },
     UiHintQueryCompleted {
         query_id: u64,
         elements: Vec<crate::windows_uia::RawUiElement>,

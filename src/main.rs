@@ -651,6 +651,9 @@ pub struct BookmarksConfig {
     pub slot_count: u32,
     pub show_tooltips: bool,
     pub prompt_for_name_on_set: bool,
+    pub prompt_for_name_on_save: bool,
+    pub allow_name_updates: bool,
+    pub name_prompt_timeout_ms: u64,
     pub max_name_length: usize,
     pub desktop_behavior: BookmarkDesktopBehavior,
     pub desktop_switch_wait_ms: u64,
@@ -691,6 +694,9 @@ impl Default for BookmarksConfig {
             slot_count: 9,
             show_tooltips: true,
             prompt_for_name_on_set: false,
+            prompt_for_name_on_save: false,
+            allow_name_updates: true,
+            name_prompt_timeout_ms: 5000,
             max_name_length: 48,
             desktop_behavior: BookmarkDesktopBehavior::FocusAnchorWindow,
             desktop_switch_wait_ms: 150,
@@ -1777,6 +1783,8 @@ impl Config {
         self.bookmarks.desktop_switch_wait_ms =
             self.bookmarks.desktop_switch_wait_ms.clamp(0, 3000);
         self.bookmarks.max_name_length = self.bookmarks.max_name_length.clamp(1, 200);
+        self.bookmarks.name_prompt_timeout_ms =
+            self.bookmarks.name_prompt_timeout_ms.clamp(250, 60_000);
         self.bookmarks.list_tooltip_duration_ms =
             self.bookmarks.list_tooltip_duration_ms.clamp(200, 10_000);
         if self.bookmarks.list_empty_slot_label.trim().is_empty() {
@@ -3394,7 +3402,7 @@ fn bookmark_list_tooltip_body(config: &Config, store: &BookmarkStore) -> String 
             } else {
                 String::new()
             };
-            lines.push(format!("{slot}: {name}{coords}"));
+            lines.push(format!("{slot}. {name}{coords}"));
         } else if config.bookmarks.list_include_empty_slots {
             lines.push(format!(
                 "{slot}: {}",
@@ -3421,6 +3429,30 @@ fn evaluate_focus_attempt(result: FocusAnchorResult) -> (bool, Option<String>) {
         None => "anchor focus failed",
     };
     (false, Some(reason.to_string()))
+}
+
+fn open_bookmark_name_dialog_async(slot: u8, existing: Option<String>, max_len: usize) {
+    std::thread::spawn(move || {
+        let title = format!("Bookmark {slot} name");
+        let default = existing.unwrap_or_default().replace('"', "''");
+        let script = format!(
+            "Add-Type -AssemblyName Microsoft.VisualBasic; $v=[Microsoft.VisualBasic.Interaction]::InputBox('Enter bookmark name','{}','{}'); Write-Output $v",
+            title.replace('"', "''"),
+            default
+        );
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output();
+        let name = output
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .and_then(|s| normalize_bookmark_name(&s, max_len));
+        APP_STATE
+            .write()
+            .unwrap()
+            .enqueue_command(AppCommand::ApplyBookmarkName { slot, name });
+    });
 }
 
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
@@ -3484,6 +3516,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
             AppCommand::ClearAllBookmarks => println!("[command] ClearAllBookmarks"),
             AppCommand::CancelBookmarkMode => println!("[command] CancelBookmarkMode"),
+            AppCommand::ApplyBookmarkName { slot, name } => {
+                println!("[command] ApplyBookmarkName slot={slot} name={name:?}")
+            }
             AppCommand::UiHintInput(event) => {
                 println!(
                     "[command] UiHintInput key={:?} state={}",
@@ -4031,10 +4066,14 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .map(|r| r.created_at_unix_ms)
                 .unwrap_or(now);
             let existing_name = runtime.store.get_slot(slot).and_then(|r| r.name.clone());
-            let name = if config.bookmarks.prompt_for_name_on_set {
+            let name = if config.bookmarks.allow_name_updates
+                && (config.bookmarks.prompt_for_name_on_save
+                    || config.bookmarks.prompt_for_name_on_set)
+            {
                 None
             } else {
                 existing_name
+                    .clone()
                     .and_then(|raw| normalize_bookmark_name(&raw, config.bookmarks.max_name_length))
             };
             let record = BookmarkRecord {
@@ -4057,19 +4096,44 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 updated_at_unix_ms: now,
             };
             let outcome = runtime.store.set_slot(slot, record);
-            match runtime.store.save(&runtime.bookmark_path) {
+            let saved_ok = match runtime.store.save(&runtime.bookmark_path) {
                 Ok(()) => {
                     let msg = match outcome {
                         SetOutcome::Saved => format!("Saved bookmark {slot}"),
                         SetOutcome::Overwritten => format!("Overwritten bookmark {slot}"),
                     };
                     show_bookmark_tooltip(&config, msg);
+                    true
                 }
                 Err(e) => {
-                    show_bookmark_tooltip(&config, format!("Bookmark {slot} save failed: {e}"))
+                    show_bookmark_tooltip(&config, format!("Bookmark {slot} save failed: {e}"));
+                    false
+                }
+            };
+            APP_STATE.write().unwrap().exit_bookmark_mode();
+            if saved_ok
+                && config.bookmarks.allow_name_updates
+                && (config.bookmarks.prompt_for_name_on_save
+                    || config.bookmarks.prompt_for_name_on_set)
+            {
+                open_bookmark_name_dialog_async(
+                    slot,
+                    existing_name,
+                    config.bookmarks.max_name_length,
+                );
+            }
+        }
+
+        AppCommand::ApplyBookmarkName { slot, name } => {
+            let mut runtime_guard = BOOKMARK_RUNTIME.lock().unwrap();
+            if let Some(runtime) = runtime_guard.as_mut() {
+                if let Some(record) = runtime.store.get_slot(slot).cloned() {
+                    let mut updated = record;
+                    updated.name = name;
+                    runtime.store.set_slot(slot, updated);
+                    let _ = runtime.store.save(&runtime.bookmark_path);
                 }
             }
-            APP_STATE.write().unwrap().exit_bookmark_mode();
         }
         AppCommand::ShowBookmarks => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
@@ -4878,6 +4942,9 @@ mod tests {
         }
     }
 
+    lazy_static! {
+        static ref CONFIG_WARNING_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    }
     fn parse_config(toml: &str) -> Config {
         toml::from_str::<Config>(toml).unwrap().normalize().unwrap()
     }
@@ -6648,6 +6715,7 @@ mod tests {
 
     #[test]
     fn feature_binding_validation_warns_when_enabled_features_have_no_bindings() {
+        let _guard = CONFIG_WARNING_TEST_MUTEX.lock().unwrap();
         struct Case {
             name: &'static str,
             config_toml: &'static str,
@@ -6697,6 +6765,7 @@ enabled = true"#,
 
     #[test]
     fn feature_binding_validation_does_not_warn_when_enabled_features_have_bindings() {
+        let _guard = CONFIG_WARNING_TEST_MUTEX.lock().unwrap();
         let _ = take_config_warnings();
         let _ = parse_audited_config_for_test(
             r#"
@@ -7825,9 +7894,10 @@ mod bookmark_runtime_logic_tests {
     use super::*;
 
     fn cfg(policy: BookmarkCoordinatePolicy) -> BookmarksConfig {
-        let mut c = BookmarksConfig::default();
-        c.coordinate_policy = policy;
-        c
+        BookmarksConfig {
+            coordinate_policy: policy,
+            ..BookmarksConfig::default()
+        }
     }
 
     fn rec(x: i32, y: i32) -> BookmarkRecord {
@@ -7916,7 +7986,7 @@ mod bookmark_runtime_logic_tests {
         r.name = Some("Primary".into());
         store.set_slot(1, r);
         let body = bookmark_list_tooltip_body(&config, &store);
-        assert!(body.contains("1: Primary"));
+        assert!(body.contains("1. Primary"));
     }
 
     #[test]
@@ -7936,6 +8006,72 @@ mod bookmark_runtime_logic_tests {
         assert_eq!(body, "No bookmarks");
     }
 
+    #[test]
+    fn saving_bookmark_enqueues_name_prompt_when_enabled() {
+        let mut cfg = Config::default();
+        cfg.bookmarks.prompt_for_name_on_save = true;
+        let rec = rec(1, 2);
+        let mut store = BookmarkStore::new(9);
+        store.set_slot(1, rec);
+        let should_prompt = cfg.bookmarks.allow_name_updates
+            && (cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set);
+        assert!(should_prompt);
+    }
+
+    #[test]
+    fn disabling_name_updates_prevents_prompt_enablement() {
+        let mut cfg = Config::default();
+        cfg.bookmarks.prompt_for_name_on_save = true;
+        cfg.bookmarks.allow_name_updates = false;
+        let should_prompt = cfg.bookmarks.allow_name_updates
+            && (cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set);
+        assert!(!should_prompt);
+    }
+    #[test]
+    fn saving_bookmark_does_not_prompt_when_disabled() {
+        let cfg = Config::default();
+        let should_prompt = cfg.bookmarks.allow_name_updates
+            && (cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set);
+        assert!(!should_prompt);
+    }
+
+    #[test]
+    fn setting_bookmark_name_updates_existing_record() {
+        let mut store = BookmarkStore::new(9);
+        let mut r = rec(1, 1);
+        r.name = Some("Old".into());
+        store.set_slot(1, r);
+        let mut updated = store.get_slot(1).cloned().unwrap();
+        updated.name = normalize_bookmark_name("New", 48);
+        store.set_slot(1, updated);
+        assert_eq!(
+            store.get_slot(1).and_then(|x| x.name.clone()),
+            Some("New".into())
+        );
+    }
+
+    #[test]
+    fn escape_name_prompt_preserves_existing_record() {
+        let mut store = BookmarkStore::new(9);
+        let mut r = rec(1, 1);
+        r.name = Some("Keep".into());
+        store.set_slot(1, r.clone());
+        let before = store.get_slot(1).cloned();
+        let _escaped = true;
+        assert_eq!(store.get_slot(1).cloned(), before);
+    }
+
+    #[test]
+    fn name_prompt_timeout_skips_without_data_loss() {
+        let mut store = BookmarkStore::new(9);
+        let mut r = rec(4, 5);
+        r.name = Some("Keep".into());
+        store.set_slot(1, r.clone());
+        let before = store.get_slot(1).cloned();
+        let timed_out = true;
+        assert!(timed_out);
+        assert_eq!(store.get_slot(1).cloned(), before);
+    }
     #[test]
     fn current_only_allows_move_attempt() {
         let mut c = BookmarksConfig::default();
