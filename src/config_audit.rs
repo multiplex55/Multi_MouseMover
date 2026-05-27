@@ -97,7 +97,7 @@ fn audit_side_specific_modifier_chords(value: &toml::Value, report: &mut ConfigA
                 path: format!("key_bindings[{index}][0]"),
                 severity: ConfigAuditSeverity::Warning,
                 message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Shift+{} for now.",
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Shift+{:?} for now.",
                     parsed.chord.key
                 ),
                 suggestion: "Use side-agnostic Shift+<key> until side-aware chord matching lands."
@@ -109,7 +109,7 @@ fn audit_side_specific_modifier_chords(value: &toml::Value, report: &mut ConfigA
                 path: format!("key_bindings[{index}][0]"),
                 severity: ConfigAuditSeverity::Warning,
                 message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Shift+{} for now.",
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Shift+{:?} for now.",
                     parsed.chord.key
                 ),
                 suggestion: "Use side-agnostic Shift+<key> until side-aware chord matching lands."
@@ -121,7 +121,7 @@ fn audit_side_specific_modifier_chords(value: &toml::Value, report: &mut ConfigA
                 path: format!("key_bindings[{index}][0]"),
                 severity: ConfigAuditSeverity::Warning,
                 message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Alt+{} for now.",
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Alt+{:?} for now.",
                     parsed.chord.key
                 ),
                 suggestion: "Use side-agnostic Alt+<key> until side-aware chord matching lands."
@@ -133,7 +133,7 @@ fn audit_side_specific_modifier_chords(value: &toml::Value, report: &mut ConfigA
                 path: format!("key_bindings[{index}][0]"),
                 severity: ConfigAuditSeverity::Warning,
                 message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Ctrl+{} for now.",
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Ctrl+{:?} for now.",
                     parsed.chord.key
                 ),
                 suggestion: "Use side-agnostic Ctrl+<key> until side-aware chord matching lands."
@@ -145,7 +145,7 @@ fn audit_side_specific_modifier_chords(value: &toml::Value, report: &mut ConfigA
                 path: format!("key_bindings[{index}][0]"),
                 severity: ConfigAuditSeverity::Warning,
                 message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Ctrl+{} for now.",
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Ctrl+{:?} for now.",
                     parsed.chord.key
                 ),
                 suggestion: "Use side-agnostic Ctrl+<key> until side-aware chord matching lands."
