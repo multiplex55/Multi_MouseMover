@@ -6,6 +6,7 @@ mod config_audit;
 mod grid_session;
 mod help_overlay;
 mod indicator;
+mod input_decode;
 mod jump_grid;
 mod jump_overlay;
 mod jump_session;
@@ -38,6 +39,7 @@ use indicator::{
 use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
 };
+use input_decode::{decode_virtual_key_from_hook, ModifierSnapshot, RawKeyboardHookEvent};
 use jump_session::JumpSessionUpdate;
 use jump_view::{JumpLabelMetadata, JumpVisuals};
 use key_chord::{KeyChord, RuntimeSystemBindings};
@@ -2731,29 +2733,33 @@ fn should_run_modifier_reconcile(
 }
 
 fn decode_key_event(w_param: WPARAM, kbd: KBDLLHOOKSTRUCT) -> Option<KeyEvent> {
-    let key = VirtualKey::from_vk_code(kbd.vkCode)?;
     let is_down = w_param.0 as u32 == WM_KEYDOWN || w_param.0 as u32 == WM_SYSKEYDOWN;
-    let right_alt_down =
-        modifier_down(VirtualKey::RightAlt.to_vk_code() as i32) || key == VirtualKey::RightAlt;
-    let alt_down = right_alt_down
-        || (kbd.flags & LLKHF_ALTDOWN)
-            != windows::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT_FLAGS(0);
-
-    Some(KeyEvent {
-        key,
+    let raw = RawKeyboardHookEvent {
+        vk_code: kbd.vkCode,
+        scan_code: kbd.scanCode,
+        flags: kbd.flags.0,
         is_down,
-        alt_down,
-        right_alt_down,
-        ctrl_down: modifier_down(0x11)
-            || key == VirtualKey::Ctrl
-            || key == VirtualKey::LeftCtrl
-            || key == VirtualKey::RightCtrl,
-        shift_down: modifier_down(0x10)
-            || key == VirtualKey::Shift
-            || key == VirtualKey::LeftShift
-            || key == VirtualKey::RightShift,
-        win_down: modifier_down(0x5B) || modifier_down(0x5C),
-    })
+    };
+    let key = decode_virtual_key_from_hook(raw)?;
+    let modifiers = ModifierSnapshot {
+        left_alt: modifier_down(VirtualKey::LeftAlt.to_vk_code() as i32)
+            || (key == VirtualKey::LeftAlt && is_down),
+        right_alt: modifier_down(VirtualKey::RightAlt.to_vk_code() as i32)
+            || (key == VirtualKey::RightAlt && is_down),
+        left_ctrl: modifier_down(VirtualKey::LeftCtrl.to_vk_code() as i32)
+            || (key == VirtualKey::LeftCtrl && is_down),
+        right_ctrl: modifier_down(VirtualKey::RightCtrl.to_vk_code() as i32)
+            || (key == VirtualKey::RightCtrl && is_down),
+        left_shift: modifier_down(VirtualKey::LeftShift.to_vk_code() as i32)
+            || (key == VirtualKey::LeftShift && is_down),
+        right_shift: modifier_down(VirtualKey::RightShift.to_vk_code() as i32)
+            || (key == VirtualKey::RightShift && is_down),
+        left_win: modifier_down(VirtualKey::LeftWin.to_vk_code() as i32)
+            || (key == VirtualKey::LeftWin && is_down),
+        right_win: modifier_down(VirtualKey::RightWin.to_vk_code() as i32)
+            || (key == VirtualKey::RightWin && is_down),
+    };
+    Some(KeyEvent::with_modifier_state(key, is_down, modifiers))
 }
 
 fn is_keyboard_hook_key_message(code: i32, w_param: WPARAM) -> bool {
