@@ -4954,6 +4954,9 @@ mod tests {
         }
     }
 
+    lazy_static! {
+        static ref CONFIG_WARNING_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    }
     fn parse_config(toml: &str) -> Config {
         toml::from_str::<Config>(toml).unwrap().normalize().unwrap()
     }
@@ -6724,6 +6727,7 @@ mod tests {
 
     #[test]
     fn feature_binding_validation_warns_when_enabled_features_have_no_bindings() {
+        let _guard = CONFIG_WARNING_TEST_MUTEX.lock().unwrap();
         struct Case {
             name: &'static str,
             config_toml: &'static str,
@@ -6773,6 +6777,7 @@ enabled = true"#,
 
     #[test]
     fn feature_binding_validation_does_not_warn_when_enabled_features_have_bindings() {
+        let _guard = CONFIG_WARNING_TEST_MUTEX.lock().unwrap();
         let _ = take_config_warnings();
         let _ = parse_audited_config_for_test(
             r#"
