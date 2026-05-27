@@ -13,14 +13,34 @@ pub struct KeyChord {
     pub win: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ParsedChordModifiers {
+    pub left_ctrl: bool,
+    pub right_ctrl: bool,
+    pub left_alt: bool,
+    pub right_alt: bool,
+    pub left_shift: bool,
+    pub right_shift: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParsedKeyChord {
+    pub chord: KeyChord,
+    pub modifiers: ParsedChordModifiers,
+}
 impl KeyChord {
     pub fn parse(input: &str) -> Result<Self, KeyChordParseError> {
+        Self::parse_with_details(input).map(|parsed| parsed.chord)
+    }
+
+    pub fn parse_with_details(input: &str) -> Result<ParsedKeyChord, KeyChordParseError> {
         let mut ctrl = false;
         let mut alt = false;
         let mut right_alt = false;
         let mut shift = false;
         let mut win = false;
         let mut key = None;
+        let mut modifiers = ParsedChordModifiers::default();
 
         for raw_token in input.split('+') {
             let token = raw_token.trim();
@@ -33,14 +53,35 @@ impl KeyChord {
 
             match token.to_ascii_uppercase().as_str() {
                 "CTRL" | "CONTROL" => set_modifier(input, "Ctrl", &mut ctrl)?,
+                "LEFTCTRL" | "LCTRL" | "LEFT_CTRL" => {
+                    set_modifier(input, "Ctrl", &mut ctrl)?;
+                    modifiers.left_ctrl = true;
+                }
+                "RIGHTCTRL" | "RCTRL" | "RIGHT_CTRL" => {
+                    set_modifier(input, "Ctrl", &mut ctrl)?;
+                    modifiers.right_ctrl = true;
+                }
                 "ALT" => set_modifier(input, "Alt", &mut alt)?,
+                "LEFTALT" | "LALT" | "LEFT_ALT" => {
+                    set_modifier(input, "Alt", &mut alt)?;
+                    modifiers.left_alt = true;
+                }
                 "RIGHTALT" | "RALT" | "RIGHT_ALT" => {
                     set_modifier(input, "RightAlt", &mut right_alt)?;
+                    modifiers.right_alt = true;
                     if !alt {
                         alt = true;
                     }
                 }
                 "SHIFT" => set_modifier(input, "Shift", &mut shift)?,
+                "LEFTSHIFT" | "LSHIFT" | "LEFT_SHIFT" => {
+                    set_modifier(input, "Shift", &mut shift)?;
+                    modifiers.left_shift = true;
+                }
+                "RIGHTSHIFT" | "RSHIFT" | "RIGHT_SHIFT" => {
+                    set_modifier(input, "Shift", &mut shift)?;
+                    modifiers.right_shift = true;
+                }
                 "WIN" | "SUPER" | "META" => set_modifier(input, "Win", &mut win)?,
                 _ => {
                     let parsed_key = VirtualKey::from_string(token).ok_or_else(|| {
@@ -60,13 +101,16 @@ impl KeyChord {
         let key =
             key.ok_or_else(|| KeyChordParseError::new(input, "missing non-modifier key token"))?;
 
-        Ok(Self {
-            key,
-            ctrl,
-            alt,
-            right_alt,
-            shift,
-            win,
+        Ok(ParsedKeyChord {
+            chord: Self {
+                key,
+                ctrl,
+                alt,
+                right_alt,
+                shift,
+                win,
+            },
+            modifiers,
         })
     }
 

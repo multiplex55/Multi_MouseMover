@@ -92,6 +92,42 @@ key_bindings = [
 ]
 ```
 
+
+## Current modifier/chord support matrix
+
+Current parser/runtime behavior for modifier chords:
+
+- **Supported now**
+  - Side-agnostic modifier chords such as `Alt+E`, `Ctrl+E`, `Shift+E`.
+  - Right-Alt-specific chords such as `RightAlt+E`.
+  - Standalone side-specific modifier keys as non-modifier key bindings, such as `LeftShift`, `RightShift`, `LeftAlt`, `RightAlt`.
+- **Not yet supported (current phase diagnostics warn)**
+  - Side-specific modifier chords: `LeftAlt+E`, `LeftShift+E`, `RightShift+E`, `LeftCtrl+E`, `RightCtrl+E`.
+
+Valid examples:
+
+```toml
+key_bindings = [
+  ["Alt+E", "step_move_up"],
+  ["Ctrl+E", "toggle_drag_mode"],
+  ["Shift+E", "move_up"],
+  ["RightAlt+E", "move_to_top_edge"],
+  ["LeftShift", "slow_mouse"],
+]
+```
+
+Invalid-for-now (parseable but warned by config audit):
+
+```toml
+key_bindings = [
+  ["LeftShift+E", "move_up"],
+  ["LeftAlt+E", "step_move_up"],
+  ["RightShift+E", "move_up"],
+  ["LeftCtrl+E", "toggle_drag_mode"],
+  ["RightCtrl+E", "toggle_drag_mode"],
+]
+```
+
 ## Config Paths
 
 | Config path | Type | Default | Connected? | Status | Notes |
