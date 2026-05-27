@@ -112,7 +112,7 @@ key_bindings = [
     ["7", "bookmark_slot_7"],
     ["8", "bookmark_slot_8"],
     ["9", "bookmark_slot_9"],
-    # ["Shift+L", "show_bookmarks"],
+    ["`", "show_bookmarks"],
 
 ]
 
@@ -591,8 +591,8 @@ enabled = true
 file = "bookmarks.json"
 slot_count = 9
 show_tooltips = true
-prompt_for_name_on_set = false
-prompt_for_name_on_save = false
+prompt_for_name_on_set = true
+prompt_for_name_on_save = true
 allow_name_updates = true
 name_prompt_timeout_ms = 5000
 max_name_length = 48
