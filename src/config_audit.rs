@@ -381,6 +381,7 @@ fn is_known_active_path(path: &str) -> bool {
         "input.stuck_key_timeout_ms",
         "input.debug_input",
         "input.shift_can_modify_plain_movement",
+        "input.right_alt_suppresses_synthetic_ctrl",
         "grid_mode.enabled",
         "grid_mode.start_region",
         "grid_mode.width_percent",
