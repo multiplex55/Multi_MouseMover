@@ -889,6 +889,7 @@ fn format_action(action: &Action) -> String {
         Action::ShowHelp => "Hints / Help".to_string(),
         Action::UiHintMode => "UI Hints".to_string(),
         Action::BookmarkMode => "Bookmark mode".to_string(),
+        Action::ShowBookmarks => "Show bookmark list".to_string(),
         Action::BookmarkSlot(slot) => format!("Jump to bookmark slot {slot}"),
         Action::ClearBookmarkSlot(slot) => format!("Clear bookmark slot {slot}"),
         Action::ClearAllBookmarks => "Clear all bookmarks".to_string(),
@@ -961,6 +962,7 @@ fn action_section(action: &Action) -> HelpBindingSection {
         | Action::NavigateForward
         | Action::UiHintMode => HelpBindingSection::JumpGrid,
         Action::BookmarkMode
+        | Action::ShowBookmarks
         | Action::BookmarkSlot(_)
         | Action::ClearBookmarkSlot(_)
         | Action::ClearAllBookmarks => HelpBindingSection::Bookmarks,
@@ -992,6 +994,7 @@ fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
         ModeContext::Bookmark => matches!(
             action,
             Action::BookmarkMode
+                | Action::ShowBookmarks
                 | Action::BookmarkSlot(_)
                 | Action::ClearBookmarkSlot(_)
                 | Action::ClearAllBookmarks
