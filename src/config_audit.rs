@@ -1,4 +1,5 @@
 use crate::key_chord::KeyChord;
+use crate::keyboard::VirtualKey;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +49,7 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
     }
     audit_key_binding_aliases(&value, &mut report);
     audit_key_binding_duplicates(&value, &mut report);
+    audit_side_specific_modifier_chords(&value, &mut report);
 
     for path in &paths {
         if is_explicitly_audited_path(path, &path_set) || is_known_active_path(path) {
@@ -65,6 +67,92 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
     }
 
     report
+}
+
+fn audit_side_specific_modifier_chords(value: &toml::Value, report: &mut ConfigAuditReport) {
+    let Some(bindings) = value.get("key_bindings").and_then(toml::Value::as_array) else {
+        return;
+    };
+    for (index, binding) in bindings.iter().enumerate() {
+        let Some(items) = binding.as_array() else {
+            continue;
+        };
+        let Some(chord_str) = items.first().and_then(toml::Value::as_str) else {
+            continue;
+        };
+        let Ok(parsed) = KeyChord::parse_with_details(chord_str) else {
+            continue;
+        };
+        if matches!(
+            parsed.chord.key,
+            VirtualKey::LeftShift
+                | VirtualKey::RightShift
+                | VirtualKey::LeftAlt
+                | VirtualKey::RightAlt
+        ) {
+            continue;
+        }
+        if parsed.modifiers.left_shift {
+            report.warnings.push(ConfigAuditWarning {
+                path: format!("key_bindings[{index}][0]"),
+                severity: ConfigAuditSeverity::Warning,
+                message: format!(
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Shift+{:?} for now.",
+                    parsed.chord.key
+                ),
+                suggestion: "Use side-agnostic Shift+<key> until side-aware chord matching lands."
+                    .to_string(),
+            });
+        }
+        if parsed.modifiers.right_shift {
+            report.warnings.push(ConfigAuditWarning {
+                path: format!("key_bindings[{index}][0]"),
+                severity: ConfigAuditSeverity::Warning,
+                message: format!(
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Shift+{:?} for now.",
+                    parsed.chord.key
+                ),
+                suggestion: "Use side-agnostic Shift+<key> until side-aware chord matching lands."
+                    .to_string(),
+            });
+        }
+        if parsed.modifiers.left_alt {
+            report.warnings.push(ConfigAuditWarning {
+                path: format!("key_bindings[{index}][0]"),
+                severity: ConfigAuditSeverity::Warning,
+                message: format!(
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Alt+{:?} for now.",
+                    parsed.chord.key
+                ),
+                suggestion: "Use side-agnostic Alt+<key> until side-aware chord matching lands."
+                    .to_string(),
+            });
+        }
+        if parsed.modifiers.left_ctrl {
+            report.warnings.push(ConfigAuditWarning {
+                path: format!("key_bindings[{index}][0]"),
+                severity: ConfigAuditSeverity::Warning,
+                message: format!(
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Ctrl+{:?} for now.",
+                    parsed.chord.key
+                ),
+                suggestion: "Use side-agnostic Ctrl+<key> until side-aware chord matching lands."
+                    .to_string(),
+            });
+        }
+        if parsed.modifiers.right_ctrl {
+            report.warnings.push(ConfigAuditWarning {
+                path: format!("key_bindings[{index}][0]"),
+                severity: ConfigAuditSeverity::Warning,
+                message: format!(
+                    "Unsupported side-specific modifier chord: {chord_str}. Use Ctrl+{:?} for now.",
+                    parsed.chord.key
+                ),
+                suggestion: "Use side-agnostic Ctrl+<key> until side-aware chord matching lands."
+                    .to_string(),
+            });
+        }
+    }
 }
 
 fn audit_key_binding_aliases(value: &toml::Value, report: &mut ConfigAuditReport) {
@@ -622,6 +710,74 @@ mod tests {
         let warning = warning_for(&report, "system_bindings.polling_rate");
         assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
         assert!(warning.suggestion.contains("top-level polling_rate"));
+    }
+
+    #[test]
+    fn config_audit_warns_on_leftshift_plus_key() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+              ["LeftShift+E", "move_up"],
+            ]
+            "#,
+        );
+        let warning = warning_for(&report, "key_bindings[0][0]");
+        assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
+        assert_eq!(
+            warning.message,
+            "Unsupported side-specific modifier chord: LeftShift+E. Use Shift+E for now."
+        );
+    }
+
+    #[test]
+    fn config_audit_warns_on_leftalt_plus_key() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+              ["LeftAlt+E", "move_up"],
+            ]
+            "#,
+        );
+        let warning = warning_for(&report, "key_bindings[0][0]");
+        assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
+        assert_eq!(
+            warning.message,
+            "Unsupported side-specific modifier chord: LeftAlt+E. Use Alt+E for now."
+        );
+    }
+
+    #[test]
+    fn config_audit_allows_rightalt_plus_key() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+              ["RightAlt+E", "move_up"],
+            ]
+            "#,
+        );
+        assert!(!report.warnings.iter().any(|warning| {
+            warning.path == "key_bindings[0][0]"
+                && warning
+                    .message
+                    .starts_with("Unsupported side-specific modifier chord")
+        }));
+    }
+
+    #[test]
+    fn config_audit_allows_standalone_leftshift() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+              ["LeftShift", "slow_mouse"],
+            ]
+            "#,
+        );
+        assert!(!report.warnings.iter().any(|warning| {
+            warning.path == "key_bindings[0][0]"
+                && warning
+                    .message
+                    .starts_with("Unsupported side-specific modifier chord")
+        }));
     }
 
     #[test]

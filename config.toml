@@ -24,6 +24,11 @@ top_speed = 6
 # Key and system bindings
 # ---------------------------------------------------------------------------
 # These action bindings are handled only while active mode is enabled.
+# Chord support today (current phase):
+# - Supported: Alt+E, Ctrl+E, Shift+E, RightAlt+E,
+#   standalone LeftShift, RightShift, LeftAlt, RightAlt.
+# - Not yet supported in side-specific chord form (until side-aware chord model lands):
+#   LeftAlt+E, LeftShift+E, RightShift+E, LeftCtrl+E, RightCtrl+E.
 # Default movement/click layout: E/S/D/F for movement, J/K/L for clicks, N for drag toggle, and . for click_then_disable.
 key_bindings = [
     ["E", "move_up"],
