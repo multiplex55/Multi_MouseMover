@@ -7,7 +7,7 @@ use crate::{
     app_state::KeyEvent,
     keyboard::VirtualKey,
     window_geometry::{foreground_window_snap_points, WindowSnapPoints},
-    zoom_overlay::{update_zoom_state, SurgicalZoomConfig, SurgicalZoomState},
+    zoom_overlay::{update_zoom_state, SurgicalZoomConfig, SurgicalZoomState, VirtualScreenBounds},
     Config, FinalAdjustConfig,
 };
 use action::{Action, Direction2D, StepMoveTier};
@@ -637,10 +637,12 @@ impl<B: MouseBackend> MouseMaster<B> {
                 surgical_active,
                 x,
                 y,
-                unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) },
-                unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) },
-                unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) },
-                unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) },
+                VirtualScreenBounds {
+                    left: unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) },
+                    top: unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) },
+                    width: unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) },
+                    height: unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) },
+                },
             );
         }
 

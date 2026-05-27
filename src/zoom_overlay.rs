@@ -34,7 +34,7 @@ pub struct SurgicalZoomConfig {
     pub center_crosshair: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SurgicalZoomState {
     pub visible: bool,
     pub x: i32,
@@ -46,19 +46,12 @@ pub struct SurgicalZoomState {
     pub pending_refresh: bool,
 }
 
-impl Default for SurgicalZoomState {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            x: 0,
-            y: 0,
-            source_left: 0,
-            source_top: 0,
-            source_size_px: 0,
-            center_crosshair: false,
-            pending_refresh: false,
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VirtualScreenBounds {
+    pub left: i32,
+    pub top: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 pub struct SurgicalZoomOverlay {
@@ -214,10 +207,7 @@ pub fn update_zoom_state(
     surgical_active: bool,
     cursor_x: i32,
     cursor_y: i32,
-    virtual_left: i32,
-    virtual_top: i32,
-    virtual_width: i32,
-    virtual_height: i32,
+    virtual_screen: VirtualScreenBounds,
 ) {
     if !(config.enabled && config.zoom_enabled && surgical_active) {
         state.visible = false;
@@ -234,10 +224,10 @@ pub fn update_zoom_state(
         cursor_x,
         cursor_y,
         source_size,
-        virtual_left,
-        virtual_top,
-        virtual_width,
-        virtual_height,
+        virtual_screen.left,
+        virtual_screen.top,
+        virtual_screen.width,
+        virtual_screen.height,
     );
     state.source_left = source_left;
     state.source_top = source_top;
@@ -305,7 +295,19 @@ mod tests {
             refresh_interval_ms: 16,
             center_crosshair: true,
         };
-        update_zoom_state(&mut state, cfg, true, 100, 200, 0, 0, 1920, 1080);
+        update_zoom_state(
+            &mut state,
+            cfg,
+            true,
+            100,
+            200,
+            VirtualScreenBounds {
+                left: 0,
+                top: 0,
+                width: 1920,
+                height: 1080,
+            },
+        );
         assert_eq!((state.x, state.y), (124, 212));
     }
     #[test]
@@ -321,9 +323,33 @@ mod tests {
             refresh_interval_ms: 16,
             center_crosshair: false,
         };
-        update_zoom_state(&mut state, cfg, true, 10, 20, 0, 0, 100, 100);
+        update_zoom_state(
+            &mut state,
+            cfg,
+            true,
+            10,
+            20,
+            VirtualScreenBounds {
+                left: 0,
+                top: 0,
+                width: 100,
+                height: 100,
+            },
+        );
         assert!(state.visible);
-        update_zoom_state(&mut state, cfg, false, 10, 20, 0, 0, 100, 100);
+        update_zoom_state(
+            &mut state,
+            cfg,
+            false,
+            10,
+            20,
+            VirtualScreenBounds {
+                left: 0,
+                top: 0,
+                width: 100,
+                height: 100,
+            },
+        );
         assert!(!state.visible);
     }
     #[test]
