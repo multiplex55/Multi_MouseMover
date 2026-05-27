@@ -128,8 +128,9 @@ modifier_reconcile_on_tick = true
 modifier_reconcile_interval_ms = 50
 # Stale-key recovery: if a tracked held key has not produced expected transitions
 # for this timeout window, it may be treated as stuck and reconciled against
-# current OS modifier state. Reconciliation cadence is max(interval, timeout), so
-# this timeout effectively gates how often stale key recovery checks can run.
+# current OS modifier state. Reconciliation runs every
+# modifier_reconcile_interval_ms; this timeout is only the stale-duration
+# threshold used for classification/diagnostics.
 stuck_key_timeout_ms = 10000
 debug_input = false
 shift_can_modify_plain_movement = true

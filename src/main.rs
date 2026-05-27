@@ -2724,13 +2724,9 @@ fn should_run_modifier_reconcile(
     if !config.modifier_reconcile_on_tick {
         return false;
     }
-    // Reconciliation must run no faster than either interval:
-    // - modifier_reconcile_interval_ms: regular polling cadence
-    // - stuck_key_timeout_ms: stale key recovery timeout
-    // The max() means stale key timeout effectively gates the cadence.
-    let cadence_ms = config
-        .modifier_reconcile_interval_ms
-        .max(config.stuck_key_timeout_ms);
+    // Reconciliation cadence is controlled only by modifier_reconcile_interval_ms.
+    // stuck_key_timeout_ms is used by stale-key diagnostics/classification logic.
+    let cadence_ms = config.modifier_reconcile_interval_ms;
     elapsed_since_last_reconcile >= Duration::from_millis(cadence_ms)
 }
 
@@ -8141,7 +8137,7 @@ mod bookmark_runtime_logic_tests {
     }
 
     #[test]
-    fn modifier_reconcile_is_cadence_gated() {
+    fn reconcile_cadence_not_gated_by_stuck_timeout() {
         let mut input = InputConfig::default();
         input.modifier_reconcile_on_tick = true;
         input.modifier_reconcile_interval_ms = 50;
@@ -8149,21 +8145,16 @@ mod bookmark_runtime_logic_tests {
 
         assert!(!should_run_modifier_reconcile(
             &input,
-            Duration::from_millis(9_999)
-        ));
-        assert!(should_run_modifier_reconcile(
-            &input,
-            Duration::from_millis(10_000)
-        ));
-
-        input.stuck_key_timeout_ms = 10;
-        assert!(!should_run_modifier_reconcile(
-            &input,
             Duration::from_millis(49)
         ));
         assert!(should_run_modifier_reconcile(
             &input,
             Duration::from_millis(50)
+        ));
+
+        assert!(should_run_modifier_reconcile(
+            &input,
+            Duration::from_millis(9_999)
         ));
 
         input.modifier_reconcile_on_tick = false;
