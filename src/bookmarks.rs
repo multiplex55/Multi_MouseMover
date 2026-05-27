@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct MonitorRect {
     pub left: i32,
     pub top: i32,
@@ -13,7 +13,8 @@ pub struct MonitorRect {
     pub bottom: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
 pub struct BookmarkRecord {
     pub slot: u8,
     pub x: i32,
@@ -47,9 +48,19 @@ pub struct LoadWarning {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
 struct BookmarkFile {
     slot_count: u8,
     slots: BTreeMap<u8, BookmarkRecord>,
+}
+
+impl Default for BookmarkFile {
+    fn default() -> Self {
+        Self {
+            slot_count: 1,
+            slots: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -158,8 +169,13 @@ impl BookmarkStore {
             file.sync_all()?;
         }
 
-        fs::rename(tmp, path)?;
-        Ok(())
+        match replace_file(&tmp, path) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                let _ = fs::remove_file(&tmp);
+                Err(err)
+            }
+        }
     }
 
     fn is_valid_slot(&self, slot: u8) -> bool {
@@ -188,6 +204,21 @@ fn temp_path_for(path: &Path) -> PathBuf {
     let mut os = path.as_os_str().to_os_string();
     os.push(".tmp");
     PathBuf::from(os)
+}
+
+fn replace_file(tmp: &Path, target: &Path) -> Result<(), io::Error> {
+    #[cfg(windows)]
+    {
+        if target.exists() {
+            fs::remove_file(target)?;
+        }
+        fs::rename(tmp, target)
+    }
+
+    #[cfg(not(windows))]
+    {
+        fs::rename(tmp, target)
+    }
 }
 
 fn quarantine_corrupt_file(path: &Path) -> Result<PathBuf, io::Error> {
@@ -371,5 +402,81 @@ mod tests {
         assert_eq!(round_trip.anchor_hwnd, None);
         assert_eq!(round_trip.anchor_process_id, None);
         assert_eq!(round_trip.anchor_window_title, None);
+    }
+
+    #[test]
+    fn save_over_existing_file_replaces_existing_file() {
+        let path = test_path("save_replaces");
+        fs::write(&path, "old content").unwrap();
+
+        let mut store = BookmarkStore::new(9);
+        let mut record = fixture_record(1);
+        record.x = 999;
+        store.set_slot(1, record);
+        store.save(&path).unwrap();
+
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("old content"));
+        let file: BookmarkFile = serde_json::from_str(&raw).unwrap();
+        assert_eq!(file.slots.get(&1).map(|r| r.x), Some(999));
+    }
+
+    #[test]
+    fn save_after_clear_replaces_existing_file_on_disk() {
+        let path = test_path("save_clear_replaces");
+        let mut store = BookmarkStore::new(9);
+        store.set_slot(1, fixture_record(1));
+        store.save(&path).unwrap();
+
+        store.clear_all();
+        store.save(&path).unwrap();
+
+        let raw = fs::read_to_string(&path).unwrap();
+        let file: BookmarkFile = serde_json::from_str(&raw).unwrap();
+        assert!(file.slots.is_empty());
+    }
+
+    #[test]
+    fn repeated_save_same_path_does_not_error() {
+        let path = test_path("repeated_save");
+        let mut store = BookmarkStore::new(9);
+        store.set_slot(1, fixture_record(1));
+
+        store.save(&path).unwrap();
+        store.save(&path).unwrap();
+        store.save(&path).unwrap();
+    }
+
+    #[test]
+    fn bookmark_store_loads_legacy_json_without_new_optional_fields() {
+        let path = test_path("legacy_missing_fields");
+        let legacy = r#"{
+  "slot_count": 9,
+  "slots": {
+    "1": {
+      "slot": 1,
+      "x": 10,
+      "y": 20,
+      "monitor_device_name": "DISPLAY1",
+      "monitor_rect": {
+        "left": 0,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080
+      }
+    }
+  }
+}"#;
+        fs::write(&path, legacy).unwrap();
+
+        let (store, warning) = BookmarkStore::load(&path, 9).unwrap();
+        assert!(warning.is_none());
+        let loaded = store.get_slot(1).expect("slot should load");
+        assert_eq!(loaded.virtual_desktop_id, None);
+        assert_eq!(loaded.anchor_hwnd, None);
+        assert_eq!(loaded.anchor_process_id, None);
+        assert_eq!(loaded.anchor_window_title, None);
+        assert_eq!(loaded.created_at_unix_ms, 0);
+        assert_eq!(loaded.updated_at_unix_ms, 0);
     }
 }
