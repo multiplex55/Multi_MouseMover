@@ -150,6 +150,21 @@ struct BookmarkRuntime {
     store: BookmarkStore,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeLoopConfig {
+    polling_rate_ms: u64,
+    input: InputConfig,
+}
+
+impl RuntimeLoopConfig {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            polling_rate_ms: config.polling_rate,
+            input: config.input,
+        }
+    }
+}
+
 const DEFAULT_POLLING_RATE_MS: u64 = 8;
 const DEFAULT_WHEEL_SPEED_INDICATOR_MS: u64 = 700;
 const DEFAULT_MOUSE_SPEED_FLASH_MS: u64 = 700;
@@ -340,6 +355,8 @@ lazy_static! {
     static ref UI_HINT_QUERY_RX: Mutex<Option<Receiver<UiHintQueryResult>>> = Mutex::new(None);
     static ref UI_HINT_SESSION: Mutex<Option<UiHintSession>> = Mutex::new(None);
     static ref BOOKMARK_RUNTIME: Mutex<Option<BookmarkRuntime>> = Mutex::new(None);
+    static ref RUNTIME_LOOP_CONFIG: RwLock<RuntimeLoopConfig> =
+        RwLock::new(RuntimeLoopConfig::from_config(&Config::default()));
 }
 
 thread_local! {
@@ -2200,12 +2217,10 @@ impl Config {
             });
         }
 
-        eprintln!("Config file not found, using defaults");
-        let fallback = env::current_dir()?.join(path);
-        Ok(LoadedConfig {
-            config: Self::default().normalize()?,
-            path: fallback,
-        })
+        Err(format!(
+            "config file '{path}' was not found in the current directory or next to the executable"
+        )
+        .into())
     }
 
     fn parse_audited_config(config_str: &str) -> Result<Self, Box<dyn Error>> {
@@ -3201,6 +3216,7 @@ fn apply_loaded_config<B: MouseBackend>(
     action_handler
         .mouse_master
         .push_config_reload_notification();
+    *RUNTIME_LOOP_CONFIG.write().unwrap() = RuntimeLoopConfig::from_config(&config);
     app_state.set_active_mode(active);
     Ok(app_state.resolve_jump_overlay())
 }
@@ -3219,6 +3235,7 @@ fn reload_config() -> Result<(), Box<dyn Error>> {
     sync_jump_overlay(resolution);
     let bookmark_runtime = load_bookmark_runtime(&config, &loaded.path)?;
     *BOOKMARK_RUNTIME.lock().unwrap() = Some(bookmark_runtime);
+    *RUNTIME_LOOP_CONFIG.write().unwrap() = RuntimeLoopConfig::from_config(&config);
     ACTION_HANDLER.write().unwrap().clear_active_keys();
     println!("[reload] config reloaded");
     Ok(())
@@ -4608,6 +4625,7 @@ fn main() {
         }
     };
     *BOOKMARK_RUNTIME.lock().unwrap() = Some(bookmark_runtime);
+    *RUNTIME_LOOP_CONFIG.write().unwrap() = RuntimeLoopConfig::from_config(&config);
 
     if let Err(e) = unsafe { install_keyboard_hook() } {
         eprintln!("❌ Keyboard Hook Failed to Install: {e}");
@@ -4650,7 +4668,11 @@ fn main() {
         process_ui_hint_query_results();
         loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
 
-        if should_run_modifier_reconcile(&config.input, last_modifier_reconcile.elapsed()) {
+        let runtime_loop_config = *RUNTIME_LOOP_CONFIG.read().unwrap();
+        if should_run_modifier_reconcile(
+            &runtime_loop_config.input,
+            last_modifier_reconcile.elapsed(),
+        ) {
             APP_STATE
                 .write()
                 .unwrap()
@@ -4716,7 +4738,7 @@ fn main() {
             last_heartbeat_sample = now;
         }
 
-        sleep(Duration::from_millis(config.polling_rate));
+        sleep(Duration::from_millis(runtime_loop_config.polling_rate_ms));
     }
 }
 
@@ -6770,6 +6792,54 @@ enabled = true"#,
                 && warning.contains("starting_speed=4 is ignored")
                 && warning.contains("[mouse_speed].default_speed=5")
         }));
+    }
+
+    #[test]
+    fn missing_config_does_not_silently_use_old_layout() {
+        let unique = format!("multi_mousemover_missing_config_{}", std::process::id());
+        let temp_dir = env::temp_dir().join(unique);
+        fs::create_dir_all(&temp_dir).unwrap();
+        let original_cwd = env::current_dir().unwrap();
+        env::set_current_dir(&temp_dir).unwrap();
+
+        let result = Config::load_with_resolved_path("config.toml");
+
+        env::set_current_dir(original_cwd).unwrap();
+        let _ = fs::remove_dir_all(temp_dir);
+        let error = result.expect_err("missing config should return an error");
+        assert!(error.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn reload_updates_runtime_loop_config_snapshot() {
+        let old_config = Config::default().normalize().unwrap();
+        let mut new_config = Config::default().normalize().unwrap();
+        new_config.polling_rate = 21;
+        new_config.input.modifier_reconcile_interval_ms = 333;
+
+        *RUNTIME_LOOP_CONFIG.write().unwrap() = RuntimeLoopConfig::from_config(&old_config);
+        let mut handler = ActionHandler::new(MouseMaster::new_with_backend(
+            old_config,
+            FakeBackend::default(),
+        ));
+        let mut app_state = AppState::default();
+        let _ = apply_loaded_config(&mut handler, &mut app_state, new_config.clone()).unwrap();
+
+        let snapshot = *RUNTIME_LOOP_CONFIG.read().unwrap();
+        assert_eq!(snapshot.polling_rate_ms, new_config.polling_rate);
+        assert_eq!(
+            snapshot.input.modifier_reconcile_interval_ms,
+            new_config.input.modifier_reconcile_interval_ms
+        );
+    }
+
+    #[test]
+    fn repo_policy_check_script_enforces_tracking_rules() {
+        let status = std::process::Command::new("bash")
+            .arg("scripts/repo_policy_check.sh")
+            .status()
+            .expect("script should execute");
+        assert!(status.success(), "repo policy check script failed");
     }
 
     #[test]

@@ -4,6 +4,11 @@ This is the canonical reference for `config.toml`. Paths marked Active are read 
 
 Status values used here: Active, Legacy, Deprecated alias, Preview-related.
 
+## Runtime loading and reload behavior
+
+- `config.toml` is required for normal startup. If it is missing, the app exits with an explicit config-not-found error instead of silently falling back to compiled defaults.
+- `reload_config` replaces the runtime loop snapshot for polling/input reconciliation fields, so changes such as `polling_rate`, `input.modifier_reconcile_on_tick`, `input.modifier_reconcile_interval_ms`, and `input.stuck_key_timeout_ms` take effect immediately after reload.
+
 ## Key Binding Example (Wheel + Wheel Speed)
 
 Example layout using vertical wheel + wheel-speed controls (with horizontal wheel bindings intentionally disabled):
