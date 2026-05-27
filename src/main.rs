@@ -8056,7 +8056,7 @@ mod bookmark_runtime_logic_tests {
         r.name = Some("Primary".into());
         store.set_slot(1, r);
         let body = bookmark_list_tooltip_body(&config, &store);
-        assert!(body.contains("1: Primary"));
+        assert!(body.contains("1. Primary"));
     }
 
     #[test]
