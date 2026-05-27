@@ -471,11 +471,13 @@ list_tooltip_duration_ms = 1200
 | --- | --- | --- | --- | --- | --- |
 | `surgical_mode.enabled` | boolean | `false` | Yes | Active | Enables fixed-speed surgical movement tier. |
 | `surgical_mode.speed_px` | integer | `1` | Yes | Active | Fixed movement speed used when `surgical_mode` action is held. |
-| `surgical_mode.zoom_enabled` | boolean | `false` | Yes | Active | Experimental: tracks surgical zoom intent; full rendered zoom viewport is not currently shown. |
+| `surgical_mode.zoom_enabled` | boolean | `false` | Yes | Active | Enables the surgical zoom overlay while the surgical action is held. |
 | `surgical_mode.zoom_scale` | float | `2.0` | Yes | Active | Zoom factor for surgical overlay. |
 | `surgical_mode.zoom_size_px` | integer | `180` | Yes | Active | Surgical overlay square size in pixels. |
 | `surgical_mode.overlay_offset_x` | integer | `24` | Yes | Active | Overlay horizontal offset from cursor. |
 | `surgical_mode.overlay_offset_y` | integer | `24` | Yes | Active | Overlay vertical offset from cursor. |
+| `surgical_mode.refresh_interval_ms` | integer milliseconds | `16` | Yes | Active | Minimum interval between surgical zoom capture/paint updates. |
+| `surgical_mode.center_crosshair` | boolean | `true` | Yes | Active | Draws a center crosshair in the surgical zoom overlay. |
 
 
 ### Surgical behavior semantics

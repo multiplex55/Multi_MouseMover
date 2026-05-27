@@ -612,9 +612,10 @@ list_tooltip_duration_ms = 1200
 enabled = true
 speed_px = 1
 zoom_enabled = true
-# Experimental: zoom fields are parsed and tracked, but no full rendered
-# zoom viewport is shown unless a complete overlay implementation is enabled.
+# Surgical zoom overlay is topmost, non-activating, and click-through.
 zoom_scale = 2.0
 zoom_size_px = 180
 overlay_offset_x = 24
 overlay_offset_y = 24
+refresh_interval_ms = 16
+center_crosshair = true

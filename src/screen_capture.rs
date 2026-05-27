@@ -139,3 +139,76 @@ pub fn capture_virtual_screen() -> Option<ScreenSnapshot> {
         })
     }
 }
+
+pub fn capture_region_around_cursor(
+    cursor_x: i32,
+    cursor_y: i32,
+    source_size_px: i32,
+) -> Option<ScreenSnapshot> {
+    let left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+
+    let source_w = source_size_px.min(width).max(1);
+    let source_h = source_size_px.min(height).max(1);
+    let source_left = (cursor_x - source_w / 2).clamp(left, left + width - source_w);
+    let source_top = (cursor_y - source_h / 2).clamp(top, top + height - source_h);
+
+    unsafe {
+        let screen_dc = GetDC(None);
+        if screen_dc.is_invalid() {
+            return None;
+        }
+        let memory_dc = CreateCompatibleDC(Some(screen_dc));
+        if memory_dc.is_invalid() {
+            let _ = ReleaseDC(None, screen_dc);
+            return None;
+        }
+        let bitmap = CreateCompatibleBitmap(screen_dc, source_w, source_h);
+        if bitmap.is_invalid() {
+            let _ = DeleteDC(memory_dc);
+            let _ = ReleaseDC(None, screen_dc);
+            return None;
+        }
+        let old_bitmap = SelectObject(memory_dc, bitmap.into());
+        if old_bitmap.is_invalid() {
+            let _ = DeleteObject(bitmap.into());
+            let _ = DeleteDC(memory_dc);
+            let _ = ReleaseDC(None, screen_dc);
+            return None;
+        }
+        if BitBlt(
+            memory_dc,
+            0,
+            0,
+            source_w,
+            source_h,
+            Some(screen_dc),
+            source_left,
+            source_top,
+            SRCCOPY,
+        )
+        .is_err()
+        {
+            let _ = SelectObject(memory_dc, old_bitmap);
+            let _ = DeleteObject(bitmap.into());
+            let _ = DeleteDC(memory_dc);
+            let _ = ReleaseDC(None, screen_dc);
+            return None;
+        }
+        let _ = ReleaseDC(None, screen_dc);
+        Some(ScreenSnapshot {
+            left: source_left,
+            top: source_top,
+            width: source_w,
+            height: source_h,
+            hdc: memory_dc,
+            bitmap,
+            old_bitmap,
+        })
+    }
+}

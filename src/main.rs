@@ -1018,6 +1018,8 @@ pub struct SurgicalModeConfig {
     zoom_size_px: i32,
     overlay_offset_x: i32,
     overlay_offset_y: i32,
+    refresh_interval_ms: u64,
+    center_crosshair: bool,
 }
 
 impl Default for SurgicalModeConfig {
@@ -1030,6 +1032,8 @@ impl Default for SurgicalModeConfig {
             zoom_size_px: 180,
             overlay_offset_x: 24,
             overlay_offset_y: 24,
+            refresh_interval_ms: 16,
+            center_crosshair: true,
         }
     }
 }
@@ -1996,6 +2000,12 @@ impl Config {
         if self.surgical_mode.zoom_size_px < 32 {
             warn_config_normalized("surgical_mode.zoom_size_px is below 32; clamping to 32");
             self.surgical_mode.zoom_size_px = 32;
+        }
+        if self.surgical_mode.refresh_interval_ms > 1000 {
+            warn_config_normalized(
+                "surgical_mode.refresh_interval_ms is above 1000; clamping to 1000",
+            );
+            self.surgical_mode.refresh_interval_ms = 1000;
         }
     }
 
