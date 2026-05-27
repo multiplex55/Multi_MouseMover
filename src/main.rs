@@ -3527,6 +3527,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             AppCommand::NamePromptInput(event) => {
                 println!("[command] NamePromptInput key={:?}", event.key)
             }
+            AppCommand::ApplyBookmarkName { slot, name } => {
+                println!("[command] ApplyBookmarkName slot={slot} name={name:?}")
+            }
             AppCommand::UiHintInput(event) => {
                 println!(
                     "[command] UiHintInput key={:?} state={}",
