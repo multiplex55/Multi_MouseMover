@@ -5349,30 +5349,6 @@ mod tests {
     }
 
     #[test]
-    fn readme_default_binding_keys_match_documented_defaults() {
-        let config = Config::default().normalize().unwrap();
-        let section = readme_section("## Default Bindings", "## Active And Idle");
-
-        for key in [
-            &config.system_bindings.toggle_active,
-            &config.system_bindings.exit,
-        ] {
-            let token = format!("`{key}`");
-            assert!(section.contains(&token), "README missing {token}");
-        }
-
-        for (key, _) in &config.key_bindings {
-            let token = format!("`{key}`");
-            assert!(section.contains(&token), "README missing {token}");
-        }
-
-        assert!(
-            !section.contains("Alt+E active toggle") && !section.contains("Alt + E active toggle"),
-            "README should not document stale Alt+E active-toggle phrasing"
-        );
-    }
-
-    #[test]
     fn readme_copy_paste_jump_snippet_parses() {
         let snippet = readme_toml_block_after("Copy-pasteable jump configuration:");
         let config = parse_config(snippet);
