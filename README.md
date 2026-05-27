@@ -53,20 +53,10 @@ Action bindings run only while active mode is enabled:
 | `F` | Jump mode |
 | `G` | Grid mode |
 | `C` | Screen select |
-| `RightAlt+M` | Save current cursor position (session only) |
-| `RightAlt+Backspace` | Clear saved cursor positions (session only) |
-| `RightAlt+J` | Enter position-history selection mode |
-| `Shift+B` | Enter bookmark mode |
-| `Shift+Ctrl+B` | Clear all bookmarks |
-| `1` | Select bookmark slot 1 (in bookmark mode) |
-| `2` | Select bookmark slot 2 (in bookmark mode) |
-| `3` | Select bookmark slot 3 (in bookmark mode) |
-| `4` | Select bookmark slot 4 (in bookmark mode) |
-| `5` | Select bookmark slot 5 (in bookmark mode) |
-| `6` | Select bookmark slot 6 (in bookmark mode) |
-| `7` | Select bookmark slot 7 (in bookmark mode) |
-| `8` | Select bookmark slot 8 (in bookmark mode) |
-| `9` | Select bookmark slot 9 (in bookmark mode) |
+| `B` | Enter bookmark mode |
+| `Backspace+1..9` | Clear bookmark slot 1..9 (in bookmark mode) |
+| `1..9` | Save bookmark slot 1..9 (in bookmark mode) / recall slot 1..9 (outside bookmark mode) |
+| `Escape` | Cancel bookmark mode |
 | `H` | Navigate back |
 | `Y` | Navigate forward |
 | `Q` / `P` | Switch to idle |
@@ -280,12 +270,13 @@ For input-pipeline regressions, run the diagnostic smoke test in [docs/smoke_tes
 This project is licensed under the terms of the MIT license. See [LICENSE](LICENSE) for details.
 
 
-## Position History (Session Only)
+## Bookmarks
 
-Position history is in-memory for this phase (no disk persistence).
+Bookmarks are in-memory/session-backed by default with optional JSON persistence via `[bookmarks]`.
 
-Flow:
-1. Press `RightAlt+M` to save the current cursor location.
-2. Press `RightAlt+J` to enter selection mode and type the shown label.
-3. The cursor jumps to the selected saved position.
-4. Press `RightAlt+Backspace` to clear all saved positions.
+Default flow:
+1. Press `B` to enter bookmark mode.
+2. Press `1..9` while in bookmark mode to save to that slot.
+3. Press `Backspace+1..9` while in bookmark mode to clear that slot.
+4. Press `1..9` outside bookmark mode to recall that slot.
+5. Press `Escape` to cancel bookmark mode without changing slots.
