@@ -75,7 +75,6 @@ pub enum AppCommand {
     ClearBookmarkSlot(u8),
     ClearAllBookmarks,
     CancelBookmarkMode,
-    NamePromptInput(KeyEvent),
     ApplyBookmarkName {
         slot: u8,
         name: Option<String>,
@@ -113,7 +112,6 @@ pub struct AppState {
     grid_direction_labels: GridDirectionLabels,
     bookmark_cancel_key: VirtualKey,
     bookmark_clear_modifier_key: VirtualKey,
-    name_prompt_active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,7 +254,6 @@ impl Default for AppState {
             grid_direction_labels: GridDirectionLabels::default(),
             bookmark_cancel_key: VirtualKey::Escape,
             bookmark_clear_modifier_key: VirtualKey::Backspace,
-            name_prompt_active: false,
         }
     }
 }
@@ -524,13 +521,6 @@ impl AppState {
             || self.is_bookmark_mode_active()
     }
 
-    pub fn set_name_prompt_active(&mut self, active: bool) {
-        self.name_prompt_active = active;
-    }
-
-    pub fn is_name_prompt_active(&self) -> bool {
-        self.name_prompt_active
-    }
     pub fn is_bookmark_mode_active(&self) -> bool {
         matches!(self.bookmark_mode, BookmarkModeState::Active { .. })
     }

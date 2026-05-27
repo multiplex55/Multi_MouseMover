@@ -186,14 +186,6 @@ lazy_static! {
     static ref LAST_UI_HINT_COMPLETION: Mutex<Option<UiHintCompletionState>> = Mutex::new(None);
     static ref LAST_SURGICAL_TOOLTIP_ACTIVE: Mutex<bool> = Mutex::new(false);
     static ref UI_HINT_QUERY_DEADLINE: Mutex<Option<(u64, Instant)>> = Mutex::new(None);
-    static ref BOOKMARK_NAME_PROMPT: Mutex<Option<BookmarkNamePromptState>> = Mutex::new(None);
-}
-
-#[derive(Debug, Clone)]
-struct BookmarkNamePromptState {
-    slot: u8,
-    buffer: String,
-    deadline: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3524,9 +3516,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
             AppCommand::ClearAllBookmarks => println!("[command] ClearAllBookmarks"),
             AppCommand::CancelBookmarkMode => println!("[command] CancelBookmarkMode"),
-            AppCommand::NamePromptInput(event) => {
-                println!("[command] NamePromptInput key={:?}", event.key)
-            }
             AppCommand::ApplyBookmarkName { slot, name } => {
                 println!("[command] ApplyBookmarkName slot={slot} name={name:?}")
             }
@@ -4135,7 +4124,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
 
-        AppCommand::NamePromptInput(_event) => {}
         AppCommand::ApplyBookmarkName { slot, name } => {
             let mut runtime_guard = BOOKMARK_RUNTIME.lock().unwrap();
             if let Some(runtime) = runtime_guard.as_mut() {
@@ -7901,69 +7889,15 @@ file = "data/bookmarks.json"
     }
 }
 
-#[allow(dead_code)]
-fn bookmark_name_char(key: VirtualKey, shift: bool) -> Option<char> {
-    let c = match key {
-        VirtualKey::A => 'a',
-        VirtualKey::B => 'b',
-        VirtualKey::C => 'c',
-        VirtualKey::D => 'd',
-        VirtualKey::E => 'e',
-        VirtualKey::F => 'f',
-        VirtualKey::G => 'g',
-        VirtualKey::H => 'h',
-        VirtualKey::I => 'i',
-        VirtualKey::J => 'j',
-        VirtualKey::K => 'k',
-        VirtualKey::L => 'l',
-        VirtualKey::M => 'm',
-        VirtualKey::N => 'n',
-        VirtualKey::O => 'o',
-        VirtualKey::P => 'p',
-        VirtualKey::Q => 'q',
-        VirtualKey::R => 'r',
-        VirtualKey::S => 's',
-        VirtualKey::T => 't',
-        VirtualKey::U => 'u',
-        VirtualKey::V => 'v',
-        VirtualKey::W => 'w',
-        VirtualKey::X => 'x',
-        VirtualKey::Y => 'y',
-        VirtualKey::Z => 'z',
-        VirtualKey::Num0 => '0',
-        VirtualKey::Num1 => '1',
-        VirtualKey::Num2 => '2',
-        VirtualKey::Num3 => '3',
-        VirtualKey::Num4 => '4',
-        VirtualKey::Num5 => '5',
-        VirtualKey::Num6 => '6',
-        VirtualKey::Num7 => '7',
-        VirtualKey::Num8 => '8',
-        VirtualKey::Num9 => '9',
-        _ => return None,
-    };
-    Some(if shift { c.to_ascii_uppercase() } else { c })
-}
-
-fn process_bookmark_name_prompt_timeout() {
-    let expired = BOOKMARK_NAME_PROMPT
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|s| Instant::now() >= s.deadline)
-        .unwrap_or(false);
-    if expired {
-        *BOOKMARK_NAME_PROMPT.lock().unwrap() = None;
-        APP_STATE.write().unwrap().set_name_prompt_active(false);
-    }
-}
+#[cfg(test)]
 mod bookmark_runtime_logic_tests {
     use super::*;
 
     fn cfg(policy: BookmarkCoordinatePolicy) -> BookmarksConfig {
-        let mut c = BookmarksConfig::default();
-        c.coordinate_policy = policy;
-        c
+        BookmarksConfig {
+            coordinate_policy: policy,
+            ..BookmarksConfig::default()
+        }
     }
 
     fn rec(x: i32, y: i32) -> BookmarkRecord {
