@@ -24,13 +24,14 @@ top_speed = 6
 # Key and system bindings
 # ---------------------------------------------------------------------------
 # These action bindings are handled only while active mode is enabled.
+# Default movement/click layout: E/S/D/F for movement, J/K/L for clicks, N for drag toggle, and . for click_then_disable.
 key_bindings = [
     ["E", "move_up"],
     ["S", "move_left"],
     ["D", "move_down"],
     ["F", "move_right"],
     ["LeftShift", "slow_mouse"],
-    #["LeftAlt", "scroll_modifier"],
+    # ["LeftAlt", "scroll_modifier"],  # Optional: only needed when [scroll_mode].enabled = true
     ["Z", "surgical_mode"],
 
     ["J", "left_click"],
@@ -40,6 +41,15 @@ key_bindings = [
     [".", "click_then_disable"],
 
     # Wheel directions (horizontal wheel bindings are commented out by preference).
+# Optional actions/examples (uncomment as needed; all action strings are valid):
+# ["I", "wheel_left"]
+# ["O", "wheel_right"]
+# ["Z", "mouse_speed_reset"]
+# ["RightAlt+F", "jump_mode_profile:precise"]
+# ["RightAlt+W", "jump_mode_profile.window"]
+# ["RightAlt+1", "movement_profile:precision"]
+# ["RightAlt+2", "wheel_profile:fast"]
+# ["Backspace+1", "clear_bookmark_1"]
     ["W", "wheel_up"],
     ["R", "wheel_down"],
     # ["I", "wheel_left"],
@@ -237,8 +247,9 @@ flash_indicator_ms = 700
 # Scroll mode
 # ---------------------------------------------------------------------------
 [scroll_mode]
-# Hold the modifier action to remap movement keys into wheel directions.
+# Scroll mode is disabled by default.
 enabled = false
+# Optional binding: modifier_action only needs a bound key when scroll mode is enabled.
 modifier_action = "scroll_modifier"
 # If true, click actions release the modifier for predictable one-shot scrolling.
 exit_on_click = true
@@ -266,9 +277,9 @@ show_direction_labels = true
 # Click bindings
 # ---------------------------------------------------------------------------
 # Click actions are bound above:
-# - SPACE: left_click
-# - L: right_click
-# - RightShift: middle_click
+# - J: left_click
+# - K: right_click
+# - L: middle_click
 # - N: toggle_drag_mode
 # - .: click_then_disable
 

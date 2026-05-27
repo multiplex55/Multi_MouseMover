@@ -614,6 +614,49 @@ mod tests {
         assert_eq!(Action::from_string("position_history_mode"), None);
     }
 
+
+    #[test]
+    fn docs_and_config_do_not_use_legacy_position_history_terms() {
+        let corpus = [
+            include_str!("../README.md"),
+            include_str!("../docs/config.md"),
+            include_str!("../config.toml"),
+        ]
+        .join("\n");
+
+        for token in [
+            "save_mouse_position",
+            "clear_mouse_positions",
+            "position_history_mode",
+            "PositionHistory",
+            "position history",
+            "mouse save position",
+        ] {
+            assert!(
+                !corpus.to_lowercase().contains(&token.to_lowercase()),
+                "legacy token found: {token}"
+            );
+        }
+    }
+
+    #[test]
+    fn optional_example_actions_are_valid_action_names() {
+        let optional_actions = [
+            "wheel_left",
+            "wheel_right",
+            "mouse_speed_reset",
+            "jump_mode_profile:precise",
+            "jump_mode_profile.window",
+            "movement_profile:precision",
+            "wheel_profile:fast",
+            "clear_bookmark_1",
+        ];
+
+        for action in optional_actions {
+            assert!(Action::from_string(action).is_some(), "invalid action: {action}");
+        }
+    }
+
     #[test]
     fn parses_bookmark_actions() {
         assert_eq!(

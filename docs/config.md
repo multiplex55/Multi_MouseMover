@@ -51,39 +51,39 @@ Holding `LeftAlt+E` emits `wheel_up` instead of moving the cursor; releasing `Le
 The checked-in `config.toml` defaults to:
 
 - Monitor-edge actions:
-  - `RightAlt+W` -> `move_to_top_edge`
-  - `RightAlt+A` -> `move_to_left_edge`
-  - `RightAlt+S` -> `move_to_bottom_edge`
-  - `RightAlt+D` -> `move_to_right_edge`
+  - `RightAlt+E` -> `move_to_top_edge`
+  - `RightAlt+S` -> `move_to_left_edge`
+  - `RightAlt+D` -> `move_to_bottom_edge`
+  - `RightAlt+F` -> `move_to_right_edge`
 - Active-window-edge actions:
-  - `RightAlt+Ctrl+W` -> `move_to_window_top_edge`
-  - `RightAlt+Ctrl+A` -> `move_to_window_left_edge`
-  - `RightAlt+Ctrl+S` -> `move_to_window_bottom_edge`
-  - `RightAlt+Ctrl+D` -> `move_to_window_right_edge`
-  - `RightAlt+Ctrl+Q` -> `move_to_window_center`
-  - `RightAlt+Ctrl+E` -> `move_to_window_titlebar`
+  - `RightAlt+Ctrl+E` -> `move_to_window_top_edge`
+  - `RightAlt+Ctrl+S` -> `move_to_window_left_edge`
+  - `RightAlt+Ctrl+D` -> `move_to_window_bottom_edge`
+  - `RightAlt+Ctrl+F` -> `move_to_window_right_edge`
+  - `RightAlt+Ctrl+H` -> `move_to_window_center`
+  - `RightAlt+Ctrl+Y` -> `move_to_window_titlebar`
 
 Full default `key_bindings` list:
 
 ```toml
 key_bindings = [
-  ["W", "move_up"], ["A", "move_left"], ["S", "move_down"], ["D", "move_right"],
+  ["E", "move_up"], ["S", "move_left"], ["D", "move_down"], ["F", "move_right"],
   ["LeftShift", "slow_mouse"],
-  ["SPACE", "left_click"], ["L", "right_click"], ["RightShift", "middle_click"],
+  ["J", "left_click"], ["K", "right_click"], ["L", "middle_click"],
   ["N", "toggle_drag_mode"], [".", "click_then_disable"],
   ["W", "wheel_up"], ["R", "wheel_down"],
-  ["X", "mouse_speed_down"], ["Z", "mouse_speed_reset"],
-  ["U", "wheel_speed_up"], ["I", "wheel_speed_down"],
+  ["M", "mouse_speed_down"], [",", "mouse_speed_up"],
+  ["U", "wheel_speed_down"], ["I", "wheel_speed_up"],
   ["RightAlt+C", "movement_profile_next"], ["RightAlt+X", "movement_profile_previous"],
   ["RightAlt+V", "wheel_profile_next"], ["RightAlt+B", "wheel_profile_previous"],
-  ["F", "jump_mode"], ["G", "grid_mode"], ["C", "screen_select"],
+  ["T", "jump_mode"], ["G", "grid_mode"], ["C", "screen_select"],
   ["H", "navigate_back"], ["Y", "navigate_forward"],
   ["Q", "disable"], ["P", "disable"],
-  ["RightAlt+W", "move_to_top_edge"], ["RightAlt+A", "move_to_left_edge"],
-  ["RightAlt+S", "move_to_bottom_edge"], ["RightAlt+D", "move_to_right_edge"],
-  ["RightAlt+Ctrl+W", "move_to_window_top_edge"], ["RightAlt+Ctrl+A", "move_to_window_left_edge"],
-  ["RightAlt+Ctrl+S", "move_to_window_bottom_edge"], ["RightAlt+Ctrl+D", "move_to_window_right_edge"],
-  ["RightAlt+Ctrl+Q", "move_to_window_center"], ["RightAlt+Ctrl+E", "move_to_window_titlebar"],
+  ["RightAlt+E", "move_to_top_edge"], ["RightAlt+S", "move_to_left_edge"],
+  ["RightAlt+D", "move_to_bottom_edge"], ["RightAlt+F", "move_to_right_edge"],
+  ["RightAlt+Ctrl+E", "move_to_window_top_edge"], ["RightAlt+Ctrl+S", "move_to_window_left_edge"],
+  ["RightAlt+Ctrl+D", "move_to_window_bottom_edge"], ["RightAlt+Ctrl+F", "move_to_window_right_edge"],
+  ["RightAlt+Ctrl+H", "move_to_window_center"], ["RightAlt+Ctrl+Y", "move_to_window_titlebar"],
   ["RightAlt+R", "reload_config"], ["RightAlt+Escape", "panic_reset"],
   ["Alt+E", "step_move_up"], ["Alt+S", "step_move_left"], ["Alt+D", "step_move_down"], ["Alt+F", "step_move_right"],
   ["Alt+Ctrl+E", "step_move_small_up"], ["Alt+Ctrl+S", "step_move_small_left"], ["Alt+Ctrl+D", "step_move_small_down"], ["Alt+Ctrl+F", "step_move_small_right"],
