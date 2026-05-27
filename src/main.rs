@@ -7743,9 +7743,9 @@ file = "data/bookmarks.json"
 mod bookmark_runtime_logic_tests {
     use super::*;
 
-    fn cfg(policy: &str) -> BookmarksConfig {
+    fn cfg(policy: BookmarkCoordinatePolicy) -> BookmarksConfig {
         let mut c = BookmarksConfig::default();
-        c.coordinate_policy = policy.to_string();
+        c.coordinate_policy = policy;
         c
     }
 
@@ -7773,7 +7773,7 @@ mod bookmark_runtime_logic_tests {
     #[test]
     fn exact_policy_preserves_coordinate() {
         assert_eq!(
-            resolve_recall_target(&rec(5000, -2000), &cfg("exact")),
+            resolve_recall_target(&rec(5000, -2000), &cfg(BookmarkCoordinatePolicy::Exact)),
             (5000, -2000)
         );
     }
@@ -7781,7 +7781,10 @@ mod bookmark_runtime_logic_tests {
     #[test]
     fn clamp_to_nearest_monitor_clamps_out_of_bounds_target() {
         assert_eq!(
-            resolve_recall_target(&rec(5000, -2000), &cfg("clamp_to_nearest_monitor")),
+            resolve_recall_target(
+                &rec(5000, -2000),
+                &cfg(BookmarkCoordinatePolicy::ClampToNearestMonitor)
+            ),
             (99, 0)
         );
     }
@@ -7796,9 +7799,9 @@ mod bookmark_runtime_logic_tests {
     }
 
     #[test]
-    fn move_without_switch_allows_move_attempt() {
+    fn current_only_allows_move_attempt() {
         let mut c = BookmarksConfig::default();
-        c.desktop_behavior = "move_without_switch".into();
+        c.desktop_behavior = BookmarkDesktopBehavior::CurrentOnly;
         let r = rec(5, 6);
         assert_eq!(resolve_recall_target(&r, &c), (5, 6));
     }
@@ -7830,7 +7833,7 @@ mod bookmark_runtime_logic_tests {
         };
         let mut c = BookmarksConfig::default();
         c.require_desktop_switch_success = false;
-        c.desktop_behavior = "focus_anchor_window".into();
+        c.desktop_behavior = BookmarkDesktopBehavior::FocusAnchorWindow;
         let (x, y) = resolve_recall_target(&record, &c);
         assert_eq!((x, y), (42, 24));
     }
