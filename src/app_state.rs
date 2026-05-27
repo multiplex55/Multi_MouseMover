@@ -76,6 +76,10 @@ pub enum AppCommand {
     ClearAllBookmarks,
     CancelBookmarkMode,
     NamePromptInput(KeyEvent),
+    ApplyBookmarkName {
+        slot: u8,
+        name: Option<String>,
+    },
     UiHintQueryCompleted {
         query_id: u64,
         elements: Vec<crate::windows_uia::RawUiElement>,
@@ -999,13 +1003,6 @@ impl AppState {
             && self.is_toggle_active_key_down_event(&event)
         {
             self.enqueue_command(AppCommand::ToggleActiveMode);
-            return;
-        }
-
-        if self.name_prompt_active {
-            if event.is_down {
-                self.enqueue_command(AppCommand::NamePromptInput(event));
-            }
             return;
         }
 

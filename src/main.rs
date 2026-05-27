@@ -3439,6 +3439,30 @@ fn evaluate_focus_attempt(result: FocusAnchorResult) -> (bool, Option<String>) {
     (false, Some(reason.to_string()))
 }
 
+fn open_bookmark_name_dialog_async(slot: u8, existing: Option<String>, max_len: usize) {
+    std::thread::spawn(move || {
+        let title = format!("Bookmark {slot} name");
+        let default = existing.unwrap_or_default().replace('"', "''");
+        let script = format!(
+            "Add-Type -AssemblyName Microsoft.VisualBasic; $v=[Microsoft.VisualBasic.Interaction]::InputBox('Enter bookmark name','{}','{}'); Write-Output $v",
+            title.replace('"', "''"),
+            default
+        );
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output();
+        let name = output
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .and_then(|s| normalize_bookmark_name(&s, max_len));
+        APP_STATE
+            .write()
+            .unwrap()
+            .enqueue_command(AppCommand::ApplyBookmarkName { slot, name });
+    });
+}
+
 fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
     if debug_diagnostics {
         match &command {
@@ -4099,61 +4123,23 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 && (config.bookmarks.prompt_for_name_on_save
                     || config.bookmarks.prompt_for_name_on_set)
             {
-                *BOOKMARK_NAME_PROMPT.lock().unwrap() = Some(BookmarkNamePromptState {
+                open_bookmark_name_dialog_async(
                     slot,
-                    buffer: String::new(),
-                    deadline: Instant::now()
-                        + Duration::from_millis(config.bookmarks.name_prompt_timeout_ms),
-                });
-                APP_STATE.write().unwrap().set_name_prompt_active(true);
+                    existing_name,
+                    config.bookmarks.max_name_length,
+                );
             }
         }
 
-        AppCommand::NamePromptInput(event) => {
-            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
-            let mut prompt = BOOKMARK_NAME_PROMPT.lock().unwrap();
-            let Some(state) = prompt.as_mut() else {
-                APP_STATE.write().unwrap().set_name_prompt_active(false);
-                return;
-            };
-            match event.key {
-                VirtualKey::Escape => {
-                    *prompt = None;
-                    APP_STATE.write().unwrap().set_name_prompt_active(false);
-                }
-                VirtualKey::Enter => {
-                    let name = if config.bookmarks.allow_name_updates {
-                        normalize_bookmark_name(&state.buffer, config.bookmarks.max_name_length)
-                    } else {
-                        None
-                    };
-                    let slot = state.slot;
-                    let mut runtime_guard = BOOKMARK_RUNTIME.lock().unwrap();
-                    if let Some(runtime) = runtime_guard.as_mut() {
-                        if let Some(record) = runtime.store.get_slot(slot).cloned() {
-                            let mut updated = record;
-                            updated.name = name;
-                            runtime.store.set_slot(slot, updated);
-                            let _ = runtime.store.save(&runtime.bookmark_path);
-                        }
-                    }
-                    *prompt = None;
-                    APP_STATE.write().unwrap().set_name_prompt_active(false);
-                }
-                VirtualKey::Backspace => {
-                    state.buffer.pop();
-                }
-                VirtualKey::Space => {
-                    if state.buffer.len() < config.bookmarks.max_name_length {
-                        state.buffer.push(' ');
-                    }
-                }
-                _ => {
-                    if let Some(ch) = bookmark_name_char(event.key, event.shift_down) {
-                        if state.buffer.len() < config.bookmarks.max_name_length {
-                            state.buffer.push(ch);
-                        }
-                    }
+        AppCommand::NamePromptInput(_event) => {}
+        AppCommand::ApplyBookmarkName { slot, name } => {
+            let mut runtime_guard = BOOKMARK_RUNTIME.lock().unwrap();
+            if let Some(runtime) = runtime_guard.as_mut() {
+                if let Some(record) = runtime.store.get_slot(slot).cloned() {
+                    let mut updated = record;
+                    updated.name = name;
+                    runtime.store.set_slot(slot, updated);
+                    let _ = runtime.store.save(&runtime.bookmark_path);
                 }
             }
         }
@@ -7906,6 +7892,7 @@ file = "data/bookmarks.json"
     }
 }
 
+#[allow(dead_code)]
 fn bookmark_name_char(key: VirtualKey, shift: bool) -> Option<char> {
     let c = match key {
         VirtualKey::A => 'a',
