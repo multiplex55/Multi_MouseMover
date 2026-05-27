@@ -145,6 +145,8 @@ pub enum VirtualKey {
     RightCtrl,
     LeftAlt,
     RightAlt,
+    LeftWin,
+    RightWin,
 }
 
 impl VirtualKey {
@@ -282,6 +284,8 @@ impl VirtualKey {
             "RIGHTCTRL" => Some(Self::RightCtrl),
             "LEFTALT" => Some(Self::LeftAlt),
             "RIGHTALT" | "RIGHT_ALT" | "RALT" => Some(Self::RightAlt),
+            "LEFTWIN" | "LWIN" => Some(Self::LeftWin),
+            "RIGHTWIN" | "RWIN" => Some(Self::RightWin),
 
             _ => None,
         }
@@ -422,6 +426,8 @@ impl VirtualKey {
             Self::RightCtrl => 0xA3,
             Self::LeftAlt => 0xA4,
             Self::RightAlt => 0xA5,
+            Self::LeftWin => 0x5B,
+            Self::RightWin => 0x5C,
         }
     }
 
@@ -559,6 +565,8 @@ impl VirtualKey {
             0xA3 => Some(Self::RightCtrl),
             0xA4 => Some(Self::LeftAlt),
             0xA5 => Some(Self::RightAlt),
+            0x5B => Some(Self::LeftWin),
+            0x5C => Some(Self::RightWin),
 
             _ => None,
         }

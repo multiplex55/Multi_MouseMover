@@ -18,10 +18,17 @@ pub struct KeyEvent {
     pub key: VirtualKey,
     pub is_down: bool,
     pub alt_down: bool,
+    pub left_alt_down: bool,
     pub right_alt_down: bool,
     pub ctrl_down: bool,
+    pub left_ctrl_down: bool,
+    pub right_ctrl_down: bool,
     pub shift_down: bool,
+    pub left_shift_down: bool,
+    pub right_shift_down: bool,
     pub win_down: bool,
+    pub left_win_down: bool,
+    pub right_win_down: bool,
 }
 
 impl KeyEvent {
@@ -30,10 +37,40 @@ impl KeyEvent {
             key,
             is_down,
             alt_down: false,
+            left_alt_down: false,
             right_alt_down: false,
             ctrl_down: false,
+            left_ctrl_down: false,
+            right_ctrl_down: false,
             shift_down: false,
+            left_shift_down: false,
+            right_shift_down: false,
             win_down: false,
+            left_win_down: false,
+            right_win_down: false,
+        }
+    }
+
+    pub fn with_modifier_state(
+        key: VirtualKey,
+        is_down: bool,
+        modifiers: crate::input_decode::ModifierSnapshot,
+    ) -> Self {
+        Self {
+            key,
+            is_down,
+            alt_down: modifiers.left_alt || modifiers.right_alt,
+            left_alt_down: modifiers.left_alt,
+            right_alt_down: modifiers.right_alt,
+            ctrl_down: modifiers.left_ctrl || modifiers.right_ctrl,
+            left_ctrl_down: modifiers.left_ctrl,
+            right_ctrl_down: modifiers.right_ctrl,
+            shift_down: modifiers.left_shift || modifiers.right_shift,
+            left_shift_down: modifiers.left_shift,
+            right_shift_down: modifiers.right_shift,
+            win_down: modifiers.left_win || modifiers.right_win,
+            left_win_down: modifiers.left_win,
+            right_win_down: modifiers.right_win,
         }
     }
 }
