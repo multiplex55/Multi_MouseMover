@@ -323,6 +323,8 @@ fn is_known_active_path(path: &str) -> bool {
         "surgical_mode.zoom_size_px",
         "surgical_mode.overlay_offset_x",
         "surgical_mode.overlay_offset_y",
+        "surgical_mode.refresh_interval_ms",
+        "surgical_mode.center_crosshair",
         "movement_profiles.*.default_speed",
         "movement_profiles.*.min_speed",
         "movement_profiles.*.max_speed",
