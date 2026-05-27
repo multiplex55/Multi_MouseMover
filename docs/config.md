@@ -445,12 +445,19 @@ enabled = true
 file = "bookmarks.json"
 slot_count = 9            # clamped to 1..9
 show_tooltips = true
+prompt_for_name_on_set = false
+max_name_length = 48
 desktop_behavior = "focus_anchor_window"
 desktop_switch_wait_ms = 150   # clamped to 0..3000
 require_desktop_switch_success = false
 cancel_key = "Escape"           # invalid values fallback to Escape
 clear_modifier_key = "Backspace" # invalid values fallback to Backspace
 coordinate_policy = "clamp_to_virtual_screen"
+list_show_coordinates = true
+list_include_empty_slots = true
+list_empty_slot_label = "(empty)"
+list_unnamed_label = "(unnamed)"
+list_tooltip_duration_ms = 1200
 ```
 
 `desktop_behavior` currently supports `focus_anchor_window` (invalid values fall back to this). `coordinate_policy` currently supports `clamp_to_virtual_screen` (invalid values fall back to this).

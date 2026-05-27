@@ -282,3 +282,4 @@ Default flow:
 3. Press `Backspace+1..9` while in bookmark mode to clear that slot.
 4. Press `1..9` outside bookmark mode to recall that slot.
 5. Press `Escape` to cancel bookmark mode without changing slots.
+6. Optional: bind `show_bookmarks` / `bookmark_list` to show a tooltip list of slots.

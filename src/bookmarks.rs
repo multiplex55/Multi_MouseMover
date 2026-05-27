@@ -17,6 +17,7 @@ pub struct MonitorRect {
 #[serde(default)]
 pub struct BookmarkRecord {
     pub slot: u8,
+    pub name: Option<String>,
     pub x: i32,
     pub y: i32,
     pub monitor_device_name: String,
@@ -27,6 +28,32 @@ pub struct BookmarkRecord {
     pub anchor_window_title: Option<String>,
     pub created_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
+}
+
+pub fn normalize_bookmark_name(input: &str, max_len: usize) -> Option<String> {
+    if max_len == 0 {
+        return None;
+    }
+    let collapsed = input
+        .chars()
+        .map(|ch| {
+            if ch == '\n' || ch == '\r' || ch == '\t' {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+    let trimmed = collapsed.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized: String = trimmed.chars().take(max_len).collect();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +271,7 @@ mod tests {
     fn fixture_record(slot: u8) -> BookmarkRecord {
         BookmarkRecord {
             slot,
+            name: None,
             x: 10,
             y: 20,
             monitor_device_name: "DISPLAY1".to_string(),
@@ -478,5 +506,34 @@ mod tests {
         assert_eq!(loaded.anchor_window_title, None);
         assert_eq!(loaded.created_at_unix_ms, 0);
         assert_eq!(loaded.updated_at_unix_ms, 0);
+        assert_eq!(loaded.name, None);
+    }
+
+    #[test]
+    fn bookmark_record_deserializes_without_name() {
+        let json = r#"{
+  "slot": 1,
+  "x": 1,
+  "y": 2,
+  "monitor_device_name": "DISPLAY1",
+  "monitor_rect": {"left": 0, "top": 0, "right": 1, "bottom": 1},
+  "created_at_unix_ms": 1,
+  "updated_at_unix_ms": 2
+}"#;
+        let record: BookmarkRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(record.name, None);
+    }
+
+    #[test]
+    fn bookmark_name_trimmed_and_clamped() {
+        assert_eq!(
+            normalize_bookmark_name("\n  hello\tworld  \n", 8),
+            Some("hello wo".to_string())
+        );
+    }
+
+    #[test]
+    fn empty_bookmark_name_becomes_none() {
+        assert_eq!(normalize_bookmark_name(" \n\t ", 10), None);
     }
 }

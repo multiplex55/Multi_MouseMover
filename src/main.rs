@@ -26,8 +26,8 @@ use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, GridInputUpdate, JumpOverlayResolution, KeyEvent};
 use bookmarks::{
-    resolve_bookmarks_path, BookmarkRecord, BookmarkStore, MonitorRect as BookmarkMonitorRect,
-    RemoveOutcome, SetOutcome,
+    normalize_bookmark_name, resolve_bookmarks_path, BookmarkRecord, BookmarkStore,
+    MonitorRect as BookmarkMonitorRect, RemoveOutcome, SetOutcome,
 };
 use config_audit::{audit_config_toml, ConfigAuditSeverity, ConfigAuditWarning};
 #[cfg(test)]
@@ -650,12 +650,19 @@ pub struct BookmarksConfig {
     pub file: String,
     pub slot_count: u32,
     pub show_tooltips: bool,
+    pub prompt_for_name_on_set: bool,
+    pub max_name_length: usize,
     pub desktop_behavior: BookmarkDesktopBehavior,
     pub desktop_switch_wait_ms: u64,
     pub require_desktop_switch_success: bool,
     pub cancel_key: String,
     pub clear_modifier_key: String,
     pub coordinate_policy: BookmarkCoordinatePolicy,
+    pub list_show_coordinates: bool,
+    pub list_include_empty_slots: bool,
+    pub list_empty_slot_label: String,
+    pub list_unnamed_label: String,
+    pub list_tooltip_duration_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -683,12 +690,19 @@ impl Default for BookmarksConfig {
             file: "bookmarks.json".to_string(),
             slot_count: 9,
             show_tooltips: true,
+            prompt_for_name_on_set: false,
+            max_name_length: 48,
             desktop_behavior: BookmarkDesktopBehavior::FocusAnchorWindow,
             desktop_switch_wait_ms: 150,
             require_desktop_switch_success: false,
             cancel_key: "Escape".to_string(),
             clear_modifier_key: "Backspace".to_string(),
             coordinate_policy: BookmarkCoordinatePolicy::ClampToVirtualScreen,
+            list_show_coordinates: true,
+            list_include_empty_slots: true,
+            list_empty_slot_label: "(empty)".to_string(),
+            list_unnamed_label: "(unnamed)".to_string(),
+            list_tooltip_duration_ms: 1200,
         }
     }
 }
@@ -1762,6 +1776,15 @@ impl Config {
         }
         self.bookmarks.desktop_switch_wait_ms =
             self.bookmarks.desktop_switch_wait_ms.clamp(0, 3000);
+        self.bookmarks.max_name_length = self.bookmarks.max_name_length.clamp(1, 200);
+        self.bookmarks.list_tooltip_duration_ms =
+            self.bookmarks.list_tooltip_duration_ms.clamp(200, 10_000);
+        if self.bookmarks.list_empty_slot_label.trim().is_empty() {
+            self.bookmarks.list_empty_slot_label = "(empty)".to_string();
+        }
+        if self.bookmarks.list_unnamed_label.trim().is_empty() {
+            self.bookmarks.list_unnamed_label = "(unnamed)".to_string();
+        }
         if VirtualKey::from_string(&self.bookmarks.cancel_key).is_none() {
             warn_config_normalized("bookmarks.cancel_key is invalid; using Escape");
             self.bookmarks.cancel_key = "Escape".to_string();
@@ -3342,7 +3365,11 @@ fn resolve_recall_target(record: &BookmarkRecord, cfg: &BookmarksConfig) -> (i32
 
 fn show_bookmark_tooltip(config: &Config, body: String) {
     if bookmark_tooltip_events_enabled(config) {
-        help_overlay::show_temporary_tooltip("Bookmarks", &body, Duration::from_millis(900));
+        help_overlay::show_temporary_tooltip(
+            "Bookmarks",
+            &body,
+            Duration::from_millis(config.bookmarks.list_tooltip_duration_ms),
+        );
     }
 }
 
@@ -3352,6 +3379,34 @@ fn bookmark_mode_entry_tooltip_body() -> String {
 
 fn bookmark_tooltip_events_enabled(config: &Config) -> bool {
     config.bookmarks.show_tooltips && config.tooltip_overlay.events.bookmarks
+}
+
+fn bookmark_list_tooltip_body(config: &Config, store: &BookmarkStore) -> String {
+    let mut lines = Vec::new();
+    for slot in 1..=(config.bookmarks.slot_count as u8) {
+        if let Some(record) = store.get_slot(slot) {
+            let name = record
+                .name
+                .clone()
+                .unwrap_or_else(|| config.bookmarks.list_unnamed_label.clone());
+            let coords = if config.bookmarks.list_show_coordinates {
+                format!(" ({}, {})", record.x, record.y)
+            } else {
+                String::new()
+            };
+            lines.push(format!("{slot}: {name}{coords}"));
+        } else if config.bookmarks.list_include_empty_slots {
+            lines.push(format!(
+                "{slot}: {}",
+                config.bookmarks.list_empty_slot_label
+            ));
+        }
+    }
+    if lines.is_empty() {
+        "No bookmarks".to_string()
+    } else {
+        lines.join("\n")
+    }
 }
 
 fn evaluate_focus_attempt(result: FocusAnchorResult) -> (bool, Option<String>) {
@@ -3423,6 +3478,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 println!("[command] RecallBookmarkSlot slot={slot}")
             }
             AppCommand::SetBookmarkSlot(slot) => println!("[command] SetBookmarkSlot slot={slot}"),
+            AppCommand::ShowBookmarks => println!("[command] ShowBookmarks"),
             AppCommand::ClearBookmarkSlot(slot) => {
                 println!("[command] ClearBookmarkSlot slot={slot}")
             }
@@ -3974,8 +4030,16 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .get_slot(slot)
                 .map(|r| r.created_at_unix_ms)
                 .unwrap_or(now);
+            let existing_name = runtime.store.get_slot(slot).and_then(|r| r.name.clone());
+            let name = if config.bookmarks.prompt_for_name_on_set {
+                None
+            } else {
+                existing_name
+                    .and_then(|raw| normalize_bookmark_name(&raw, config.bookmarks.max_name_length))
+            };
             let record = BookmarkRecord {
                 slot,
+                name,
                 x,
                 y,
                 monitor_device_name: "current".to_string(),
@@ -4006,6 +4070,17 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 }
             }
             APP_STATE.write().unwrap().exit_bookmark_mode();
+        }
+        AppCommand::ShowBookmarks => {
+            let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+            if !config.bookmarks.enabled {
+                return;
+            }
+            let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            show_bookmark_tooltip(&config, bookmark_list_tooltip_body(&config, &runtime.store));
         }
         AppCommand::ClearBookmarkSlot(slot) => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
@@ -7631,7 +7706,10 @@ desktop_switch_wait_ms = 999999
         );
         assert_eq!(config.bookmarks.slot_count, 1);
         assert_eq!(config.bookmarks.file, "bookmarks.json");
-        assert_eq!(config.bookmarks.desktop_behavior, BookmarkDesktopBehavior::FocusAnchorWindow);
+        assert_eq!(
+            config.bookmarks.desktop_behavior,
+            BookmarkDesktopBehavior::FocusAnchorWindow
+        );
         assert_eq!(
             config.bookmarks.coordinate_policy,
             BookmarkCoordinatePolicy::ClampToVirtualScreen
@@ -7659,7 +7737,10 @@ desktop_switch_wait_ms = 999999
     #[test]
     fn bookmark_coordinate_policy_parses_valid_values() {
         let cfg = parse_config("[bookmarks]\ncoordinate_policy = \"exact\"\n");
-        assert_eq!(cfg.bookmarks.coordinate_policy, BookmarkCoordinatePolicy::Exact);
+        assert_eq!(
+            cfg.bookmarks.coordinate_policy,
+            BookmarkCoordinatePolicy::Exact
+        );
     }
 
     #[test]
@@ -7752,6 +7833,7 @@ mod bookmark_runtime_logic_tests {
     fn rec(x: i32, y: i32) -> BookmarkRecord {
         BookmarkRecord {
             slot: 1,
+            name: None,
             x,
             y,
             monitor_device_name: "m".into(),
@@ -7796,6 +7878,62 @@ mod bookmark_runtime_logic_tests {
         let second = store.set_slot(1, rec(2, 2));
         assert_eq!(first, SetOutcome::Saved);
         assert_eq!(second, SetOutcome::Overwritten);
+    }
+
+    #[test]
+    fn saving_new_bookmark_defaults_name_to_none() {
+        let mut store = BookmarkStore::new(9);
+        store.set_slot(1, rec(10, 20));
+        assert_eq!(store.get_slot(1).and_then(|r| r.name.clone()), None);
+    }
+
+    #[test]
+    fn overwriting_named_bookmark_preserves_name_when_prompt_disabled() {
+        let mut store = BookmarkStore::new(9);
+        let mut first = rec(1, 1);
+        first.name = Some("Desk".into());
+        store.set_slot(1, first);
+        let mut cfg = BookmarksConfig::default();
+        cfg.prompt_for_name_on_set = false;
+        let preserved = store
+            .get_slot(1)
+            .and_then(|r| r.name.clone())
+            .and_then(|n| normalize_bookmark_name(&n, cfg.max_name_length));
+        let mut next = rec(2, 2);
+        next.name = preserved;
+        store.set_slot(1, next);
+        assert_eq!(
+            store.get_slot(1).and_then(|r| r.name.clone()),
+            Some("Desk".to_string())
+        );
+    }
+
+    #[test]
+    fn bookmark_list_tooltip_includes_names() {
+        let config = Config::default();
+        let mut store = BookmarkStore::new(9);
+        let mut r = rec(12, 34);
+        r.name = Some("Primary".into());
+        store.set_slot(1, r);
+        let body = bookmark_list_tooltip_body(&config, &store);
+        assert!(body.contains("1: Primary"));
+    }
+
+    #[test]
+    fn bookmark_list_tooltip_marks_empty_slots() {
+        let config = Config::default();
+        let store = BookmarkStore::new(3);
+        let body = bookmark_list_tooltip_body(&config, &store);
+        assert!(body.contains("(empty)"));
+    }
+
+    #[test]
+    fn bookmark_list_tooltip_hides_empty_slots_when_configured() {
+        let mut config = Config::default();
+        config.bookmarks.list_include_empty_slots = false;
+        let store = BookmarkStore::new(3);
+        let body = bookmark_list_tooltip_body(&config, &store);
+        assert_eq!(body, "No bookmarks");
     }
 
     #[test]

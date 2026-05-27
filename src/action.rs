@@ -74,6 +74,7 @@ pub enum Action {
     ShowHelp,
     UiHintMode,
     BookmarkMode,
+    ShowBookmarks,
     BookmarkSlot(u8),
     ClearBookmarkSlot(u8),
     ClearAllBookmarks,
@@ -204,6 +205,7 @@ impl Action {
             "show_help" | "help" | "toggle_help" | "hints" | "show_hints" => Some(Self::ShowHelp),
             "ui_hint_mode" | "ui_hints" | "show_ui_hints" | "hint_mode" => Some(Self::UiHintMode),
             "bookmark_mode" => Some(Self::BookmarkMode),
+            "show_bookmarks" | "bookmark_list" | "show_bookmark_list" => Some(Self::ShowBookmarks),
             "clear_all_bookmarks" => Some(Self::ClearAllBookmarks),
             action if action.starts_with("bookmark_slot_") => action
                 .trim_start_matches("bookmark_slot_")
@@ -614,7 +616,6 @@ mod tests {
         assert_eq!(Action::from_string("position_history_mode"), None);
     }
 
-
     #[test]
     fn docs_and_config_do_not_use_legacy_position_history_terms() {
         let corpus = [
@@ -653,7 +654,10 @@ mod tests {
         ];
 
         for action in optional_actions {
-            assert!(Action::from_string(action).is_some(), "invalid action: {action}");
+            assert!(
+                Action::from_string(action).is_some(),
+                "invalid action: {action}"
+            );
         }
     }
 
@@ -690,9 +694,26 @@ mod tests {
     }
 
     #[test]
+    fn show_bookmarks_action_parses() {
+        assert_eq!(
+            Action::from_string("show_bookmarks"),
+            Some(Action::ShowBookmarks)
+        );
+        assert_eq!(
+            Action::from_string("bookmark_list"),
+            Some(Action::ShowBookmarks)
+        );
+        assert_eq!(
+            Action::from_string("show_bookmark_list"),
+            Some(Action::ShowBookmarks)
+        );
+    }
+
+    #[test]
     fn bookmark_actions_are_one_shot_not_continuous() {
         let actions = [
             Action::BookmarkMode,
+            Action::ShowBookmarks,
             Action::BookmarkSlot(1),
             Action::ClearBookmarkSlot(1),
             Action::ClearAllBookmarks,

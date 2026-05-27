@@ -369,6 +369,7 @@ impl<B: MouseBackend> MouseMaster<B> {
             | Action::ShowHelp
             | Action::UiHintMode
             | Action::BookmarkMode
+            | Action::ShowBookmarks
             | Action::BookmarkSlot(_)
             | Action::ClearBookmarkSlot(_)
             | Action::ClearAllBookmarks => {}
@@ -482,7 +483,9 @@ impl<B: MouseBackend> MouseMaster<B> {
     fn wheel_units_for_direction(&self, direction: WheelDirection) -> i32 {
         let axis_multiplier = match direction {
             WheelDirection::Up | WheelDirection::Down => self.effective_wheel.vertical_multiplier,
-            WheelDirection::Left | WheelDirection::Right => self.effective_wheel.horizontal_multiplier,
+            WheelDirection::Left | WheelDirection::Right => {
+                self.effective_wheel.horizontal_multiplier
+            }
         };
         let signed_multiplier = match direction {
             WheelDirection::Up | WheelDirection::Left => -axis_multiplier,
@@ -2043,13 +2046,22 @@ mod tests {
         mouse.tick_wheel_at(&actions(&[Action::WheelUp]), base);
         assert_eq!(mouse.backend.scrolls, vec![(-1, Axis::Vertical)]);
 
-        mouse.tick_wheel_at(&actions(&[Action::WheelUp]), base + Duration::from_millis(50));
+        mouse.tick_wheel_at(
+            &actions(&[Action::WheelUp]),
+            base + Duration::from_millis(50),
+        );
         assert_eq!(mouse.backend.scrolls.len(), 1);
 
-        mouse.tick_wheel_at(&actions(&[Action::WheelUp]), base + Duration::from_millis(140));
+        mouse.tick_wheel_at(
+            &actions(&[Action::WheelUp]),
+            base + Duration::from_millis(140),
+        );
         assert_eq!(mouse.backend.scrolls.len(), 2);
 
-        mouse.tick_wheel_at(&actions(&[Action::WheelDown]), base + Duration::from_millis(150));
+        mouse.tick_wheel_at(
+            &actions(&[Action::WheelDown]),
+            base + Duration::from_millis(150),
+        );
         assert_eq!(mouse.backend.scrolls.len(), 3);
         assert_eq!(mouse.backend.scrolls[2], (1, Axis::Vertical));
 
