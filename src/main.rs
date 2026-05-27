@@ -196,7 +196,6 @@ struct BookmarkNamePromptState {
     deadline: Instant,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UiHintCompletionAction {
     MoveOnly,
@@ -1790,7 +1789,8 @@ impl Config {
         self.bookmarks.desktop_switch_wait_ms =
             self.bookmarks.desktop_switch_wait_ms.clamp(0, 3000);
         self.bookmarks.max_name_length = self.bookmarks.max_name_length.clamp(1, 200);
-        self.bookmarks.name_prompt_timeout_ms = self.bookmarks.name_prompt_timeout_ms.clamp(250, 60_000);
+        self.bookmarks.name_prompt_timeout_ms =
+            self.bookmarks.name_prompt_timeout_ms.clamp(250, 60_000);
         self.bookmarks.list_tooltip_duration_ms =
             self.bookmarks.list_tooltip_duration_ms.clamp(200, 10_000);
         if self.bookmarks.list_empty_slot_label.trim().is_empty() {
@@ -3498,7 +3498,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
             AppCommand::ClearAllBookmarks => println!("[command] ClearAllBookmarks"),
             AppCommand::CancelBookmarkMode => println!("[command] CancelBookmarkMode"),
-            AppCommand::NamePromptInput(event) => println!("[command] NamePromptInput key={:?}", event.key),
+            AppCommand::NamePromptInput(event) => {
+                println!("[command] NamePromptInput key={:?}", event.key)
+            }
             AppCommand::UiHintInput(event) => {
                 println!(
                     "[command] UiHintInput key={:?} state={}",
@@ -3941,10 +3943,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             let Some(record) = runtime.store.get_slot(slot).cloned() else {
                 show_bookmark_tooltip(&config, format!("Bookmark {slot} is empty"));
                 APP_STATE.write().unwrap().exit_bookmark_mode();
-            if config.bookmarks.prompt_for_name_on_save || config.bookmarks.prompt_for_name_on_set {
-                *BOOKMARK_NAME_PROMPT.lock().unwrap() = Some(BookmarkNamePromptState { slot, buffer: String::new(), deadline: Instant::now() + Duration::from_millis(config.bookmarks.name_prompt_timeout_ms) });
-                APP_STATE.write().unwrap().set_name_prompt_active(true);
-            }
                 return;
             };
 
@@ -4050,7 +4048,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .map(|r| r.created_at_unix_ms)
                 .unwrap_or(now);
             let existing_name = runtime.store.get_slot(slot).and_then(|r| r.name.clone());
-            let name = if config.bookmarks.prompt_for_name_on_save || config.bookmarks.prompt_for_name_on_set {
+            let name = if config.bookmarks.prompt_for_name_on_save
+                || config.bookmarks.prompt_for_name_on_set
+            {
                 None
             } else {
                 existing_name
@@ -4076,19 +4076,33 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 updated_at_unix_ms: now,
             };
             let outcome = runtime.store.set_slot(slot, record);
-            match runtime.store.save(&runtime.bookmark_path) {
+            let saved_ok = match runtime.store.save(&runtime.bookmark_path) {
                 Ok(()) => {
                     let msg = match outcome {
                         SetOutcome::Saved => format!("Saved bookmark {slot}"),
                         SetOutcome::Overwritten => format!("Overwritten bookmark {slot}"),
                     };
                     show_bookmark_tooltip(&config, msg);
+                    true
                 }
                 Err(e) => {
-                    show_bookmark_tooltip(&config, format!("Bookmark {slot} save failed: {e}"))
+                    show_bookmark_tooltip(&config, format!("Bookmark {slot} save failed: {e}"));
+                    false
                 }
-            }
+            };
             APP_STATE.write().unwrap().exit_bookmark_mode();
+            if saved_ok
+                && (config.bookmarks.prompt_for_name_on_save
+                    || config.bookmarks.prompt_for_name_on_set)
+            {
+                *BOOKMARK_NAME_PROMPT.lock().unwrap() = Some(BookmarkNamePromptState {
+                    slot,
+                    buffer: String::new(),
+                    deadline: Instant::now()
+                        + Duration::from_millis(config.bookmarks.name_prompt_timeout_ms),
+                });
+                APP_STATE.write().unwrap().set_name_prompt_active(true);
+            }
         }
 
         AppCommand::NamePromptInput(event) => {
@@ -4104,7 +4118,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     APP_STATE.write().unwrap().set_name_prompt_active(false);
                 }
                 VirtualKey::Enter => {
-                    let name = normalize_bookmark_name(&state.buffer, config.bookmarks.max_name_length);
+                    let name =
+                        normalize_bookmark_name(&state.buffer, config.bookmarks.max_name_length);
                     let slot = state.slot;
                     let mut runtime_guard = BOOKMARK_RUNTIME.lock().unwrap();
                     if let Some(runtime) = runtime_guard.as_mut() {
@@ -4118,11 +4133,19 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     *prompt = None;
                     APP_STATE.write().unwrap().set_name_prompt_active(false);
                 }
-                VirtualKey::Backspace => { state.buffer.pop(); }
-                VirtualKey::Space => { if state.buffer.len() < config.bookmarks.max_name_length { state.buffer.push(' '); } }
+                VirtualKey::Backspace => {
+                    state.buffer.pop();
+                }
+                VirtualKey::Space => {
+                    if state.buffer.len() < config.bookmarks.max_name_length {
+                        state.buffer.push(' ');
+                    }
+                }
                 _ => {
                     if let Some(ch) = bookmark_name_char(event.key, event.shift_down) {
-                        if state.buffer.len() < config.bookmarks.max_name_length { state.buffer.push(ch); }
+                        if state.buffer.len() < config.bookmarks.max_name_length {
+                            state.buffer.push(ch);
+                        }
                     }
                 }
             }
@@ -7876,19 +7899,56 @@ file = "data/bookmarks.json"
     }
 }
 
-#[cfg(test)]
-
 fn bookmark_name_char(key: VirtualKey, shift: bool) -> Option<char> {
     let c = match key {
-        VirtualKey::A=> 'a',VirtualKey::B=> 'b',VirtualKey::C=> 'c',VirtualKey::D=> 'd',VirtualKey::E=> 'e',VirtualKey::F=> 'f',VirtualKey::G=> 'g',VirtualKey::H=> 'h',VirtualKey::I=> 'i',VirtualKey::J=> 'j',VirtualKey::K=> 'k',VirtualKey::L=> 'l',VirtualKey::M=> 'm',VirtualKey::N=> 'n',VirtualKey::O=> 'o',VirtualKey::P=> 'p',VirtualKey::Q=> 'q',VirtualKey::R=> 'r',VirtualKey::S=> 's',VirtualKey::T=> 't',VirtualKey::U=> 'u',VirtualKey::V=> 'v',VirtualKey::W=> 'w',VirtualKey::X=> 'x',VirtualKey::Y=> 'y',VirtualKey::Z=> 'z',
-        VirtualKey::Num0 => '0', VirtualKey::Num1=>'1',VirtualKey::Num2=>'2',VirtualKey::Num3=>'3',VirtualKey::Num4=>'4',VirtualKey::Num5=>'5',VirtualKey::Num6=>'6',VirtualKey::Num7=>'7',VirtualKey::Num8=>'8',VirtualKey::Num9=>'9',
-        _ => return None
+        VirtualKey::A => 'a',
+        VirtualKey::B => 'b',
+        VirtualKey::C => 'c',
+        VirtualKey::D => 'd',
+        VirtualKey::E => 'e',
+        VirtualKey::F => 'f',
+        VirtualKey::G => 'g',
+        VirtualKey::H => 'h',
+        VirtualKey::I => 'i',
+        VirtualKey::J => 'j',
+        VirtualKey::K => 'k',
+        VirtualKey::L => 'l',
+        VirtualKey::M => 'm',
+        VirtualKey::N => 'n',
+        VirtualKey::O => 'o',
+        VirtualKey::P => 'p',
+        VirtualKey::Q => 'q',
+        VirtualKey::R => 'r',
+        VirtualKey::S => 's',
+        VirtualKey::T => 't',
+        VirtualKey::U => 'u',
+        VirtualKey::V => 'v',
+        VirtualKey::W => 'w',
+        VirtualKey::X => 'x',
+        VirtualKey::Y => 'y',
+        VirtualKey::Z => 'z',
+        VirtualKey::Num0 => '0',
+        VirtualKey::Num1 => '1',
+        VirtualKey::Num2 => '2',
+        VirtualKey::Num3 => '3',
+        VirtualKey::Num4 => '4',
+        VirtualKey::Num5 => '5',
+        VirtualKey::Num6 => '6',
+        VirtualKey::Num7 => '7',
+        VirtualKey::Num8 => '8',
+        VirtualKey::Num9 => '9',
+        _ => return None,
     };
     Some(if shift { c.to_ascii_uppercase() } else { c })
 }
 
 fn process_bookmark_name_prompt_timeout() {
-    let expired = BOOKMARK_NAME_PROMPT.lock().unwrap().as_ref().map(|s| Instant::now() >= s.deadline).unwrap_or(false);
+    let expired = BOOKMARK_NAME_PROMPT
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| Instant::now() >= s.deadline)
+        .unwrap_or(false);
     if expired {
         *BOOKMARK_NAME_PROMPT.lock().unwrap() = None;
         APP_STATE.write().unwrap().set_name_prompt_active(false);
@@ -8009,7 +8069,6 @@ mod bookmark_runtime_logic_tests {
         assert_eq!(body, "No bookmarks");
     }
 
-
     #[test]
     fn saving_bookmark_enqueues_name_prompt_when_enabled() {
         let mut cfg = Config::default();
@@ -8017,14 +8076,16 @@ mod bookmark_runtime_logic_tests {
         let rec = rec(1, 2);
         let mut store = BookmarkStore::new(9);
         store.set_slot(1, rec);
-        let should_prompt = cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set;
+        let should_prompt =
+            cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set;
         assert!(should_prompt);
     }
 
     #[test]
     fn saving_bookmark_does_not_prompt_when_disabled() {
         let cfg = Config::default();
-        let should_prompt = cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set;
+        let should_prompt =
+            cfg.bookmarks.prompt_for_name_on_save || cfg.bookmarks.prompt_for_name_on_set;
         assert!(!should_prompt);
     }
 
@@ -8037,7 +8098,10 @@ mod bookmark_runtime_logic_tests {
         let mut updated = store.get_slot(1).cloned().unwrap();
         updated.name = normalize_bookmark_name("New", 48);
         store.set_slot(1, updated);
-        assert_eq!(store.get_slot(1).and_then(|x| x.name.clone()), Some("New".into()));
+        assert_eq!(
+            store.get_slot(1).and_then(|x| x.name.clone()),
+            Some("New".into())
+        );
     }
 
     #[test]

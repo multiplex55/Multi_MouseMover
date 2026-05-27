@@ -520,7 +520,6 @@ impl AppState {
             || self.is_bookmark_mode_active()
     }
 
-
     pub fn set_name_prompt_active(&mut self, active: bool) {
         self.name_prompt_active = active;
     }
