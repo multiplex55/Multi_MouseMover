@@ -215,7 +215,7 @@ fn mark_parsed_modifier_side(family: &str, req: ModifierSideRequirement, m: &mut
 fn is_shift_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::Shift | VirtualKey::LeftShift | VirtualKey::RightShift) }
 fn is_ctrl_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::Ctrl | VirtualKey::LeftCtrl | VirtualKey::RightCtrl) }
 fn is_alt_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::Alt | VirtualKey::LeftAlt | VirtualKey::RightAlt) }
-fn is_win_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::Win | VirtualKey::LeftWin | VirtualKey::RightWin) }
+fn is_win_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::LeftWin | VirtualKey::RightWin) }
 fn key_is_left_ctrl(key: VirtualKey) -> bool { matches!(key, VirtualKey::LeftCtrl) }
 fn key_is_right_ctrl(key: VirtualKey) -> bool { matches!(key, VirtualKey::RightCtrl) }
 fn key_is_left_alt(key: VirtualKey) -> bool { matches!(key, VirtualKey::LeftAlt) }
