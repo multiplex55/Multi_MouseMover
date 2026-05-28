@@ -38,19 +38,17 @@ impl OwnedModifierKeys {
                 self.contains_exact(VirtualKey::LeftAlt)
                     || self.contains_exact(VirtualKey::RightAlt)
             }
-            VirtualKey::LeftAlt | VirtualKey::RightAlt => self.contains_exact(VirtualKey::Alt),
+            VirtualKey::LeftAlt | VirtualKey::RightAlt => false,
             VirtualKey::Ctrl => {
                 self.contains_exact(VirtualKey::LeftCtrl)
                     || self.contains_exact(VirtualKey::RightCtrl)
             }
-            VirtualKey::LeftCtrl | VirtualKey::RightCtrl => self.contains_exact(VirtualKey::Ctrl),
+            VirtualKey::LeftCtrl | VirtualKey::RightCtrl => false,
             VirtualKey::Shift => {
                 self.contains_exact(VirtualKey::LeftShift)
                     || self.contains_exact(VirtualKey::RightShift)
             }
-            VirtualKey::LeftShift | VirtualKey::RightShift => {
-                self.contains_exact(VirtualKey::Shift)
-            }
+            VirtualKey::LeftShift | VirtualKey::RightShift => false,
             VirtualKey::LeftWin | VirtualKey::RightWin => false,
             _ => false,
         }
