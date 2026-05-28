@@ -1,5 +1,4 @@
-use crate::key_chord::KeyChord;
-use crate::keyboard::VirtualKey;
+use crate::key_chord::{KeyChord, ModifierSideRequirement};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +48,7 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
     }
     audit_key_binding_aliases(&value, &mut report);
     audit_key_binding_duplicates(&value, &mut report);
-    audit_side_specific_modifier_chords(&value, &mut report);
+    audit_key_binding_overlap_warnings(&value, &mut report);
 
     for path in &paths {
         if is_explicitly_audited_path(path, &path_set) || is_known_active_path(path) {
@@ -69,10 +68,12 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
     report
 }
 
-fn audit_side_specific_modifier_chords(value: &toml::Value, report: &mut ConfigAuditReport) {
+fn audit_key_binding_overlap_warnings(value: &toml::Value, report: &mut ConfigAuditReport) {
     let Some(bindings) = value.get("key_bindings").and_then(toml::Value::as_array) else {
         return;
     };
+
+    let mut parsed = Vec::new();
     for (index, binding) in bindings.iter().enumerate() {
         let Some(items) = binding.as_array() else {
             continue;
@@ -80,79 +81,95 @@ fn audit_side_specific_modifier_chords(value: &toml::Value, report: &mut ConfigA
         let Some(chord_str) = items.first().and_then(toml::Value::as_str) else {
             continue;
         };
-        let Ok(parsed) = KeyChord::parse_with_details(chord_str) else {
+        let Some(action) = items.get(1).and_then(toml::Value::as_str) else {
             continue;
         };
-        if matches!(
-            parsed.chord.key,
-            VirtualKey::LeftShift
-                | VirtualKey::RightShift
-                | VirtualKey::LeftAlt
-                | VirtualKey::RightAlt
-        ) {
+        let Ok(chord) = KeyChord::parse(chord_str) else {
             continue;
-        }
-        if parsed.modifiers.left_shift {
-            report.warnings.push(ConfigAuditWarning {
-                path: format!("key_bindings[{index}][0]"),
-                severity: ConfigAuditSeverity::Warning,
-                message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Shift+{:?} for now.",
-                    parsed.chord.key
-                ),
-                suggestion: "Use side-agnostic Shift+<key> until side-aware chord matching lands."
-                    .to_string(),
-            });
-        }
-        if parsed.modifiers.right_shift {
-            report.warnings.push(ConfigAuditWarning {
-                path: format!("key_bindings[{index}][0]"),
-                severity: ConfigAuditSeverity::Warning,
-                message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Shift+{:?} for now.",
-                    parsed.chord.key
-                ),
-                suggestion: "Use side-agnostic Shift+<key> until side-aware chord matching lands."
-                    .to_string(),
-            });
-        }
-        if parsed.modifiers.left_alt {
-            report.warnings.push(ConfigAuditWarning {
-                path: format!("key_bindings[{index}][0]"),
-                severity: ConfigAuditSeverity::Warning,
-                message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Alt+{:?} for now.",
-                    parsed.chord.key
-                ),
-                suggestion: "Use side-agnostic Alt+<key> until side-aware chord matching lands."
-                    .to_string(),
-            });
-        }
-        if parsed.modifiers.left_ctrl {
-            report.warnings.push(ConfigAuditWarning {
-                path: format!("key_bindings[{index}][0]"),
-                severity: ConfigAuditSeverity::Warning,
-                message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Ctrl+{:?} for now.",
-                    parsed.chord.key
-                ),
-                suggestion: "Use side-agnostic Ctrl+<key> until side-aware chord matching lands."
-                    .to_string(),
-            });
-        }
-        if parsed.modifiers.right_ctrl {
-            report.warnings.push(ConfigAuditWarning {
-                path: format!("key_bindings[{index}][0]"),
-                severity: ConfigAuditSeverity::Warning,
-                message: format!(
-                    "Unsupported side-specific modifier chord: {chord_str}. Use Ctrl+{:?} for now.",
-                    parsed.chord.key
-                ),
-                suggestion: "Use side-agnostic Ctrl+<key> until side-aware chord matching lands."
-                    .to_string(),
-            });
+        };
+        parsed.push((index, action.to_string(), chord));
+    }
+
+    for i in 0..parsed.len() {
+        for j in (i + 1)..parsed.len() {
+            let (left_index, left_action, left) = &parsed[i];
+            let (right_index, right_action, right) = &parsed[j];
+            if left.key != right.key || left_action != right_action {
+                continue;
+            }
+            emit_overlap_warning(
+                left_index,
+                right_index,
+                left,
+                right,
+                "Alt",
+                |c| c.modifiers.alt,
+                report,
+            );
+            emit_overlap_warning(
+                left_index,
+                right_index,
+                left,
+                right,
+                "Shift",
+                |c| c.modifiers.shift,
+                report,
+            );
         }
     }
+
+    if parsed.iter().any(|(_, _, chord)| {
+        chord.modifiers.alt == ModifierSideRequirement::Right
+            || (chord.modifiers.alt == ModifierSideRequirement::Any
+                && chord.modifiers.ctrl == ModifierSideRequirement::Any)
+    }) {
+        report.warnings.push(ConfigAuditWarning {
+            path: "key_bindings".to_string(),
+            severity: ConfigAuditSeverity::Info,
+            message: "AltGr advisory: some layouts report AltGr as RightAlt+Ctrl, so RightAlt and generic Alt/Ctrl combinations can overlap.".to_string(),
+            suggestion: "Prefer explicit side requirements (e.g. RightAlt without generic Alt/Ctrl alternatives) or avoid ambiguous AltGr-adjacent bindings.".to_string(),
+        });
+    }
+}
+
+fn emit_overlap_warning<F: Fn(&KeyChord) -> ModifierSideRequirement>(
+    left_index: &usize,
+    right_index: &usize,
+    left: &KeyChord,
+    right: &KeyChord,
+    family_name: &str,
+    requirement: F,
+    report: &mut ConfigAuditReport,
+) {
+    let left_req = requirement(left);
+    let right_req = requirement(right);
+    let overlaps = matches!(
+        (left_req, right_req),
+        (ModifierSideRequirement::Any, ModifierSideRequirement::Left)
+            | (ModifierSideRequirement::Any, ModifierSideRequirement::Right)
+            | (ModifierSideRequirement::Left, ModifierSideRequirement::Any)
+            | (ModifierSideRequirement::Right, ModifierSideRequirement::Any)
+    );
+    if !overlaps {
+        return;
+    }
+    let (generic, specific) = if left_req == ModifierSideRequirement::Any {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    report.warnings.push(ConfigAuditWarning {
+        path: "key_bindings".to_string(),
+        severity: ConfigAuditSeverity::Warning,
+        message: format!(
+            "{family_name} overlap: '{}' overlaps '{}'; both may match a single event, and the more specific chord wins due to resolver specificity.",
+            generic.display_label(),
+            specific.display_label()
+        ),
+        suggestion: format!(
+            "Review key_bindings[{left_index}] and key_bindings[{right_index}]: this can shadow the generic binding when the side-specific modifier is pressed."
+        ),
+    });
 }
 
 fn audit_key_binding_aliases(value: &toml::Value, report: &mut ConfigAuditReport) {
@@ -714,71 +731,70 @@ mod tests {
     }
 
     #[test]
-    fn config_audit_warns_on_leftshift_plus_key() {
+    fn config_audit_warns_on_alt_generic_side_overlap() {
         let report = audit_config_toml(
             r#"
             key_bindings = [
-              ["LeftShift+E", "move_up"],
-            ]
-            "#,
-        );
-        let warning = warning_for(&report, "key_bindings[0][0]");
-        assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
-        assert_eq!(
-            warning.message,
-            "Unsupported side-specific modifier chord: LeftShift+E. Use Shift+E for now."
-        );
-    }
-
-    #[test]
-    fn config_audit_warns_on_leftalt_plus_key() {
-        let report = audit_config_toml(
-            r#"
-            key_bindings = [
-              ["LeftAlt+E", "move_up"],
-            ]
-            "#,
-        );
-        let warning = warning_for(&report, "key_bindings[0][0]");
-        assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
-        assert_eq!(
-            warning.message,
-            "Unsupported side-specific modifier chord: LeftAlt+E. Use Alt+E for now."
-        );
-    }
-
-    #[test]
-    fn config_audit_allows_rightalt_plus_key() {
-        let report = audit_config_toml(
-            r#"
-            key_bindings = [
+              ["Alt+E", "move_up"],
               ["RightAlt+E", "move_up"],
             ]
             "#,
         );
-        assert!(!report.warnings.iter().any(|warning| {
-            warning.path == "key_bindings[0][0]"
-                && warning
-                    .message
-                    .starts_with("Unsupported side-specific modifier chord")
-        }));
+        let warning = warning_for(&report, "key_bindings");
+        assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
+        assert!(warning.message.contains("Alt+E"));
+        assert!(warning.message.contains("RightAlt+E"));
+        assert!(warning.message.contains("more specific chord wins"));
     }
 
     #[test]
-    fn config_audit_allows_standalone_leftshift() {
+    fn config_audit_warns_on_shift_generic_side_overlap() {
         let report = audit_config_toml(
             r#"
             key_bindings = [
-              ["LeftShift", "slow_mouse"],
+              ["Shift+E", "move_up"],
+              ["LeftShift+E", "move_up"],
             ]
             "#,
         );
-        assert!(!report.warnings.iter().any(|warning| {
-            warning.path == "key_bindings[0][0]"
-                && warning
-                    .message
-                    .starts_with("Unsupported side-specific modifier chord")
-        }));
+        let warning = warning_for(&report, "key_bindings");
+        assert_eq!(warning.severity, ConfigAuditSeverity::Warning);
+        assert!(warning.message.contains("Shift+E"));
+        assert!(warning.message.contains("LeftShift+E"));
+    }
+
+    #[test]
+    fn config_audit_emits_altgr_advisory_for_relevant_chords() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+              ["RightAlt+E", "move_up"],
+              ["Ctrl+Alt+E", "move_up"],
+            ]
+            "#,
+        );
+        let advisory = report
+            .warnings
+            .iter()
+            .find(|warning| warning.severity == ConfigAuditSeverity::Info && warning.message.contains("AltGr advisory"))
+            .expect("expected AltGr advisory warning");
+        assert_eq!(advisory.path, "key_bindings");
+    }
+
+    #[test]
+    fn config_audit_has_no_false_positive_for_non_overlapping_chords() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+              ["Alt+E", "move_up"],
+              ["RightAlt+Q", "move_up"],
+            ]
+            "#,
+        );
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|warning| warning.message.contains("overlaps")));
     }
 
     #[test]

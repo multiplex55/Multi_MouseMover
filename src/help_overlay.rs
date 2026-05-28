@@ -1,7 +1,7 @@
 use crate::action::{Action, Direction2D, StepMoveTier};
 use crate::action_handler::{RuntimeNotification, RuntimeNotificationKind};
 use crate::app_state::ModeContext;
-use crate::key_chord::{KeyChord, ModifierSideRequirement};
+use crate::key_chord::KeyChord;
 use crate::TooltipOverlayConfig;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
@@ -1004,22 +1004,7 @@ fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
 }
 
 fn format_key_chord(chord: KeyChord) -> String {
-    fn push(parts: &mut Vec<String>, req: ModifierSideRequirement, any: &str, left: &str, right: &str) {
-        match req {
-            ModifierSideRequirement::NotRequired => {}
-            ModifierSideRequirement::Any => parts.push(any.to_string()),
-            ModifierSideRequirement::Left => parts.push(left.to_string()),
-            ModifierSideRequirement::Right => parts.push(right.to_string()),
-        }
-    }
-
-    let mut parts = Vec::new();
-    push(&mut parts, chord.modifiers.ctrl, "Ctrl", "LeftCtrl", "RightCtrl");
-    push(&mut parts, chord.modifiers.alt, "Alt", "LeftAlt", "RightAlt");
-    push(&mut parts, chord.modifiers.shift, "Shift", "LeftShift", "RightShift");
-    push(&mut parts, chord.modifiers.win, "Win", "LeftWin", "RightWin");
-    parts.push(format!("{:?}", chord.key));
-    parts.join("+")
+    chord.display_label()
 }
 
 #[cfg(test)]
@@ -1088,6 +1073,21 @@ mod tests {
             .iter()
             .any(|binding| { binding.key == "H" && binding.action == "Hints / Help" }));
         assert_eq!(view.stats, HelpRuntimeStats::default());
+    }
+
+    #[test]
+    fn help_contents_use_canonical_parseable_chord_labels() {
+        let view = help_view_from_bindings(
+            [(KeyChord::parse("Meta+Period").unwrap(), Action::ShowHelp)],
+            ModeContext::Active,
+        );
+        let binding = view
+            .bindings
+            .iter()
+            .find(|binding| binding.action == "Hints / Help")
+            .expect("expected ShowHelp binding");
+        assert_eq!(binding.key, "Win+Period");
+        assert_eq!(KeyChord::parse(&binding.key).unwrap(), KeyChord::parse("Win+Period").unwrap());
     }
 
     #[test]
