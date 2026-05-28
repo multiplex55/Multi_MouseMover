@@ -11,6 +11,52 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 const LLKHF_INJECTED_BITS: u32 = 0x10;
 const LLKHF_LOWER_IL_INJECTED_BITS: u32 = 0x02;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OwnedModifierKeys {
+    keys: HashSet<VirtualKey>,
+}
+
+impl OwnedModifierKeys {
+    pub fn insert(&mut self, key: VirtualKey) {
+        self.keys.insert(key);
+    }
+
+    pub fn contains(&self, key: &VirtualKey) -> bool {
+        self.keys.contains(key)
+    }
+
+    pub fn contains_exact(&self, key: VirtualKey) -> bool {
+        self.keys.contains(&key)
+    }
+
+    pub fn owns_key(&self, key: VirtualKey) -> bool {
+        if self.contains_exact(key) {
+            return true;
+        }
+        match key {
+            VirtualKey::Alt => {
+                self.contains_exact(VirtualKey::LeftAlt)
+                    || self.contains_exact(VirtualKey::RightAlt)
+            }
+            VirtualKey::LeftAlt | VirtualKey::RightAlt => self.contains_exact(VirtualKey::Alt),
+            VirtualKey::Ctrl => {
+                self.contains_exact(VirtualKey::LeftCtrl)
+                    || self.contains_exact(VirtualKey::RightCtrl)
+            }
+            VirtualKey::LeftCtrl | VirtualKey::RightCtrl => self.contains_exact(VirtualKey::Ctrl),
+            VirtualKey::Shift => {
+                self.contains_exact(VirtualKey::LeftShift)
+                    || self.contains_exact(VirtualKey::RightShift)
+            }
+            VirtualKey::LeftShift | VirtualKey::RightShift => {
+                self.contains_exact(VirtualKey::Shift)
+            }
+            VirtualKey::LeftWin | VirtualKey::RightWin => false,
+            _ => false,
+        }
+    }
+}
+
 /// Enum representing virtual key codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VirtualKey {
@@ -798,8 +844,8 @@ impl KeyBindings {
         self.bindings.iter().map(|(chord, action)| (*chord, action))
     }
 
-    pub fn owned_modifiers(&self) -> HashSet<VirtualKey> {
-        let mut owned = HashSet::new();
+    pub fn owned_modifiers(&self) -> OwnedModifierKeys {
+        let mut owned = OwnedModifierKeys::default();
         for (chord, _) in &self.bindings {
             match chord.modifiers.alt {
                 crate::key_chord::ModifierSideRequirement::NotRequired => {}
@@ -1192,6 +1238,32 @@ mod tests {
         assert!(owned.contains(&VirtualKey::Alt));
     }
 
+    #[test]
+    fn alt_chord_owns_both_alts() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("Alt+W").unwrap(), Action::MoveUp);
+        let owned = bindings.owned_modifiers();
+        assert!(owned.owns_key(VirtualKey::LeftAlt));
+        assert!(owned.owns_key(VirtualKey::RightAlt));
+    }
+
+    #[test]
+    fn rightalt_chord_owns_only_rightalt() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("RightAlt+W").unwrap(), Action::MoveUp);
+        let owned = bindings.owned_modifiers();
+        assert!(owned.owns_key(VirtualKey::RightAlt));
+        assert!(!owned.owns_key(VirtualKey::LeftAlt));
+    }
+
+    #[test]
+    fn leftshift_chord_owns_only_leftshift() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("LeftShift+W").unwrap(), Action::MoveUp);
+        let owned = bindings.owned_modifiers();
+        assert!(owned.owns_key(VirtualKey::LeftShift));
+        assert!(!owned.owns_key(VirtualKey::RightShift));
+    }
     #[test]
     fn alt_chord_marks_alt_owned() {
         let mut bindings = KeyBindings::new();
