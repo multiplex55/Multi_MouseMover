@@ -734,8 +734,6 @@ impl KeyBindings {
         } else {
             self.bindings.push((chord, action));
         }
-        self.bindings
-            .sort_by_key(|(chord, _)| std::cmp::Reverse(chord.specificity()));
     }
 
     pub fn clear(&mut self) {
@@ -760,29 +758,27 @@ impl KeyBindings {
             return None;
         }
 
-        if let Some((chord, action)) = self
-            .bindings
-            .iter()
-            .find(|(chord, _)| chord.matches_event(event))
-        {
-            return Some(ResolvedBinding {
-                chord: *chord,
-                action: action.clone(),
-            });
+        if let Some(resolved) = self.resolve_best_match(|chord| chord.matches_event(event)) {
+            return Some(resolved);
         }
 
         if !shift_can_modify_plain_movement {
             return None;
         }
 
-        self.bindings.iter().find_map(|(chord, action)| {
-            chord
-                .matches_event_allowing_shift_modifier(event)
-                .then(|| ResolvedBinding {
-                    chord: *chord,
-                    action: action.clone(),
-                })
-        })
+        self.resolve_best_match(|chord| chord.matches_event_allowing_shift_modifier(event))
+    }
+
+    fn resolve_best_match(&self, matcher: impl Fn(&KeyChord) -> bool) -> Option<ResolvedBinding> {
+        self.bindings
+            .iter()
+            .enumerate()
+            .filter(|(_, (chord, _))| matcher(chord))
+            .max_by_key(|(idx, (chord, _))| (chord.specificity(), std::cmp::Reverse(*idx)))
+            .map(|(_, (chord, action))| ResolvedBinding {
+                chord: *chord,
+                action: action.clone(),
+            })
     }
 
     pub fn get_action_for_event(
@@ -1060,7 +1056,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_exact_binding_wins_over_plain_binding() {
+    fn shift_explicit_binding_wins_over_plain_binding() {
         let mut bindings = KeyBindings::new();
         bindings.add_chord_binding(KeyChord::parse("E").unwrap(), Action::MoveRight);
         bindings.add_chord_binding(KeyChord::parse("Shift+E").unwrap(), Action::MoveLeft);
@@ -1131,6 +1127,41 @@ mod tests {
                 .resolve_for_key_down_event(&plain, true)
                 .map(|r| r.action),
             Some(Action::MoveUp)
+        );
+    }
+
+    #[test]
+    fn deterministic_tie_break_uses_insertion_order() {
+        let chord = KeyChord::parse("W").unwrap();
+        let bindings = KeyBindings {
+            bindings: vec![(chord, Action::MoveUp), (chord, Action::MoveDown)],
+        };
+
+        let event = KeyEvent::new(VirtualKey::W, true);
+        for _ in 0..10 {
+            assert_eq!(
+                bindings
+                    .resolve_for_key_down_event(&event, true)
+                    .map(|r| r.action.clone()),
+                Some(Action::MoveUp)
+            );
+        }
+    }
+
+    #[test]
+    fn shift_relaxed_fallback_does_not_override_explicit_match() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("W").unwrap(), Action::MoveUp);
+        bindings.add_chord_binding(KeyChord::parse("Shift+W").unwrap(), Action::MoveDown);
+
+        let mut event = KeyEvent::new(VirtualKey::W, true);
+        event.shift_down = true;
+
+        assert_eq!(
+            bindings
+                .resolve_for_key_down_event(&event, true)
+                .map(|r| r.action),
+            Some(Action::MoveDown)
         );
     }
 
