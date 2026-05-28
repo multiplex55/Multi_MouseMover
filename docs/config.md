@@ -128,6 +128,29 @@ key_bindings = [
 ]
 ```
 
+### AltGr (`RightAlt`) synthetic Ctrl compatibility
+
+Many layouts emit AltGr as `RightAlt` plus a synthetic `Ctrl` state. To keep `RightAlt+<key>` bindings usable, the input flag below defaults to enabled:
+
+- `input.right_alt_suppresses_synthetic_ctrl = true`
+
+When enabled, binding matching and swallow/passthrough shortcut decisions treat `Ctrl` as **not held** if all of the following are true:
+
+- `RightAlt` is down,
+- `ctrl_down` is true only because of synthetic AltGr behavior, and
+- neither physical Ctrl key (`left_ctrl_down` / `right_ctrl_down`) is pressed.
+
+This preserves distinctions such as:
+
+- `RightAlt+E` matching without requiring physical Ctrl.
+- `RightAlt+Ctrl+E` still requiring a real physical Ctrl key.
+
+Swallow precedence is:
+
+1. Explicit configured/system bindings claim the key event first.
+2. If no explicit binding matches, preserved shortcuts (for example `Ctrl+W`, `Alt+Tab`, `Alt+F4`, and Win shortcuts) pass through.
+3. Remaining active-mode trigger release cleanup still swallows where needed.
+
 ## Config Paths
 
 | Config path | Type | Default | Connected? | Status | Notes |
@@ -146,6 +169,7 @@ key_bindings = [
 | `input.stuck_key_timeout_ms` | integer milliseconds | `10000` | Yes | Active | Stale-duration threshold used to classify tracked held keys as stuck for diagnostics/recovery; normalized to `500..=60000` and reset to default when `0`. |
 | `input.debug_input` | boolean | `false` | Yes | Active | Enables verbose debug-input logs (raw keys, swallow reasons, system matches, trigger tracking). |
 | `input.shift_can_modify_plain_movement` | boolean | `true` | Yes | Active | Keeps shift-relaxed plain-movement matching enabled. |
+| `input.right_alt_suppresses_synthetic_ctrl` | boolean | `true` | Yes | Active | When true, AltGr-style synthetic Ctrl is ignored for matching/passthrough decisions while RightAlt is held, unless a physical Ctrl key is also down. |
 | `mouse_speed.default_speed` | integer | `1` | Yes | Active | Normal held-movement speed and replacement for legacy `starting_speed`. |
 | `mouse_speed.min_speed` | integer | `1` | Yes | Active | Lower bound for runtime mouse speed changes. |
 | `mouse_speed.max_speed` | integer | `12` | Yes | Active | Upper bound for runtime mouse speed changes. |
