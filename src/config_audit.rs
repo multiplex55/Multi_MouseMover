@@ -97,8 +97,24 @@ fn audit_key_binding_overlap_warnings(value: &toml::Value, report: &mut ConfigAu
             if left.key != right.key || left_action != right_action {
                 continue;
             }
-            emit_overlap_warning(left_index, right_index, left, right, report, "Alt", |c| c.modifiers.alt);
-            emit_overlap_warning(left_index, right_index, left, right, report, "Shift", |c| c.modifiers.shift);
+            emit_overlap_warning(
+                left_index,
+                right_index,
+                left,
+                right,
+                "Alt",
+                |c| c.modifiers.alt,
+                report,
+            );
+            emit_overlap_warning(
+                left_index,
+                right_index,
+                left,
+                right,
+                "Shift",
+                |c| c.modifiers.shift,
+                report,
+            );
         }
     }
 
