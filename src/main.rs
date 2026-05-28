@@ -7754,8 +7754,8 @@ enabled = true"#,
         process_ui_hint_query_results();
         let mut app_state = APP_STATE.write().unwrap();
         while let Some(command) = app_state.pop_command() {
-            if matches!(command, AppCommand::ActivateUiHints { .. }) {
-                panic!("stale ui-hint query result unexpectedly scheduled activation");
+            if matches!(command, AppCommand::UiHintQueryCompleted { .. }) {
+                panic!("stale ui-hint query result unexpectedly scheduled completion dispatch");
             }
         }
     }
