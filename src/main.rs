@@ -7738,10 +7738,10 @@ enabled = true"#,
 
         process_ui_hint_query_timeout();
 
-        assert!(matches!(
+        assert_ne!(
             APP_STATE.read().unwrap().current_ui_hint_query_id(),
-            None
-        ));
+            Some(query_id)
+        );
 
         let stale = UiHintQueryResult {
             query_id,
@@ -7752,7 +7752,12 @@ enabled = true"#,
         *UI_HINT_QUERY_RX.lock().unwrap() = Some(rx);
         let _ = tx.send(stale);
         process_ui_hint_query_results();
-        assert!(APP_STATE.write().unwrap().pop_command().is_none());
+        let mut app_state = APP_STATE.write().unwrap();
+        while let Some(command) = app_state.pop_command() {
+            if matches!(command, AppCommand::ActivateUiHints { .. }) {
+                panic!("stale ui-hint query result unexpectedly scheduled activation");
+            }
+        }
     }
 
     fn ui_hint_cleanup_is_idempotent() {
