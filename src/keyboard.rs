@@ -57,6 +57,24 @@ impl OwnedModifierKeys {
     }
 }
 
+impl IntoIterator for OwnedModifierKeys {
+    type Item = VirtualKey;
+    type IntoIter = std::collections::hash_set::IntoIter<VirtualKey>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.keys.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a OwnedModifierKeys {
+    type Item = &'a VirtualKey;
+    type IntoIter = std::collections::hash_set::Iter<'a, VirtualKey>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.keys.iter()
+    }
+}
+
 /// Enum representing virtual key codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VirtualKey {
