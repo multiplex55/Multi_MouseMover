@@ -776,7 +776,10 @@ mod tests {
         let advisory = report
             .warnings
             .iter()
-            .find(|warning| warning.severity == ConfigAuditSeverity::Info && warning.message.contains("AltGr advisory"))
+            .find(|warning| {
+                warning.severity == ConfigAuditSeverity::Info
+                    && warning.message.contains("AltGr advisory")
+            })
             .expect("expected AltGr advisory warning");
         assert_eq!(advisory.path, "key_bindings");
     }

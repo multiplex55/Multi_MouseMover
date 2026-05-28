@@ -1087,7 +1087,10 @@ mod tests {
             .find(|binding| binding.action == "Hints / Help")
             .expect("expected ShowHelp binding");
         assert_eq!(binding.key, "Win+Period");
-        assert_eq!(KeyChord::parse(&binding.key).unwrap(), KeyChord::parse("Win+Period").unwrap());
+        assert_eq!(
+            KeyChord::parse(&binding.key).unwrap(),
+            KeyChord::parse("Win+Period").unwrap()
+        );
     }
 
     #[test]
