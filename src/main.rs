@@ -42,7 +42,7 @@ use jump_overlay::{
 };
 use jump_session::JumpSessionUpdate;
 use jump_view::{JumpLabelMetadata, JumpVisuals};
-use key_chord::{KeyChord, RuntimeSystemBindings};
+use key_chord::{KeyChord, ModifierRequirements, ModifierSideRequirement, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::{StatusOverlayConfig, OVERLAY};
@@ -747,20 +747,20 @@ pub enum UiHintAfterSelect {
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct UiHintModifierConfig {
-    pub ctrl: bool,
-    pub alt: bool,
-    pub right_alt: bool,
-    pub shift: bool,
-    pub win: bool,
+    #[serde(flatten)]
+    pub modifiers: ModifierRequirements,
 }
 
 impl UiHintModifierConfig {
     fn matches_event(self, event: &KeyEvent) -> bool {
-        self.ctrl == event.ctrl_down
-            && self.alt == event.alt_down
-            && self.right_alt == event.right_alt_down
-            && self.shift == event.shift_down
-            && self.win == event.win_down
+        let chord = KeyChord {
+            key: event.key,
+            modifiers: self.modifiers,
+        };
+        chord.matches_ctrl(event)
+            && chord.matches_alt(event)
+            && chord.matches_shift(event)
+            && chord.matches_win(event)
     }
 }
 
@@ -7621,8 +7621,12 @@ enabled = true"#,
         );
 
         cfg.browse_modifier = Some(UiHintModifierConfig {
-            shift: true,
-            ..UiHintModifierConfig::default()
+            modifiers: ModifierRequirements::new(
+                ModifierSideRequirement::NotRequired,
+                ModifierSideRequirement::NotRequired,
+                ModifierSideRequirement::Any,
+                ModifierSideRequirement::NotRequired,
+            ),
         });
         let mut ev = KeyEvent::new(VirtualKey::A, true);
         ev.shift_down = true;
@@ -7632,8 +7636,12 @@ enabled = true"#,
         );
 
         cfg.right_click_modifier = Some(UiHintModifierConfig {
-            ctrl: true,
-            ..UiHintModifierConfig::default()
+            modifiers: ModifierRequirements::new(
+                ModifierSideRequirement::Any,
+                ModifierSideRequirement::NotRequired,
+                ModifierSideRequirement::NotRequired,
+                ModifierSideRequirement::NotRequired,
+            ),
         });
         let mut ev2 = KeyEvent::new(VirtualKey::A, true);
         ev2.ctrl_down = true;
@@ -7643,6 +7651,25 @@ enabled = true"#,
         );
     }
 
+    #[test]
+    fn ui_hint_modifiers_support_side_requirements() {
+        let config = parse_config(
+            r#"
+            [ui_hints]
+            browse_modifier.alt = "right"
+            right_click_modifier.ctrl = "any"
+            "#,
+        );
+
+        assert_eq!(
+            config.ui_hints.browse_modifier.unwrap().modifiers.alt,
+            ModifierSideRequirement::Right
+        );
+        assert_eq!(
+            config.ui_hints.right_click_modifier.unwrap().modifiers.ctrl,
+            ModifierSideRequirement::Any
+        );
+    }
     #[test]
     fn ui_hints_defaults_when_section_missing() {
         let config = parse_config("");
