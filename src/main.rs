@@ -36,10 +36,10 @@ use indicator::IndicatorState;
 use indicator::{
     resolve_indicator_snapshot, IndicatorInput, MouseIndicatorInput, WheelIndicatorInput,
 };
+use input_decode::{decode_virtual_key_from_hook, ModifierSnapshot, RawKeyboardHookEvent};
 use jump_overlay::{
     hide_jump_overlay, show_jump_overlay, update_jump_overlay, virtual_screen_region,
 };
-use input_decode::{decode_virtual_key_from_hook, ModifierSnapshot, RawKeyboardHookEvent};
 use jump_session::JumpSessionUpdate;
 use jump_view::{JumpLabelMetadata, JumpVisuals};
 use key_chord::{KeyChord, RuntimeSystemBindings};
@@ -7692,6 +7692,15 @@ enabled = true"#,
 
     #[test]
     fn ui_hint_query_timeout_exits_mode_and_stale_result_is_ignored() {
+        {
+            let mut app_state = APP_STATE.write().unwrap();
+            app_state.exit_ui_hint_mode();
+            while app_state.pop_command().is_some() {}
+        }
+        *UI_HINT_QUERY_DEADLINE.lock().unwrap() = None;
+        *UI_HINT_QUERY_RX.lock().unwrap() = None;
+        *UI_HINT_SESSION.lock().unwrap() = None;
+
         let query_id = UI_HINT_QUERY_ID.fetch_add(1, Ordering::Relaxed) + 1;
         APP_STATE
             .write()
