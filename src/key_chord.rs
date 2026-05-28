@@ -129,7 +129,7 @@ impl KeyChord {
         append_modifier_label(&mut parts, "Alt", "LeftAlt", "RightAlt", self.modifiers.alt);
         append_modifier_label(&mut parts, "Shift", "LeftShift", "RightShift", self.modifiers.shift);
         append_modifier_label(&mut parts, "Win", "LeftWin", "RightWin", self.modifiers.win);
-        parts.push(format!("{:?}", self.key));
+        parts.push(canonical_key_label(self.key));
         parts.join("+")
     }
 
@@ -189,6 +189,50 @@ impl KeyChord {
 
 fn family_specificity(req: ModifierSideRequirement) -> u8 { match req { ModifierSideRequirement::NotRequired => 0, ModifierSideRequirement::Any => 1, ModifierSideRequirement::Left | ModifierSideRequirement::Right => 2 } }
 fn append_modifier_label(parts: &mut Vec<String>, any: &str, left: &str, right: &str, req: ModifierSideRequirement){ match req { ModifierSideRequirement::NotRequired=>{}, ModifierSideRequirement::Any=>parts.push(any.to_string()), ModifierSideRequirement::Left=>parts.push(left.to_string()), ModifierSideRequirement::Right=>parts.push(right.to_string())} }
+fn canonical_key_label(key: VirtualKey) -> String {
+    match key {
+        VirtualKey::OemPlus => "Plus".to_string(),
+        VirtualKey::OemComma => "Comma".to_string(),
+        VirtualKey::OemMinus => "Minus".to_string(),
+        VirtualKey::OemPeriod => "Period".to_string(),
+        VirtualKey::Oem1 => "Semicolon".to_string(),
+        VirtualKey::Oem2 => "Slash".to_string(),
+        VirtualKey::Oem3 => "Backtick".to_string(),
+        VirtualKey::Oem4 => "LeftBracket".to_string(),
+        VirtualKey::Oem5 => "Backslash".to_string(),
+        VirtualKey::Oem6 => "RightBracket".to_string(),
+        VirtualKey::Oem7 => "Apostrophe".to_string(),
+        _ => match key {
+            VirtualKey::A => "A".to_string(),
+            VirtualKey::B => "B".to_string(),
+            VirtualKey::C => "C".to_string(),
+            VirtualKey::D => "D".to_string(),
+            VirtualKey::E => "E".to_string(),
+            VirtualKey::F => "F".to_string(),
+            VirtualKey::G => "G".to_string(),
+            VirtualKey::H => "H".to_string(),
+            VirtualKey::I => "I".to_string(),
+            VirtualKey::J => "J".to_string(),
+            VirtualKey::K => "K".to_string(),
+            VirtualKey::L => "L".to_string(),
+            VirtualKey::M => "M".to_string(),
+            VirtualKey::N => "N".to_string(),
+            VirtualKey::O => "O".to_string(),
+            VirtualKey::P => "P".to_string(),
+            VirtualKey::Q => "Q".to_string(),
+            VirtualKey::R => "R".to_string(),
+            VirtualKey::S => "S".to_string(),
+            VirtualKey::T => "T".to_string(),
+            VirtualKey::U => "U".to_string(),
+            VirtualKey::V => "V".to_string(),
+            VirtualKey::W => "W".to_string(),
+            VirtualKey::X => "X".to_string(),
+            VirtualKey::Y => "Y".to_string(),
+            VirtualKey::Z => "Z".to_string(),
+            _ => format!("{:?}", key),
+        },
+    }
+}
 fn matches_family(req: ModifierSideRequirement, any_down: bool, left_down: bool, right_down: bool, self_key: bool, self_left: bool, self_right: bool) -> bool { match req { ModifierSideRequirement::NotRequired => !any_down || self_key, ModifierSideRequirement::Any => any_down || self_key, ModifierSideRequirement::Left => left_down || self_left, ModifierSideRequirement::Right => right_down || self_right } }
 fn matches_family_ignoring_extra(req: ModifierSideRequirement, any_down: bool, left_down: bool, right_down: bool, self_key: bool, self_left: bool, self_right: bool) -> bool { match req { ModifierSideRequirement::NotRequired => true, ModifierSideRequirement::Any => any_down || self_key, ModifierSideRequirement::Left => left_down || self_left, ModifierSideRequirement::Right => right_down || self_right } }
 
