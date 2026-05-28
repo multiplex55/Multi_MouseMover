@@ -4,13 +4,47 @@ use std::error::Error;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModifierSideRequirement {
+    NotRequired,
+    Any,
+    Left,
+    Right,
+}
+
+impl Default for ModifierSideRequirement {
+    fn default() -> Self {
+        Self::NotRequired
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct ModifierRequirements {
+    pub ctrl: ModifierSideRequirement,
+    pub alt: ModifierSideRequirement,
+    pub shift: ModifierSideRequirement,
+    pub win: ModifierSideRequirement,
+}
+
+impl ModifierRequirements {
+    pub const fn new(
+        ctrl: ModifierSideRequirement,
+        alt: ModifierSideRequirement,
+        shift: ModifierSideRequirement,
+        win: ModifierSideRequirement,
+    ) -> Self {
+        Self {
+            ctrl,
+            alt,
+            shift,
+            win,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyChord {
     pub key: VirtualKey,
-    pub ctrl: bool,
-    pub alt: bool,
-    pub right_alt: bool,
-    pub shift: bool,
-    pub win: bool,
+    pub modifiers: ModifierRequirements,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -35,13 +69,9 @@ impl KeyChord {
 
     pub fn parse_with_details(input: &str) -> Result<ParsedKeyChord, KeyChordParseError> {
         let tokens: Vec<&str> = input.split('+').map(str::trim).collect();
-        let mut ctrl = false;
-        let mut alt = false;
-        let mut right_alt = false;
-        let mut shift = false;
-        let mut win = false;
         let mut key = None;
-        let mut modifiers = ParsedChordModifiers::default();
+        let mut modifiers = ModifierRequirements::default();
+        let mut parsed_modifiers = ParsedChordModifiers::default();
 
         for token in tokens.iter().copied() {
             if token.is_empty() {
@@ -51,50 +81,22 @@ impl KeyChord {
                 ));
             }
 
-            match token.to_ascii_uppercase().as_str() {
-                "CTRL" | "CONTROL" => set_modifier(input, "Ctrl", &mut ctrl)?,
-                "LEFTCTRL" | "LCTRL" | "LEFT_CTRL" if tokens.len() > 1 => {
-                    set_modifier(input, "Ctrl", &mut ctrl)?;
-                    modifiers.left_ctrl = true;
+            if tokens.len() > 1 {
+                if let Some((family, req)) = parse_modifier_token(token) {
+                    set_modifier(input, family, req, &mut modifiers)?;
+                    mark_parsed_modifier_side(family, req, &mut parsed_modifiers);
+                    continue;
                 }
-                "RIGHTCTRL" | "RCTRL" | "RIGHT_CTRL" if tokens.len() > 1 => {
-                    set_modifier(input, "Ctrl", &mut ctrl)?;
-                    modifiers.right_ctrl = true;
-                }
-                "ALT" => set_modifier(input, "Alt", &mut alt)?,
-                "LEFTALT" | "LALT" | "LEFT_ALT" if tokens.len() > 1 => {
-                    set_modifier(input, "Alt", &mut alt)?;
-                    modifiers.left_alt = true;
-                }
-                "RIGHTALT" | "RALT" | "RIGHT_ALT" if tokens.len() > 1 => {
-                    set_modifier(input, "RightAlt", &mut right_alt)?;
-                    modifiers.right_alt = true;
-                    if !alt {
-                        alt = true;
-                    }
-                }
-                "SHIFT" => set_modifier(input, "Shift", &mut shift)?,
-                "LEFTSHIFT" | "LSHIFT" | "LEFT_SHIFT" if tokens.len() > 1 => {
-                    set_modifier(input, "Shift", &mut shift)?;
-                    modifiers.left_shift = true;
-                }
-                "RIGHTSHIFT" | "RSHIFT" | "RIGHT_SHIFT" if tokens.len() > 1 => {
-                    set_modifier(input, "Shift", &mut shift)?;
-                    modifiers.right_shift = true;
-                }
-                "WIN" | "SUPER" | "META" => set_modifier(input, "Win", &mut win)?,
-                _ => {
-                    let parsed_key = VirtualKey::from_string(token).ok_or_else(|| {
-                        KeyChordParseError::new(input, format!("invalid key token '{token}'"))
-                    })?;
+            }
 
-                    if key.replace(parsed_key).is_some() {
-                        return Err(KeyChordParseError::new(
-                            input,
-                            format!("duplicate non-modifier token '{token}'"),
-                        ));
-                    }
-                }
+            let parsed_key = VirtualKey::from_string(token)
+                .ok_or_else(|| KeyChordParseError::new(input, format!("invalid key token '{token}'")))?;
+
+            if key.replace(parsed_key).is_some() {
+                return Err(KeyChordParseError::new(
+                    input,
+                    format!("duplicate non-modifier token '{token}'"),
+                ));
             }
         }
 
@@ -102,49 +104,61 @@ impl KeyChord {
             key.ok_or_else(|| KeyChordParseError::new(input, "missing non-modifier key token"))?;
 
         Ok(ParsedKeyChord {
-            chord: Self {
-                key,
-                ctrl,
-                alt,
-                right_alt,
-                shift,
-                win,
-            },
-            modifiers,
+            chord: Self { key, modifiers },
+            modifiers: parsed_modifiers,
         })
     }
 
     pub fn from_key(key: VirtualKey) -> Self {
         Self {
             key,
-            ctrl: false,
-            alt: false,
-            right_alt: false,
-            shift: false,
-            win: false,
+            modifiers: ModifierRequirements::default(),
         }
     }
 
     pub fn specificity(&self) -> u8 {
-        self.ctrl as u8 + self.alt as u8 + self.right_alt as u8 + self.shift as u8 + self.win as u8
+        family_specificity(self.modifiers.ctrl)
+            + family_specificity(self.modifiers.alt)
+            + family_specificity(self.modifiers.shift)
+            + family_specificity(self.modifiers.win)
+    }
+
+    pub fn display_label(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        append_modifier_label(&mut parts, "Ctrl", "LeftCtrl", "RightCtrl", self.modifiers.ctrl);
+        append_modifier_label(&mut parts, "Alt", "LeftAlt", "RightAlt", self.modifiers.alt);
+        append_modifier_label(&mut parts, "Shift", "LeftShift", "RightShift", self.modifiers.shift);
+        append_modifier_label(&mut parts, "Win", "LeftWin", "RightWin", self.modifiers.win);
+        parts.push(canonical_key_label(self.key));
+        parts.join("+")
+    }
+
+    pub fn matches_ctrl(&self, event: &KeyEvent) -> bool {
+        matches_family(self.modifiers.ctrl, event.ctrl_down, event.left_ctrl_down, event.right_ctrl_down, is_ctrl_key(self.key), key_is_left_ctrl(self.key), key_is_right_ctrl(self.key))
+    }
+
+    pub fn matches_alt(&self, event: &KeyEvent) -> bool {
+        matches_family(self.modifiers.alt, event.alt_down, event.left_alt_down, event.right_alt_down, is_alt_key(self.key), key_is_left_alt(self.key), key_is_right_alt(self.key))
+    }
+
+    pub fn matches_shift(&self, event: &KeyEvent) -> bool {
+        matches_family(self.modifiers.shift, event.shift_down, event.left_shift_down, event.right_shift_down, is_shift_key(self.key), key_is_left_shift(self.key), key_is_right_shift(self.key))
+    }
+
+    pub fn matches_win(&self, event: &KeyEvent) -> bool {
+        matches_family(self.modifiers.win, event.win_down, event.left_win_down, event.right_win_down, is_win_key(self.key), key_is_left_win(self.key), key_is_right_win(self.key))
     }
 
     pub fn matches_event(&self, event: &KeyEvent) -> bool {
-        self.key == event.key
-            && modifier_matches(self.ctrl, event.ctrl_down, is_ctrl_key(self.key))
-            && modifier_matches(self.alt, event.alt_down, is_alt_key(self.key))
-            && (!self.right_alt || event.right_alt_down)
-            && modifier_matches(self.shift, event.shift_down, is_shift_key(self.key))
-            && self.win == event.win_down
+        self.key == event.key && self.matches_ctrl(event) && self.matches_alt(event) && self.matches_shift(event) && self.matches_win(event)
     }
 
     pub fn matches_event_ignoring_extra_modifiers(&self, event: &KeyEvent) -> bool {
         self.key == event.key
-            && (!self.ctrl || event.ctrl_down || is_ctrl_key(self.key))
-            && (!self.alt || event.alt_down || is_alt_key(self.key))
-            && (!self.right_alt || event.right_alt_down)
-            && (!self.shift || event.shift_down || is_shift_key(self.key))
-            && (!self.win || event.win_down)
+            && matches_family_ignoring_extra(self.modifiers.ctrl, event.ctrl_down, event.left_ctrl_down, event.right_ctrl_down, is_ctrl_key(self.key), key_is_left_ctrl(self.key), key_is_right_ctrl(self.key))
+            && matches_family_ignoring_extra(self.modifiers.alt, event.alt_down, event.left_alt_down, event.right_alt_down, is_alt_key(self.key), key_is_left_alt(self.key), key_is_right_alt(self.key))
+            && matches_family_ignoring_extra(self.modifiers.shift, event.shift_down, event.left_shift_down, event.right_shift_down, is_shift_key(self.key), key_is_left_shift(self.key), key_is_right_shift(self.key))
+            && matches_family_ignoring_extra(self.modifiers.win, event.win_down, event.left_win_down, event.right_win_down, is_win_key(self.key), key_is_left_win(self.key), key_is_right_win(self.key))
     }
 
     pub fn matches_event_allowing_shift_modifier(&self, event: &KeyEvent) -> bool {
@@ -153,7 +167,6 @@ impl KeyChord {
             && event.shift_down
             && !event.ctrl_down
             && !event.alt_down
-            && !event.right_alt_down
             && !event.win_down
     }
 
@@ -170,393 +183,110 @@ impl KeyChord {
     }
 
     fn is_unmodified(&self) -> bool {
-        !self.ctrl && !self.alt && !self.right_alt && !self.shift && !self.win
+        self.modifiers == ModifierRequirements::default()
     }
 }
 
-fn modifier_matches(chord_modifier: bool, event_modifier: bool, self_key: bool) -> bool {
-    chord_modifier == event_modifier || (!chord_modifier && event_modifier && self_key)
+fn family_specificity(req: ModifierSideRequirement) -> u8 { match req { ModifierSideRequirement::NotRequired => 0, ModifierSideRequirement::Any => 1, ModifierSideRequirement::Left | ModifierSideRequirement::Right => 2 } }
+fn append_modifier_label(parts: &mut Vec<String>, any: &str, left: &str, right: &str, req: ModifierSideRequirement){ match req { ModifierSideRequirement::NotRequired=>{}, ModifierSideRequirement::Any=>parts.push(any.to_string()), ModifierSideRequirement::Left=>parts.push(left.to_string()), ModifierSideRequirement::Right=>parts.push(right.to_string())} }
+fn canonical_key_label(key: VirtualKey) -> String {
+    match key {
+        VirtualKey::OemPlus => "Plus".to_string(),
+        VirtualKey::OemComma => "Comma".to_string(),
+        VirtualKey::OemMinus => "Minus".to_string(),
+        VirtualKey::OemPeriod => "Period".to_string(),
+        VirtualKey::Oem1 => "Semicolon".to_string(),
+        VirtualKey::Oem2 => "Slash".to_string(),
+        VirtualKey::Oem3 => "Backtick".to_string(),
+        VirtualKey::Oem4 => "LeftBracket".to_string(),
+        VirtualKey::Oem5 => "Backslash".to_string(),
+        VirtualKey::Oem6 => "RightBracket".to_string(),
+        VirtualKey::Oem7 => "Apostrophe".to_string(),
+        _ => match key {
+            VirtualKey::A => "A".to_string(),
+            VirtualKey::B => "B".to_string(),
+            VirtualKey::C => "C".to_string(),
+            VirtualKey::D => "D".to_string(),
+            VirtualKey::E => "E".to_string(),
+            VirtualKey::F => "F".to_string(),
+            VirtualKey::G => "G".to_string(),
+            VirtualKey::H => "H".to_string(),
+            VirtualKey::I => "I".to_string(),
+            VirtualKey::J => "J".to_string(),
+            VirtualKey::K => "K".to_string(),
+            VirtualKey::L => "L".to_string(),
+            VirtualKey::M => "M".to_string(),
+            VirtualKey::N => "N".to_string(),
+            VirtualKey::O => "O".to_string(),
+            VirtualKey::P => "P".to_string(),
+            VirtualKey::Q => "Q".to_string(),
+            VirtualKey::R => "R".to_string(),
+            VirtualKey::S => "S".to_string(),
+            VirtualKey::T => "T".to_string(),
+            VirtualKey::U => "U".to_string(),
+            VirtualKey::V => "V".to_string(),
+            VirtualKey::W => "W".to_string(),
+            VirtualKey::X => "X".to_string(),
+            VirtualKey::Y => "Y".to_string(),
+            VirtualKey::Z => "Z".to_string(),
+            _ => format!("{:?}", key),
+        },
+    }
 }
+fn matches_family(req: ModifierSideRequirement, any_down: bool, left_down: bool, right_down: bool, self_key: bool, self_left: bool, self_right: bool) -> bool { match req { ModifierSideRequirement::NotRequired => !any_down || self_key, ModifierSideRequirement::Any => any_down || self_key, ModifierSideRequirement::Left => left_down || self_left, ModifierSideRequirement::Right => right_down || self_right } }
+fn matches_family_ignoring_extra(req: ModifierSideRequirement, any_down: bool, left_down: bool, right_down: bool, self_key: bool, self_left: bool, self_right: bool) -> bool { match req { ModifierSideRequirement::NotRequired => true, ModifierSideRequirement::Any => any_down || self_key, ModifierSideRequirement::Left => left_down || self_left, ModifierSideRequirement::Right => right_down || self_right } }
 
-fn is_shift_key(key: VirtualKey) -> bool {
-    matches!(
-        key,
-        VirtualKey::Shift | VirtualKey::LeftShift | VirtualKey::RightShift
-    )
+fn parse_modifier_token(token: &str) -> Option<(&'static str, ModifierSideRequirement)> {
+    match token.to_ascii_uppercase().as_str() {
+        "CTRL" | "CONTROL" => Some(("Ctrl", ModifierSideRequirement::Any)),
+        "LEFTCTRL" | "LCTRL" | "LEFT_CTRL" => Some(("Ctrl", ModifierSideRequirement::Left)),
+        "RIGHTCTRL" | "RCTRL" | "RIGHT_CTRL" => Some(("Ctrl", ModifierSideRequirement::Right)),
+        "ALT" => Some(("Alt", ModifierSideRequirement::Any)),
+        "LEFTALT" | "LALT" | "LEFT_ALT" => Some(("Alt", ModifierSideRequirement::Left)),
+        "RIGHTALT" | "RALT" | "RIGHT_ALT" => Some(("Alt", ModifierSideRequirement::Right)),
+        "SHIFT" => Some(("Shift", ModifierSideRequirement::Any)),
+        "LEFTSHIFT" | "LSHIFT" | "LEFT_SHIFT" => Some(("Shift", ModifierSideRequirement::Left)),
+        "RIGHTSHIFT" | "RSHIFT" | "RIGHT_SHIFT" => Some(("Shift", ModifierSideRequirement::Right)),
+        "WIN" | "SUPER" | "META" => Some(("Win", ModifierSideRequirement::Any)),
+        "LEFTWIN" | "LWIN" | "LEFT_WIN" => Some(("Win", ModifierSideRequirement::Left)),
+        "RIGHTWIN" | "RWIN" | "RIGHT_WIN" => Some(("Win", ModifierSideRequirement::Right)),
+        _ => None,
+    }
 }
+fn set_modifier(input: &str, family: &str, requirement: ModifierSideRequirement, modifiers: &mut ModifierRequirements) -> Result<(), KeyChordParseError> { let slot = match family {"Ctrl"=> &mut modifiers.ctrl, "Alt"=> &mut modifiers.alt, "Shift"=> &mut modifiers.shift, "Win"=> &mut modifiers.win, _=>unreachable!()}; if *slot != ModifierSideRequirement::NotRequired { return Err(KeyChordParseError::new(input, format!("duplicate modifier '{family}'"))); } *slot = requirement; Ok(()) }
+fn mark_parsed_modifier_side(family: &str, req: ModifierSideRequirement, m: &mut ParsedChordModifiers) { match (family, req) { ("Ctrl", ModifierSideRequirement::Left)=>m.left_ctrl=true, ("Ctrl", ModifierSideRequirement::Right)=>m.right_ctrl=true, ("Alt", ModifierSideRequirement::Left)=>m.left_alt=true, ("Alt", ModifierSideRequirement::Right)=>m.right_alt=true, ("Shift", ModifierSideRequirement::Left)=>m.left_shift=true, ("Shift", ModifierSideRequirement::Right)=>m.right_shift=true, _=>{} } }
 
-fn is_ctrl_key(key: VirtualKey) -> bool {
-    matches!(
-        key,
-        VirtualKey::Ctrl | VirtualKey::LeftCtrl | VirtualKey::RightCtrl
-    )
-}
-
-fn is_alt_key(key: VirtualKey) -> bool {
-    matches!(
-        key,
-        VirtualKey::Alt | VirtualKey::LeftAlt | VirtualKey::RightAlt
-    )
-}
+fn is_shift_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::Shift | VirtualKey::LeftShift | VirtualKey::RightShift) }
+fn is_ctrl_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::Ctrl | VirtualKey::LeftCtrl | VirtualKey::RightCtrl) }
+fn is_alt_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::Alt | VirtualKey::LeftAlt | VirtualKey::RightAlt) }
+fn is_win_key(key: VirtualKey) -> bool { matches!(key, VirtualKey::LeftWin | VirtualKey::RightWin) }
+fn key_is_left_ctrl(key: VirtualKey) -> bool { matches!(key, VirtualKey::LeftCtrl) }
+fn key_is_right_ctrl(key: VirtualKey) -> bool { matches!(key, VirtualKey::RightCtrl) }
+fn key_is_left_alt(key: VirtualKey) -> bool { matches!(key, VirtualKey::LeftAlt) }
+fn key_is_right_alt(key: VirtualKey) -> bool { matches!(key, VirtualKey::RightAlt) }
+fn key_is_left_shift(key: VirtualKey) -> bool { matches!(key, VirtualKey::LeftShift) }
+fn key_is_right_shift(key: VirtualKey) -> bool { matches!(key, VirtualKey::RightShift) }
+fn key_is_left_win(key: VirtualKey) -> bool { matches!(key, VirtualKey::LeftWin) }
+fn key_is_right_win(key: VirtualKey) -> bool { matches!(key, VirtualKey::RightWin) }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RuntimeSystemBindings {
-    pub toggle_active: KeyChord,
-    pub exit: KeyChord,
-    pub exit_ignore_extra_modifiers: bool,
-    pub panic_reset: KeyChord,
-    pub panic_reset_ignore_extra_modifiers: bool,
-    pub panic_reset_sets_idle: bool,
-}
-
-impl RuntimeSystemBindings {
-    #[allow(dead_code)]
-    pub fn new(toggle_active: KeyChord, exit: KeyChord) -> Self {
-        Self {
-            toggle_active,
-            exit,
-            ..Self::default()
-        }
-    }
-}
-
-impl Default for RuntimeSystemBindings {
-    fn default() -> Self {
-        Self {
-            toggle_active: KeyChord {
-                key: VirtualKey::E,
-                ctrl: true,
-                alt: false,
-                right_alt: false,
-                shift: false,
-                win: false,
-            },
-            exit: KeyChord {
-                key: VirtualKey::Escape,
-                ctrl: false,
-                alt: false,
-                right_alt: false,
-                shift: false,
-                win: false,
-            },
-            exit_ignore_extra_modifiers: true,
-            panic_reset: KeyChord {
-                key: VirtualKey::Escape,
-                ctrl: false,
-                alt: true,
-                right_alt: true,
-                shift: false,
-                win: false,
-            },
-            panic_reset_ignore_extra_modifiers: true,
-            panic_reset_sets_idle: true,
-        }
-    }
-}
+pub struct RuntimeSystemBindings { pub toggle_active: KeyChord, pub exit: KeyChord, pub exit_ignore_extra_modifiers: bool, pub panic_reset: KeyChord, pub panic_reset_ignore_extra_modifiers: bool, pub panic_reset_sets_idle: bool }
+impl RuntimeSystemBindings { #[allow(dead_code)] pub fn new(toggle_active: KeyChord, exit: KeyChord) -> Self { Self { toggle_active, exit, ..Self::default() } } }
+impl Default for RuntimeSystemBindings { fn default() -> Self { Self { toggle_active: KeyChord { key: VirtualKey::E, modifiers: ModifierRequirements::new(ModifierSideRequirement::Any, ModifierSideRequirement::NotRequired, ModifierSideRequirement::NotRequired, ModifierSideRequirement::NotRequired)}, exit: KeyChord::from_key(VirtualKey::Escape), exit_ignore_extra_modifiers: true, panic_reset: KeyChord { key: VirtualKey::Escape, modifiers: ModifierRequirements::new(ModifierSideRequirement::NotRequired, ModifierSideRequirement::Right, ModifierSideRequirement::NotRequired, ModifierSideRequirement::NotRequired)}, panic_reset_ignore_extra_modifiers: true, panic_reset_sets_idle: true } } }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyChordParseError {
-    input: String,
-    reason: String,
-}
-
-impl KeyChordParseError {
-    fn new(input: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self {
-            input: input.into(),
-            reason: reason.into(),
-        }
-    }
-}
-
-impl fmt::Display for KeyChordParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid key chord '{}': {}", self.input, self.reason)
-    }
-}
-
+pub struct KeyChordParseError { input: String, reason: String }
+impl KeyChordParseError { fn new(input: impl Into<String>, reason: impl Into<String>) -> Self { Self { input: input.into(), reason: reason.into() } } }
+impl fmt::Display for KeyChordParseError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "invalid key chord '{}': {}", self.input, self.reason) } }
 impl Error for KeyChordParseError {}
 
-fn set_modifier(input: &str, modifier: &str, target: &mut bool) -> Result<(), KeyChordParseError> {
-    if *target {
-        return Err(KeyChordParseError::new(
-            input,
-            format!("duplicate modifier '{modifier}'"),
-        ));
-    }
-    *target = true;
-    Ok(())
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn chord(
-        key: VirtualKey,
-        ctrl: bool,
-        alt: bool,
-        right_alt: bool,
-        shift: bool,
-        win: bool,
-    ) -> KeyChord {
-        KeyChord {
-            key,
-            ctrl,
-            alt,
-            right_alt,
-            shift,
-            win,
-        }
-    }
-
-    #[test]
-    fn parses_supported_chords() {
-        assert_eq!(
-            KeyChord::parse("Ctrl+E").unwrap(),
-            chord(VirtualKey::E, true, false, false, false, false)
-        );
-        assert_eq!(
-            KeyChord::parse("Alt+E").unwrap(),
-            chord(VirtualKey::E, false, true, false, false, false)
-        );
-        assert_eq!(
-            KeyChord::parse("RightAlt+E").unwrap(),
-            chord(VirtualKey::E, false, true, true, false, false)
-        );
-        assert_eq!(
-            KeyChord::parse("Ctrl+Shift+J").unwrap(),
-            chord(VirtualKey::J, true, false, false, true, false)
-        );
-        assert_eq!(
-            KeyChord::parse("Escape").unwrap(),
-            chord(VirtualKey::Escape, false, false, false, false, false)
-        );
-        assert_eq!(
-            KeyChord::parse("LeftShift").unwrap(),
-            chord(VirtualKey::LeftShift, false, false, false, false, false)
-        );
-    }
-
-    #[test]
-    fn matches_event_ignoring_extra_modifiers_escape_matches_alt_escape() {
-        let chord = KeyChord::parse("Escape").unwrap();
-        let mut event = KeyEvent::new(VirtualKey::Escape, true);
-        event.alt_down = true;
-        assert!(chord.matches_event_ignoring_extra_modifiers(&event));
-    }
-
-    #[test]
-    fn matches_event_escape_does_not_match_alt_escape_without_ignore_extra() {
-        let chord = KeyChord::parse("Escape").unwrap();
-        let mut event = KeyEvent::new(VirtualKey::Escape, true);
-        event.alt_down = true;
-        assert!(!chord.matches_event(&event));
-    }
-
-    #[test]
-    fn matches_event_ignoring_extra_modifiers_still_requires_required_modifier() {
-        let chord = KeyChord::parse("Ctrl+Q").unwrap();
-        let event = KeyEvent::new(VirtualKey::Q, true);
-        assert!(!chord.matches_event_ignoring_extra_modifiers(&event));
-    }
-
-    #[test]
-    fn parses_modifier_aliases() {
-        assert_eq!(
-            KeyChord::parse("Control+E").unwrap(),
-            chord(VirtualKey::E, true, false, false, false, false)
-        );
-        assert_eq!(
-            KeyChord::parse("Super+E").unwrap(),
-            chord(VirtualKey::E, false, false, false, false, true)
-        );
-        assert_eq!(
-            KeyChord::parse("Meta+E").unwrap(),
-            chord(VirtualKey::E, false, false, false, false, true)
-        );
-        assert_eq!(
-            KeyChord::parse("RAlt+E").unwrap(),
-            chord(VirtualKey::E, false, true, true, false, false)
-        );
-        assert_eq!(
-            KeyChord::parse("RIGHT_ALT+E").unwrap(),
-            chord(VirtualKey::E, false, true, true, false, false)
-        );
-    }
-
-    #[test]
-    fn parses_case_insensitively() {
-        assert_eq!(
-            KeyChord::parse("ctrl+shift+j").unwrap(),
-            chord(VirtualKey::J, true, false, false, true, false)
-        );
-        assert_eq!(
-            KeyChord::parse("eScApE").unwrap(),
-            chord(VirtualKey::Escape, false, false, false, false, false)
-        );
-    }
-
-    #[test]
-    fn parses_punctuation_key_aliases_in_chords() {
-        let cases = [
-            ("Ctrl+;", VirtualKey::Oem1),
-            ("Alt+Semicolon", VirtualKey::Oem1),
-            ("Shift+Comma", VirtualKey::OemComma),
-            ("Win+Period", VirtualKey::OemPeriod),
-            ("Meta+Dot", VirtualKey::OemPeriod),
-            ("Ctrl+Forward_Slash", VirtualKey::Oem2),
-            ("Alt+Backtick", VirtualKey::Oem3),
-            ("Shift+Left_Bracket", VirtualKey::Oem4),
-            ("Ctrl+Backslash", VirtualKey::Oem5),
-            ("Alt+Right_Bracket", VirtualKey::Oem6),
-            ("Shift+Apostrophe", VirtualKey::Oem7),
-        ];
-
-        for (input, expected_key) in cases {
-            assert_eq!(KeyChord::parse(input).unwrap().key, expected_key, "{input}");
-        }
-    }
-
-    #[test]
-    fn parses_modifier_aliases_table_driven() {
-        let cases = [
-            (
-                "Ctrl+E",
-                chord(VirtualKey::E, true, false, false, false, false),
-            ),
-            (
-                "Control+E",
-                chord(VirtualKey::E, true, false, false, false, false),
-            ),
-            (
-                "Alt+E",
-                chord(VirtualKey::E, false, true, false, false, false),
-            ),
-            (
-                "RightAlt+E",
-                chord(VirtualKey::E, false, true, true, false, false),
-            ),
-            (
-                "RAlt+E",
-                chord(VirtualKey::E, false, true, true, false, false),
-            ),
-            (
-                "RIGHT_ALT+E",
-                chord(VirtualKey::E, false, true, true, false, false),
-            ),
-            (
-                "Shift+E",
-                chord(VirtualKey::E, false, false, false, true, false),
-            ),
-            (
-                "Win+E",
-                chord(VirtualKey::E, false, false, false, false, true),
-            ),
-            (
-                "Super+E",
-                chord(VirtualKey::E, false, false, false, false, true),
-            ),
-            (
-                "Meta+E",
-                chord(VirtualKey::E, false, false, false, false, true),
-            ),
-        ];
-
-        for (input, expected) in cases {
-            assert_eq!(KeyChord::parse(input).unwrap(), expected, "{input}");
-        }
-    }
-
-    #[test]
-    fn matches_exact_modifiers() {
-        let chord = KeyChord::parse("Ctrl+E").unwrap();
-        let mut event = KeyEvent::new(VirtualKey::E, true);
-        event.ctrl_down = true;
-
-        assert!(chord.matches_event(&event));
-        assert!(!event.alt_down);
-        assert!(!event.right_alt_down);
-        assert!(!event.shift_down);
-        assert!(!event.win_down);
-
-        event.shift_down = true;
-        assert!(!chord.matches_event(&event));
-    }
-
-    #[test]
-    fn modifier_self_keys_match_their_own_down_modifier_state() {
-        let cases = [
-            (VirtualKey::LeftShift, false, false, false, true),
-            (VirtualKey::RightShift, false, false, false, true),
-            (VirtualKey::LeftCtrl, true, false, false, false),
-            (VirtualKey::RightCtrl, true, false, false, false),
-            (VirtualKey::LeftAlt, false, true, false, false),
-            (VirtualKey::RightAlt, false, true, true, false),
-        ];
-
-        for (key, ctrl_down, alt_down, right_alt_down, shift_down) in cases {
-            let chord = KeyChord::from_key(key);
-            let mut event = KeyEvent::new(key, true);
-            event.ctrl_down = ctrl_down;
-            event.alt_down = alt_down;
-            event.right_alt_down = right_alt_down;
-            event.shift_down = shift_down;
-
-            assert!(chord.matches_event(&event), "{key:?}");
-        }
-    }
-
-    #[test]
-    fn shift_relaxed_match_only_accepts_plain_chord_with_extra_shift() {
-        let plain_w = KeyChord::parse("W").unwrap();
-        let shift_w = KeyChord::parse("Shift+W").unwrap();
-        let mut event = KeyEvent::new(VirtualKey::W, true);
-        event.shift_down = true;
-
-        assert!(plain_w.matches_event_allowing_shift_modifier(&event));
-        assert!(!shift_w.matches_event_allowing_shift_modifier(&event));
-
-        event.ctrl_down = true;
-        assert!(!plain_w.matches_event_allowing_shift_modifier(&event));
-
-        event.ctrl_down = false;
-        event.alt_down = true;
-        event.right_alt_down = true;
-        assert!(!plain_w.matches_event_allowing_shift_modifier(&event));
-    }
-
-    #[test]
-    fn right_alt_matches_more_specifically_than_alt_and_plain_key() {
-        let right_alt_w = KeyChord::parse("RightAlt+W").unwrap();
-        let alt_w = KeyChord::parse("Alt+W").unwrap();
-        let plain_w = KeyChord::parse("W").unwrap();
-
-        let mut event = KeyEvent::new(VirtualKey::W, true);
-        event.alt_down = true;
-        event.right_alt_down = true;
-
-        assert!(right_alt_w.matches_event(&event));
-        assert!(alt_w.matches_event(&event));
-        assert!(!plain_w.matches_event(&event));
-
-        event.right_alt_down = false;
-        assert!(!right_alt_w.matches_event(&event));
-        assert!(alt_w.matches_event(&event));
-    }
-
-    #[test]
-    fn rejects_invalid_key_token() {
-        assert!(KeyChord::parse("Ctrl+Nope").is_err());
-    }
-
-    #[test]
-    fn rejects_duplicate_non_modifier_token() {
-        assert!(KeyChord::parse("Ctrl+E+E").is_err());
-    }
-
-    #[test]
-    fn rejects_modifier_only_chord() {
-        assert!(KeyChord::parse("Ctrl+Shift").is_err());
-    }
+mod tests { use super::*;
+fn chord(key: VirtualKey, ctrl: ModifierSideRequirement, alt: ModifierSideRequirement, shift: ModifierSideRequirement, win: ModifierSideRequirement) -> KeyChord { KeyChord { key, modifiers: ModifierRequirements::new(ctrl, alt, shift, win) } }
+#[test] fn parse_side_and_generic_modifiers(){ let cases=[("Ctrl+E",chord(VirtualKey::E,ModifierSideRequirement::Any,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired)),("LeftCtrl+E",chord(VirtualKey::E,ModifierSideRequirement::Left,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired)),("RightCtrl+E",chord(VirtualKey::E,ModifierSideRequirement::Right,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired)),("Alt+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Any,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired)),("LeftAlt+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Left,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired)),("RightAlt+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Right,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired)),("Shift+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Any,ModifierSideRequirement::NotRequired)),("LeftShift+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Left,ModifierSideRequirement::NotRequired)),("RightShift+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Right,ModifierSideRequirement::NotRequired)),("Win+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Any)),("LeftWin+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Left)),("RightWin+E",chord(VirtualKey::E,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::NotRequired,ModifierSideRequirement::Right))]; for (i,e) in cases { assert_eq!(KeyChord::parse(i).unwrap(),e,"{i}"); } }
+#[test] fn standalone_side_modifier_is_key(){ assert_eq!(KeyChord::parse("LeftShift").unwrap(), KeyChord::from_key(VirtualKey::LeftShift)); }
+#[test] fn matching_any_left_right(){ let any=KeyChord::parse("Alt+E").unwrap(); let left=KeyChord::parse("LeftAlt+E").unwrap(); let right=KeyChord::parse("RightAlt+E").unwrap(); let mut e=KeyEvent::new(VirtualKey::E,true); e.alt_down=true; e.left_alt_down=true; assert!(any.matches_event(&e)); assert!(left.matches_event(&e)); assert!(!right.matches_event(&e)); e.left_alt_down=false; e.right_alt_down=true; assert!(right.matches_event(&e)); }
+#[test] fn specificity_ordering(){ assert!(KeyChord::parse("RightAlt+E").unwrap().specificity() > KeyChord::parse("Alt+E").unwrap().specificity()); assert!(KeyChord::parse("Shift+E").unwrap().specificity() > KeyChord::parse("E").unwrap().specificity()); }
+#[test] fn display_roundtrip_matrix(){ let inputs=["E","Shift+E","RightAlt+E","LeftCtrl+RightShift+Q","Meta+Period","LeftShift"]; for input in inputs { let c=KeyChord::parse(input).unwrap(); let label=c.display_label(); assert_eq!(KeyChord::parse(&label).unwrap(), c, "{input} -> {label}"); } }
+#[test] fn rejects_duplicate_conflicting_modifiers(){ assert!(KeyChord::parse("Ctrl+LeftCtrl+E").is_err()); assert!(KeyChord::parse("LeftAlt+RightAlt+E").is_err()); assert!(KeyChord::parse("E+E").is_err()); }
 }

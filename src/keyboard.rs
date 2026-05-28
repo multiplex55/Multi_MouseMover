@@ -805,23 +805,52 @@ impl KeyBindings {
     pub fn owned_modifiers(&self) -> HashSet<VirtualKey> {
         let mut owned = HashSet::new();
         for (chord, _) in &self.bindings {
-            if chord.right_alt {
-                owned.insert(VirtualKey::RightAlt);
-                owned.insert(VirtualKey::Alt);
+            match chord.modifiers.alt {
+                crate::key_chord::ModifierSideRequirement::NotRequired => {}
+                crate::key_chord::ModifierSideRequirement::Any => {
+                    owned.insert(VirtualKey::Alt);
+                }
+                crate::key_chord::ModifierSideRequirement::Left => {
+                    owned.insert(VirtualKey::LeftAlt);
+                    owned.insert(VirtualKey::Alt);
+                }
+                crate::key_chord::ModifierSideRequirement::Right => {
+                    owned.insert(VirtualKey::RightAlt);
+                    owned.insert(VirtualKey::Alt);
+                }
             }
-            if chord.alt {
-                owned.insert(VirtualKey::Alt);
+            match chord.modifiers.ctrl {
+                crate::key_chord::ModifierSideRequirement::NotRequired => {}
+                crate::key_chord::ModifierSideRequirement::Any => {
+                    owned.insert(VirtualKey::Ctrl);
+                }
+                crate::key_chord::ModifierSideRequirement::Left => {
+                    owned.insert(VirtualKey::LeftCtrl);
+                    owned.insert(VirtualKey::Ctrl);
+                }
+                crate::key_chord::ModifierSideRequirement::Right => {
+                    owned.insert(VirtualKey::RightCtrl);
+                    owned.insert(VirtualKey::Ctrl);
+                }
             }
-            if chord.ctrl {
-                owned.insert(VirtualKey::Ctrl);
-            }
-            if chord.shift {
-                owned.insert(VirtualKey::Shift);
+            match chord.modifiers.shift {
+                crate::key_chord::ModifierSideRequirement::NotRequired => {}
+                crate::key_chord::ModifierSideRequirement::Any => {
+                    owned.insert(VirtualKey::Shift);
+                }
+                crate::key_chord::ModifierSideRequirement::Left => {
+                    owned.insert(VirtualKey::LeftShift);
+                    owned.insert(VirtualKey::Shift);
+                }
+                crate::key_chord::ModifierSideRequirement::Right => {
+                    owned.insert(VirtualKey::RightShift);
+                    owned.insert(VirtualKey::Shift);
+                }
             }
             // There is currently no generic Win virtual key variant in `VirtualKey`.
             // We still track Win in chord matching via the event's `win_down` flag,
             // but owned-modifier swallowing only applies to representable key events.
-            let _ = chord.win;
+            let _ = chord.modifiers.win;
         }
         owned
     }

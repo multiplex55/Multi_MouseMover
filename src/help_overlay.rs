@@ -1,7 +1,7 @@
 use crate::action::{Action, Direction2D, StepMoveTier};
 use crate::action_handler::{RuntimeNotification, RuntimeNotificationKind};
 use crate::app_state::ModeContext;
-use crate::key_chord::KeyChord;
+use crate::key_chord::{KeyChord, ModifierSideRequirement};
 use crate::TooltipOverlayConfig;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
@@ -1004,21 +1004,20 @@ fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
 }
 
 fn format_key_chord(chord: KeyChord) -> String {
+    fn push(parts: &mut Vec<String>, req: ModifierSideRequirement, any: &str, left: &str, right: &str) {
+        match req {
+            ModifierSideRequirement::NotRequired => {}
+            ModifierSideRequirement::Any => parts.push(any.to_string()),
+            ModifierSideRequirement::Left => parts.push(left.to_string()),
+            ModifierSideRequirement::Right => parts.push(right.to_string()),
+        }
+    }
+
     let mut parts = Vec::new();
-    if chord.ctrl {
-        parts.push("Ctrl".to_string());
-    }
-    if chord.right_alt {
-        parts.push("RightAlt".to_string());
-    } else if chord.alt {
-        parts.push("Alt".to_string());
-    }
-    if chord.shift {
-        parts.push("Shift".to_string());
-    }
-    if chord.win {
-        parts.push("Win".to_string());
-    }
+    push(&mut parts, chord.modifiers.ctrl, "Ctrl", "LeftCtrl", "RightCtrl");
+    push(&mut parts, chord.modifiers.alt, "Alt", "LeftAlt", "RightAlt");
+    push(&mut parts, chord.modifiers.shift, "Shift", "LeftShift", "RightShift");
+    push(&mut parts, chord.modifiers.win, "Win", "LeftWin", "RightWin");
     parts.push(format!("{:?}", chord.key));
     parts.join("+")
 }
