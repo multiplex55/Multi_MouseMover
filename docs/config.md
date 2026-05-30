@@ -545,6 +545,16 @@ list_tooltip_duration_ms = 1200
 `SurgicalMode` is a **held precision modifier**: movement requires both the surgical key and a movement key. Holding surgical alone produces no cursor movement. While active, movement runs at fixed `surgical_mode.speed_px` with no acceleration ramp.
 
 
+## Manual smoke-test checklist
+
+Use this checklist after changing key routing, modifier handling, or panic-reset behavior:
+
+- **LeftShift slow movement:** hold `LeftShift` with a movement binding and confirm movement uses the configured slow profile, then release `LeftShift` and confirm normal speed resumes.
+- **Shift/Alt/RightAlt movement variants:** confirm plain movement, `Shift+<movement>`, `Alt+<movement>` step movement, and `RightAlt+<movement>` edge/window variants resolve to their configured actions without stealing unrelated OS shortcuts.
+- **Ctrl+Escape exit:** press `Ctrl+Escape` and confirm the app exits through `system_bindings.exit`.
+- **Stuck-Alt recovery:** simulate or reproduce a stuck `Alt`/`RightAlt` state, press `RightAlt+Escape`, and confirm panic reset clears active movement/modifier/drag/exclusive-mode state.
+- **Ctrl+W passthrough when unconfigured:** with no explicit `Ctrl+W` binding, confirm `Ctrl+W` is not swallowed and reaches the foreground application.
+
 ## System binding priority and Escape conflicts
 
 `system_bindings` are always evaluated first for key-down events: `exit`, then `panic_reset`, then `toggle_active`.
