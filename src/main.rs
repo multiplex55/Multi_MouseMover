@@ -8293,7 +8293,7 @@ mod bookmark_runtime_logic_tests {
     }
 
     #[test]
-    fn reconcile_cadence_not_gated_by_stuck_timeout() {
+    fn bug_alt_stuck_reconcile_interval_not_gated_by_stuck_timeout() {
         let mut input = InputConfig::default();
         input.modifier_reconcile_on_tick = true;
         input.modifier_reconcile_interval_ms = 50;

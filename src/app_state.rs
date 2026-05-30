@@ -1152,7 +1152,9 @@ impl AppState {
             return;
         }
 
-        if self.is_preserved_shortcut(&event) {
+        if self.is_preserved_shortcut(&event)
+            && !self.has_explicit_configured_binding_for_event(&event)
+        {
             return;
         }
 
@@ -3699,5 +3701,140 @@ mod tests {
         state.reconcile_stale_keys(|_| false);
 
         assert!(!state.should_swallow_key(&up));
+    }
+
+    #[test]
+    fn bug_preserved_shortcut_passes_through_without_explicit_binding_but_binding_precedes_filter()
+    {
+        let mut unbound = state_with_bound_key(VirtualKey::S);
+        let mut ctrl_s = KeyEvent::new(VirtualKey::S, true);
+        ctrl_s.ctrl_down = true;
+        ctrl_s.left_ctrl_down = true;
+
+        assert!(!unbound.should_swallow_key(&ctrl_s));
+        unbound.route_key_event(ctrl_s, Some(Action::MoveUp));
+        assert_eq!(collect_commands(&mut unbound), Vec::new());
+
+        let mut bound = state_with_bound_chords([KeyChord::parse("Ctrl+S").unwrap()]);
+        assert!(bound.should_swallow_key(&ctrl_s));
+        bound.route_key_event(ctrl_s, Some(Action::MoveUp));
+        assert_eq!(
+            collect_commands(&mut bound),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveUp,
+                is_down: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn bug_altgr_preserved_shortcut_normalizes_synthetic_ctrl_before_precedence() {
+        let mut synthetic_ctrl_s = KeyEvent::new(VirtualKey::S, true);
+        synthetic_ctrl_s.alt_down = true;
+        synthetic_ctrl_s.right_alt_down = true;
+        synthetic_ctrl_s.ctrl_down = true;
+
+        let unbound = state_with_bound_key(VirtualKey::S);
+        assert!(!unbound.should_swallow_key(&synthetic_ctrl_s));
+
+        let bound = state_with_bound_chords([KeyChord::parse("RightAlt+S").unwrap()]);
+        assert!(bound.should_swallow_key(&synthetic_ctrl_s));
+        assert!(bound.has_explicit_configured_binding_for_event(&synthetic_ctrl_s));
+    }
+
+    #[test]
+    fn bug_panic_reset_precedes_preserved_shortcuts_and_clears_runtime_state() {
+        let mut state = state_with_bound_key(VirtualKey::S);
+        state.route_key_event(KeyEvent::new(VirtualKey::S, true), Some(Action::MoveUp));
+        assert_eq!(collect_commands(&mut state).len(), 1);
+
+        let mut panic = KeyEvent::new(VirtualKey::Escape, true);
+        panic.alt_down = true;
+        panic.right_alt_down = true;
+        panic.ctrl_down = true;
+        panic.left_ctrl_down = true;
+        panic.shift_down = true;
+        panic.left_shift_down = true;
+
+        assert!(state.should_swallow_key(&panic));
+        state.route_key_event(panic, None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![
+                AppCommand::SetActiveMode { active: false },
+                AppCommand::PanicReset,
+            ]
+        );
+    }
+
+    #[test]
+    fn bug_alt_stuck_reconcile_interval_altgr_sequence_recovers_missed_right_alt_up() {
+        let mut state = state_with_bound_chords([KeyChord::parse("RightAlt+E").unwrap()]);
+        state.set_owned_modifiers([VirtualKey::RightAlt]);
+
+        state.route_key_event(KeyEvent::new(VirtualKey::RightAlt, true), None);
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
+
+        let mut e_down = right_alt_e_with_synthetic_ctrl();
+        assert!(state.should_swallow_key(&e_down));
+        state.route_key_event(e_down, Some(Action::MoveRight));
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveRight,
+                is_down: true,
+            }]
+        );
+
+        e_down.is_down = false;
+        state.route_key_event(e_down, None);
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveRight,
+                is_down: false,
+            }]
+        );
+
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
+        state.reconcile_stale_keys(|key| key != VirtualKey::RightAlt);
+        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
+        assert_eq!(collect_commands(&mut state), Vec::new());
+    }
+
+    #[test]
+    fn bug_altgr_active_trigger_uses_right_alt_specific_chord_for_key_up() {
+        let mut state = state_with_bound_chords([
+            KeyChord::parse("Alt+E").unwrap(),
+            KeyChord::parse("RightAlt+E").unwrap(),
+        ]);
+        let e_down = right_alt_e_with_synthetic_ctrl();
+
+        state.route_key_event(e_down, Some(Action::MoveUp));
+        assert!(state
+            .active_trigger_chords
+            .contains(&KeyChord::parse("RightAlt+E").unwrap()));
+        assert!(!state
+            .active_trigger_chords
+            .contains(&KeyChord::parse("Alt+E").unwrap()));
+
+        let mut e_up = e_down;
+        e_up.is_down = false;
+        assert!(state.should_swallow_key(&e_up));
+        state.route_key_event(e_up, None);
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![
+                AppCommand::KeyAction {
+                    action: Action::MoveUp,
+                    is_down: true,
+                },
+                AppCommand::KeyAction {
+                    action: Action::MoveUp,
+                    is_down: false,
+                },
+            ]
+        );
     }
 }

@@ -117,4 +117,37 @@ mod tests {
         assert_eq!(left, Some(VirtualKey::LeftShift));
         assert_eq!(right, Some(VirtualKey::RightShift));
     }
+
+    #[test]
+    fn bug_altgr_hook_snapshot_keeps_synthetic_ctrl_side_unspecified() {
+        let event = crate::app_state::KeyEvent::with_modifier_state(
+            VirtualKey::E,
+            true,
+            ModifierSnapshot {
+                right_alt: true,
+                left_ctrl: false,
+                right_ctrl: false,
+                ..ModifierSnapshot::default()
+            },
+        );
+
+        assert!(event.alt_down);
+        assert!(event.right_alt_down);
+        assert!(!event.ctrl_down);
+        assert!(!event.left_ctrl_down);
+        assert!(!event.right_ctrl_down);
+    }
+
+    #[test]
+    fn bug_altgr_synthetic_ctrl_snapshot_is_distinguishable_from_physical_ctrl() {
+        let event = crate::app_state::KeyEvent::new(VirtualKey::E, true);
+        let mut synthetic = event;
+        synthetic.alt_down = true;
+        synthetic.right_alt_down = true;
+        synthetic.ctrl_down = true;
+
+        assert!(synthetic.ctrl_down);
+        assert!(!synthetic.left_ctrl_down);
+        assert!(!synthetic.right_ctrl_down);
+    }
 }

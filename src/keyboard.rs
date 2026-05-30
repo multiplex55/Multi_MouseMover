@@ -1284,4 +1284,40 @@ mod tests {
         let owned = bindings.owned_modifiers();
         assert!(owned.contains(&VirtualKey::Alt));
     }
+
+    #[test]
+    fn bug_right_alt_e_specific_binding_wins_then_falls_back_to_generic_alt_e() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("Alt+E").unwrap(), Action::MoveDown);
+        bindings.add_chord_binding(KeyChord::parse("RightAlt+E").unwrap(), Action::MoveUp);
+
+        let mut altgr = KeyEvent::new(VirtualKey::E, true);
+        altgr.alt_down = true;
+        altgr.right_alt_down = true;
+        let resolved = bindings.resolve_for_key_down_event(&altgr, true).unwrap();
+        assert_eq!(resolved.chord, KeyChord::parse("RightAlt+E").unwrap());
+        assert_eq!(resolved.action, Action::MoveUp);
+
+        let mut fallback = KeyBindings::new();
+        fallback.add_chord_binding(KeyChord::parse("Alt+E").unwrap(), Action::MoveDown);
+        let resolved = fallback.resolve_for_key_down_event(&altgr, true).unwrap();
+        assert_eq!(resolved.chord, KeyChord::parse("Alt+E").unwrap());
+        assert_eq!(resolved.action, Action::MoveDown);
+    }
+
+    #[test]
+    fn bug_binding_resolution_tie_break_stays_first_inserted_across_repeated_resolves() {
+        let chord = KeyChord::parse("RightAlt+E").unwrap();
+        let bindings = KeyBindings {
+            bindings: vec![(chord, Action::MoveUp), (chord, Action::MoveDown)],
+        };
+        let mut event = KeyEvent::new(VirtualKey::E, true);
+        event.alt_down = true;
+        event.right_alt_down = true;
+
+        for _ in 0..20 {
+            let resolved = bindings.resolve_for_key_down_event(&event, true).unwrap();
+            assert_eq!(resolved.action, Action::MoveUp);
+        }
+    }
 }
