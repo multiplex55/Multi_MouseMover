@@ -198,14 +198,16 @@ impl KeyChord {
     }
 
     pub fn matches_event(&self, event: &KeyEvent) -> bool {
+        let event = event_with_altgr_synthetic_ctrl_normalized(event);
         self.key == event.key
-            && self.matches_ctrl(event)
-            && self.matches_alt(event)
-            && self.matches_shift(event)
-            && self.matches_win(event)
+            && self.matches_ctrl(&event)
+            && self.matches_alt(&event)
+            && self.matches_shift(&event)
+            && self.matches_win(&event)
     }
 
     pub fn matches_event_ignoring_extra_modifiers(&self, event: &KeyEvent) -> bool {
+        let event = event_with_altgr_synthetic_ctrl_normalized(event);
         self.key == event.key
             && matches_family_ignoring_extra(
                 self.modifiers.ctrl,
@@ -269,6 +271,15 @@ impl KeyChord {
     fn is_unmodified(&self) -> bool {
         self.modifiers == ModifierRequirements::default()
     }
+}
+
+fn event_with_altgr_synthetic_ctrl_normalized(event: &KeyEvent) -> KeyEvent {
+    let mut effective = *event;
+    let synthetic_ctrl = event.ctrl_down && !event.left_ctrl_down && !event.right_ctrl_down;
+    if event.right_alt_down && synthetic_ctrl {
+        effective.ctrl_down = false;
+    }
+    effective
 }
 
 fn family_specificity(req: ModifierSideRequirement) -> u8 {
@@ -735,5 +746,40 @@ mod tests {
         assert!(KeyChord::parse("Ctrl+LeftCtrl+E").is_err());
         assert!(KeyChord::parse("LeftAlt+RightAlt+E").is_err());
         assert!(KeyChord::parse("E+E").is_err());
+    }
+
+    #[test]
+    fn bug_altgr_generic_vs_side_specific_match_and_display_are_stable() {
+        let generic = KeyChord::parse("Alt+E").unwrap();
+        let right = KeyChord::parse("RightAlt+E").unwrap();
+        let left = KeyChord::parse("LeftAlt+E").unwrap();
+
+        let mut altgr_event = KeyEvent::new(VirtualKey::E, true);
+        altgr_event.alt_down = true;
+        altgr_event.right_alt_down = true;
+
+        assert!(generic.matches_event(&altgr_event));
+        assert!(right.matches_event(&altgr_event));
+        assert!(!left.matches_event(&altgr_event));
+
+        altgr_event.ctrl_down = true;
+        assert!(generic.matches_event(&altgr_event));
+        assert!(right.matches_event(&altgr_event));
+        assert!(!KeyChord::parse("Ctrl+RightAlt+E")
+            .unwrap()
+            .matches_event(&altgr_event));
+        assert!(right.specificity() > generic.specificity());
+        assert_eq!(generic.display_label(), "Alt+E");
+        assert_eq!(right.display_label(), "RightAlt+E");
+    }
+
+    #[test]
+    fn bug_chord_parser_records_side_details_for_altgr_bindings() {
+        let parsed = KeyChord::parse_with_details("RightAlt+E").unwrap();
+
+        assert_eq!(parsed.chord.display_label(), "RightAlt+E");
+        assert!(parsed.modifiers.right_alt);
+        assert!(!parsed.modifiers.left_alt);
+        assert_eq!(parsed.chord.specificity(), 2);
     }
 }
