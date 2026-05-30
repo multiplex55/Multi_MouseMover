@@ -3092,8 +3092,7 @@ fn clear_all_runtime_input_state<B: MouseBackend>(
     reason: RuntimeCleanupReason,
 ) -> JumpOverlayResolution {
     action_handler.clear_runtime_input_state();
-    app_state.clear_active_action_keys_and_exit_exclusive_modes();
-    app_state.hide_help();
+    app_state.clear_runtime_input_state();
     help_overlay::hide_help_overlay();
     if matches!(reason, RuntimeCleanupReason::PanicReset) {
         action_handler.mouse_master.push_panic_reset_notification();
@@ -3176,6 +3175,28 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
         }
     }
 
+    if action == Action::PanicReset {
+        if is_down {
+            action_handler.mouse_master.hard_reset_runtime();
+            let _ = clear_all_runtime_input_state(
+                action_handler,
+                app_state,
+                RuntimeCleanupReason::PanicReset,
+            );
+            if action_handler
+                .mouse_master
+                .config
+                .system_bindings
+                .panic_reset_sets_idle
+            {
+                action_handler.mouse_master.set_active_mode(false);
+                app_state.set_active_mode(false);
+            }
+            return Some(app_state.resolve_jump_overlay());
+        }
+        return None;
+    }
+
     if action == Action::ClickThenDisable {
         if is_down {
             action_handler.execute_action(&Action::ClickThenDisable);
@@ -3203,7 +3224,7 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
     }
 
     if is_down {
-        if action == Action::ReloadConfig || action == Action::PanicReset {
+        if action == Action::ReloadConfig {
             return None;
         }
         match send_navigation_action(keyboard_sender, &action) {
@@ -5051,6 +5072,89 @@ mod tests {
         assert!(handler.active_keys.is_empty());
         assert!(!handler.mouse_master.left_button_held());
         assert!(!app_state.is_jump_active());
+    }
+
+    #[test]
+    fn panic_reset_clears_all_active_input_state() {
+        let mut app_state = AppState::default();
+        app_state.set_bound_keys([VirtualKey::Left, VirtualKey::Right]);
+        app_state.toggle_help();
+        app_state.route_key_event(
+            KeyEvent::new(VirtualKey::Left, true),
+            Some(Action::MoveLeft),
+        );
+        app_state.reconcile_stale_keys(|_| false);
+        app_state.route_key_event(
+            KeyEvent::new(VirtualKey::Right, true),
+            Some(Action::MoveRight),
+        );
+        let config = Config::default().normalize().unwrap();
+        assert!(app_state.enter_jump_mode(
+            &config.jump,
+            config.final_adjust.clone(),
+            jump_region(),
+            VirtualKey::J,
+        ));
+
+        let mut handler = ActionHandler::new(MouseMaster::new_with_backend(
+            checked_in_config(),
+            FakeBackend::default(),
+        ));
+        handler.process_active_keys(Action::MoveRight, true);
+        handler.process_active_keys(Action::SlowMouse, true);
+        handler.process_active_keys(Action::SurgicalMode, true);
+        handler.process_active_keys(Action::ScrollModifier, true);
+        handler.process_active_keys(Action::WheelDown, true);
+        handler.mouse_master.handle_action(Action::ToggleDragMode);
+
+        let resolution = clear_all_runtime_input_state(
+            &mut handler,
+            &mut app_state,
+            RuntimeCleanupReason::PanicReset,
+        );
+
+        assert!(handler.active_keys.is_empty());
+        assert!(!handler.mouse_master.left_button_held());
+        assert_eq!(
+            handler.mouse_master.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+            ]
+        );
+        assert!(!app_state.has_active_action_keys());
+        assert_eq!(app_state.held_physical_key_count(), 0);
+        assert_eq!(app_state.reconciled_released_key_count(), 0);
+        assert!(!app_state.help_visible());
+        assert!(!app_state.is_jump_active());
+        assert!(!app_state.is_grid_active());
+        assert!(!app_state.is_bookmark_mode_active());
+        assert_eq!(resolution, JumpOverlayResolution::Hidden);
+    }
+
+    #[test]
+    fn panic_reset_releases_held_mouse_buttons() {
+        let mut handler = ActionHandler::new(MouseMaster::new_with_backend(
+            checked_in_config(),
+            FakeBackend::default(),
+        ));
+        handler.mouse_master.handle_action(Action::ToggleDragMode);
+
+        let mut app_state = AppState::default();
+        let _ = clear_all_runtime_input_state(
+            &mut handler,
+            &mut app_state,
+            RuntimeCleanupReason::PanicReset,
+        );
+
+        assert!(!handler.mouse_master.left_button_held());
+        assert_eq!(
+            handler.mouse_master.backend.operations,
+            vec![
+                MouseOperation::ButtonDown(Button::Left),
+                MouseOperation::ButtonUp(Button::Left),
+            ]
+        );
     }
 
     #[test]

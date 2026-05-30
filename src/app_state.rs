@@ -421,6 +421,23 @@ impl AppState {
         self.exit_bookmark_mode();
     }
 
+    pub fn clear_runtime_input_state(&mut self) {
+        self.clear_active_action_keys_and_exit_exclusive_modes();
+        self.held_physical_keys.clear();
+        self.reconciled_released_keys.clear();
+        self.hide_help();
+    }
+
+    #[cfg(test)]
+    pub fn held_physical_key_count(&self) -> usize {
+        self.held_physical_keys.len()
+    }
+
+    #[cfg(test)]
+    pub fn reconciled_released_key_count(&self) -> usize {
+        self.reconciled_released_keys.len()
+    }
+
     pub fn set_system_bindings(&mut self, system_bindings: RuntimeSystemBindings) {
         self.system_bindings = system_bindings;
     }
@@ -3540,6 +3557,56 @@ mod tests {
                 AppCommand::PanicReset
             ]
         );
+    }
+
+    #[test]
+    fn panic_reset_works_with_extra_modifiers() {
+        let mut state = AppState::default();
+        let mut event = KeyEvent::new(VirtualKey::Escape, true);
+        event.alt_down = true;
+        event.right_alt_down = true;
+        event.ctrl_down = true;
+        event.left_ctrl_down = true;
+        event.shift_down = true;
+        event.left_shift_down = true;
+
+        assert!(state.should_swallow_key(&event));
+        state.route_key_event(event, None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![
+                AppCommand::SetActiveMode { active: false },
+                AppCommand::PanicReset
+            ]
+        );
+    }
+
+    #[test]
+    fn panic_reset_optionally_sets_idle() {
+        for (sets_idle, expected) in [
+            (
+                true,
+                vec![
+                    AppCommand::SetActiveMode { active: false },
+                    AppCommand::PanicReset,
+                ],
+            ),
+            (false, vec![AppCommand::PanicReset]),
+        ] {
+            let mut state = AppState::default();
+            state.set_system_bindings(RuntimeSystemBindings {
+                panic_reset_sets_idle: sets_idle,
+                ..RuntimeSystemBindings::default()
+            });
+            let mut event = KeyEvent::new(VirtualKey::Escape, true);
+            event.alt_down = true;
+            event.right_alt_down = true;
+
+            state.route_key_event(event, None);
+
+            assert_eq!(collect_commands(&mut state), expected);
+        }
     }
 
     #[test]
