@@ -7,11 +7,11 @@ use crate::jump_view::{
     FinalAdjustOverlayView, GridOverlayMetadata, JumpOverlayView, JumpStageMetadata, JumpVisuals,
 };
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
-use crate::keyboard::VirtualKey;
+use crate::keyboard::{OwnedModifierKeys, VirtualKey};
 #[cfg(test)]
 use crate::Config;
 use crate::JumpConfig;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyEvent {
@@ -133,9 +133,9 @@ pub struct AppState {
     active_keys: HashSet<VirtualKey>,
     active_trigger_chords: HashSet<KeyChord>,
     active_triggers: std::collections::HashMap<VirtualKey, ActiveTrigger>,
-    owned_modifiers: HashSet<VirtualKey>,
+    owned_modifiers: OwnedModifierKeys,
     reconciled_released_keys: HashSet<VirtualKey>,
-    held_physical_keys: HashSet<VirtualKey>,
+    held_physical_keys: HashMap<VirtualKey, HeldKeyState>,
     swallow_owned_modifiers: bool,
     debug_input: bool,
     jump: JumpState,
@@ -150,6 +150,15 @@ pub struct AppState {
     grid_direction_labels: GridDirectionLabels,
     bookmark_cancel_key: VirtualKey,
     bookmark_clear_modifier_key: VirtualKey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeldKeyState {
+    pub pressed_at: std::time::Instant,
+    pub last_event_at: std::time::Instant,
+    pub was_action_trigger: bool,
+    pub was_owned_modifier: bool,
+    pub reconciled_release_sent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -276,9 +285,9 @@ impl Default for AppState {
             active_keys: HashSet::new(),
             active_trigger_chords: HashSet::new(),
             active_triggers: std::collections::HashMap::new(),
-            owned_modifiers: HashSet::new(),
+            owned_modifiers: OwnedModifierKeys::default(),
             reconciled_released_keys: HashSet::new(),
-            held_physical_keys: HashSet::new(),
+            held_physical_keys: HashMap::new(),
             swallow_owned_modifiers: true,
             debug_input: false,
             jump: JumpState::Inactive,
@@ -333,7 +342,10 @@ impl AppState {
     where
         I: IntoIterator<Item = VirtualKey>,
     {
-        self.owned_modifiers = modifiers.into_iter().collect();
+        self.owned_modifiers = OwnedModifierKeys::default();
+        for key in modifiers {
+            self.owned_modifiers.insert(key);
+        }
     }
 
     pub fn set_debug_input(&mut self, enabled: bool) {
@@ -344,16 +356,15 @@ impl AppState {
     where
         F: FnMut(VirtualKey) -> bool,
     {
-        let stale_keys: Vec<VirtualKey> = self
+        let stale_keys: Vec<(VirtualKey, HeldKeyState)> = self
             .held_physical_keys
             .iter()
-            .copied()
-            .filter(|key| !is_key_physically_down(*key))
+            .filter_map(|(key, state)| (!is_key_physically_down(*key)).then_some((*key, *state)))
             .collect();
 
-        for key in stale_keys {
-            let stale_owned_modifier = self.owned_modifiers.contains(&key);
-            let stale_trigger = self.active_triggers.contains_key(&key);
+        for (key, held_state) in stale_keys {
+            let stale_owned_modifier = held_state.was_owned_modifier;
+            let stale_trigger = held_state.was_action_trigger;
             let mut synthesized_action = None;
 
             self.held_physical_keys.remove(&key);
@@ -372,8 +383,8 @@ impl AppState {
 
             if self.debug_input {
                 eprintln!(
-                    "[debug-input] reconciled stale key={:?} trigger={} owned_modifier={}",
-                    key, stale_trigger, stale_owned_modifier
+                    "[debug-input] reconciled stale key={:?} trigger={} owned_modifier={} held_ms={} reconciled_release_sent={}",
+                    key, stale_trigger, stale_owned_modifier, held_state.pressed_at.elapsed().as_millis(), held_state.reconciled_release_sent
                 );
             }
         }
@@ -970,8 +981,8 @@ impl AppState {
 
         if self.active_mode
             && self.swallow_owned_modifiers
-            && self.owned_modifiers.contains(&event.key)
-            && (self.held_physical_keys.contains(&event.key)
+            && self.owned_modifiers.owns_key(event.key)
+            && (self.held_physical_keys.contains_key(&event.key)
                 || (event.is_down && !self.reconciled_released_keys.contains(&event.key)))
         {
             self.debug_swallow("owned_modifier_active", event, true);
@@ -1135,10 +1146,27 @@ impl AppState {
         if event.is_down {
             self.reconciled_released_keys.remove(&event.key);
             self.active_keys.insert(event.key);
-            self.held_physical_keys.insert(event.key);
+            let now = std::time::Instant::now();
+            let mut was_action_trigger = false;
             if let Some(resolved_action) = action.clone() {
                 self.track_active_trigger(event, resolved_action);
+                was_action_trigger = true;
             }
+            self.held_physical_keys
+                .entry(event.key)
+                .and_modify(|state| {
+                    state.last_event_at = now;
+                    state.was_action_trigger |= was_action_trigger;
+                    state.was_owned_modifier |= self.owned_modifiers.owns_key(event.key);
+                    state.reconciled_release_sent = false;
+                })
+                .or_insert(HeldKeyState {
+                    pressed_at: now,
+                    last_event_at: now,
+                    was_action_trigger,
+                    was_owned_modifier: self.owned_modifiers.owns_key(event.key),
+                    reconciled_release_sent: false,
+                });
         } else {
             self.active_keys.remove(&event.key);
             self.held_physical_keys.remove(&event.key);
@@ -3564,6 +3592,36 @@ mod tests {
         assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
     }
 
+    #[test]
+    fn held_key_insert_on_down_remove_on_up() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        assert!(state.held_physical_keys.contains_key(&VirtualKey::E));
+        state.route_key_event(KeyEvent::new(VirtualKey::E, false), None);
+        assert!(!state.held_physical_keys.contains_key(&VirtualKey::E));
+    }
+
+    #[test]
+    fn reconcile_releases_only_physically_up_keys() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        state.route_key_event(KeyEvent::new(VirtualKey::W, true), Some(Action::MoveDown));
+        let _ = collect_commands(&mut state);
+
+        state.reconcile_stale_keys(|key| key == VirtualKey::W);
+
+        let cmds = collect_commands(&mut state);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            AppCommand::KeyAction {
+                action: Action::MoveUp,
+                is_down: false,
+            }
+        );
+        assert!(state.held_physical_keys.contains_key(&VirtualKey::W));
+        assert!(!state.held_physical_keys.contains_key(&VirtualKey::E));
+    }
     #[test]
     fn reconcile_removes_active_trigger_for_stale_key() {
         let mut state = state_with_bound_key(VirtualKey::E);
