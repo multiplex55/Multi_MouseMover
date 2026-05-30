@@ -1152,7 +1152,9 @@ impl AppState {
             return;
         }
 
-        if self.is_preserved_shortcut(&event) {
+        if self.is_preserved_shortcut(&event)
+            && !self.has_explicit_configured_binding_for_event(&event)
+        {
             return;
         }
 
