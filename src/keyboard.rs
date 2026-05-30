@@ -38,17 +38,19 @@ impl OwnedModifierKeys {
                 self.contains_exact(VirtualKey::LeftAlt)
                     || self.contains_exact(VirtualKey::RightAlt)
             }
-            VirtualKey::LeftAlt | VirtualKey::RightAlt => false,
+            VirtualKey::LeftAlt | VirtualKey::RightAlt => self.contains_exact(VirtualKey::Alt),
             VirtualKey::Ctrl => {
                 self.contains_exact(VirtualKey::LeftCtrl)
                     || self.contains_exact(VirtualKey::RightCtrl)
             }
-            VirtualKey::LeftCtrl | VirtualKey::RightCtrl => false,
+            VirtualKey::LeftCtrl | VirtualKey::RightCtrl => self.contains_exact(VirtualKey::Ctrl),
             VirtualKey::Shift => {
                 self.contains_exact(VirtualKey::LeftShift)
                     || self.contains_exact(VirtualKey::RightShift)
             }
-            VirtualKey::LeftShift | VirtualKey::RightShift => false,
+            VirtualKey::LeftShift | VirtualKey::RightShift => {
+                self.contains_exact(VirtualKey::Shift)
+            }
             VirtualKey::LeftWin | VirtualKey::RightWin => false,
             _ => false,
         }
@@ -870,11 +872,9 @@ impl KeyBindings {
                 }
                 crate::key_chord::ModifierSideRequirement::Left => {
                     owned.insert(VirtualKey::LeftAlt);
-                    owned.insert(VirtualKey::Alt);
                 }
                 crate::key_chord::ModifierSideRequirement::Right => {
                     owned.insert(VirtualKey::RightAlt);
-                    owned.insert(VirtualKey::Alt);
                 }
             }
             match chord.modifiers.ctrl {
@@ -884,11 +884,9 @@ impl KeyBindings {
                 }
                 crate::key_chord::ModifierSideRequirement::Left => {
                     owned.insert(VirtualKey::LeftCtrl);
-                    owned.insert(VirtualKey::Ctrl);
                 }
                 crate::key_chord::ModifierSideRequirement::Right => {
                     owned.insert(VirtualKey::RightCtrl);
-                    owned.insert(VirtualKey::Ctrl);
                 }
             }
             match chord.modifiers.shift {
@@ -898,11 +896,9 @@ impl KeyBindings {
                 }
                 crate::key_chord::ModifierSideRequirement::Left => {
                     owned.insert(VirtualKey::LeftShift);
-                    owned.insert(VirtualKey::Shift);
                 }
                 crate::key_chord::ModifierSideRequirement::Right => {
                     owned.insert(VirtualKey::RightShift);
-                    owned.insert(VirtualKey::Shift);
                 }
             }
             // There is currently no generic Win virtual key variant in `VirtualKey`.
@@ -1246,12 +1242,13 @@ mod tests {
     }
 
     #[test]
-    fn right_alt_in_chord_marks_right_alt_and_alt_owned() {
+    fn right_alt_in_chord_marks_right_alt_owned() {
         let mut bindings = KeyBindings::new();
         bindings.add_chord_binding(KeyChord::parse("RightAlt+W").unwrap(), Action::MoveUp);
         let owned = bindings.owned_modifiers();
         assert!(owned.contains(&VirtualKey::RightAlt));
-        assert!(owned.contains(&VirtualKey::Alt));
+        assert!(owned.owns_key(VirtualKey::Alt));
+        assert!(!owned.contains(&VirtualKey::Alt));
     }
 
     #[test]
