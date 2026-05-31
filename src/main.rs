@@ -42,7 +42,7 @@ use jump_overlay::{
 };
 use jump_session::JumpSessionUpdate;
 use jump_view::{JumpLabelMetadata, JumpVisuals};
-use key_chord::{KeyChord, ModifierRequirements, ModifierSideRequirement, RuntimeSystemBindings};
+use key_chord::{KeyChord, ModifierRequirements, RuntimeSystemBindings};
 use keyboard::*;
 use lazy_static::lazy_static;
 use overlay::{StatusOverlayConfig, OVERLAY};

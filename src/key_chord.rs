@@ -4,19 +4,14 @@ use serde::Deserialize;
 use std::error::Error;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModifierSideRequirement {
+    #[default]
     NotRequired,
     Any,
     Left,
     Right,
-}
-
-impl Default for ModifierSideRequirement {
-    fn default() -> Self {
-        Self::NotRequired
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
