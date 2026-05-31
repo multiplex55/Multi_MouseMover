@@ -5262,7 +5262,7 @@ mod tests {
         set_runtime_config(previous_config.clone());
         let mut invalid_config = previous_config.clone();
         invalid_config.polling_rate = 99;
-        invalid_config.system_bindings.toggle_active = Some("Ctrl+DefinitelyNotAKey".to_string());
+        invalid_config.system_bindings.toggle_active = "Ctrl+DefinitelyNotAKey".to_string();
 
         let mut action_handler = ActionHandler::new(MouseMaster::new_with_backend(
             previous_config,
