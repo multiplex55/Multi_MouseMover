@@ -52,7 +52,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::sync::{Mutex, RwLock};
+use std::sync::{LazyLock, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::{env, error::Error, fs};
@@ -185,6 +185,7 @@ static HOOK_EVENTS_SEEN: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_DECODED: AtomicU64 = AtomicU64::new(0);
 static HOOK_EVENTS_SWALLOWED: AtomicU64 = AtomicU64::new(0);
 static UI_HINT_QUERY_ID: AtomicU64 = AtomicU64::new(0);
+static RUNTIME_CONFIG: LazyLock<RwLock<Config>> = LazyLock::new(|| RwLock::new(Config::default()));
 lazy_static! {
     static ref LAST_UI_HINT_COMPLETION: Mutex<Option<UiHintCompletionState>> = Mutex::new(None);
     static ref LAST_SURGICAL_TOOLTIP_ACTIVE: Mutex<bool> = Mutex::new(false);
@@ -263,6 +264,35 @@ fn hook_diagnostics_snapshot() -> HookDiagnostics {
         events_decoded: HOOK_EVENTS_DECODED.load(Ordering::Relaxed),
         events_swallowed: HOOK_EVENTS_SWALLOWED.load(Ordering::Relaxed),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeConfigSnapshot {
+    polling_rate: u64,
+    input: InputConfig,
+    tooltip_overlay_duration_ms: u64,
+    bookmarks_list_tooltip_duration_ms: u64,
+    ui_hints_query_timeout_ms: u64,
+}
+
+impl RuntimeConfigSnapshot {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            polling_rate: config.polling_rate,
+            input: config.input,
+            tooltip_overlay_duration_ms: config.tooltip_overlay.duration_ms,
+            bookmarks_list_tooltip_duration_ms: config.bookmarks.list_tooltip_duration_ms,
+            ui_hints_query_timeout_ms: config.ui_hints.query_timeout_ms,
+        }
+    }
+}
+
+fn runtime_config_snapshot() -> RuntimeConfigSnapshot {
+    RuntimeConfigSnapshot::from_config(&RUNTIME_CONFIG.read().unwrap())
+}
+
+fn set_runtime_config(config: Config) {
+    *RUNTIME_CONFIG.write().unwrap() = config;
 }
 
 impl LoopDiagnostics {
@@ -3273,6 +3303,7 @@ fn apply_loaded_config<B: MouseBackend>(
     app_state: &mut AppState,
     config: Config,
 ) -> Result<JumpOverlayResolution, Box<dyn Error>> {
+    config.runtime_system_bindings()?;
     let active = action_handler.mouse_master.current_mode == ModeState::Active;
     let _ = clear_all_runtime_input_state(action_handler, app_state, RuntimeCleanupReason::Reload);
     action_handler
@@ -3283,13 +3314,16 @@ fn apply_loaded_config<B: MouseBackend>(
         .mouse_master
         .push_config_reload_notification();
     app_state.set_active_mode(active);
-    Ok(app_state.resolve_jump_overlay())
+    let resolution = app_state.resolve_jump_overlay();
+    set_runtime_config(config);
+    Ok(resolution)
 }
 
 fn reload_config() -> Result<(), Box<dyn Error>> {
     let loaded = Config::load_with_resolved_path("config.toml")?;
     let config = loaded.config.clone();
     config.runtime_system_bindings()?;
+    let bookmark_runtime = load_bookmark_runtime(&config, &loaded.path)?;
     let resolution = {
         let mut action_handler = ACTION_HANDLER.write().unwrap();
         let mut app_state = APP_STATE.write().unwrap();
@@ -3298,7 +3332,6 @@ fn reload_config() -> Result<(), Box<dyn Error>> {
     config.initialize_bindings();
     config.initialize_system_bindings()?;
     sync_jump_overlay(resolution);
-    let bookmark_runtime = load_bookmark_runtime(&config, &loaded.path)?;
     *BOOKMARK_RUNTIME.lock().unwrap() = Some(bookmark_runtime);
     ACTION_HANDLER.write().unwrap().clear_active_keys();
     println!("[reload] config reloaded");
@@ -4778,23 +4811,24 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let config = loaded.config.clone();
+    let startup_config = loaded.config.clone();
     println!("✅ Config Loaded");
-    print_startup_validation_summary(&config, &loaded.path);
+    print_startup_validation_summary(&startup_config, &loaded.path);
 
-    config.initialize_bindings();
+    startup_config.initialize_bindings();
     println!("✅ Key Bindings Initialized");
-    if let Err(e) = config.initialize_system_bindings() {
+    if let Err(e) = startup_config.initialize_system_bindings() {
         eprintln!("❌ System Binding Initialization Failed: {e}");
         std::process::exit(1);
     }
-    let bookmark_runtime = match load_bookmark_runtime(&config, &loaded.path) {
+    let bookmark_runtime = match load_bookmark_runtime(&startup_config, &loaded.path) {
         Ok(runtime) => runtime,
         Err(e) => {
             eprintln!("❌ Bookmark Store Failed to Load: {e}");
             std::process::exit(1);
         }
     };
+    set_runtime_config(startup_config.clone());
     *BOOKMARK_RUNTIME.lock().unwrap() = Some(bookmark_runtime);
 
     if let Err(e) = unsafe { install_keyboard_hook() } {
@@ -4833,12 +4867,13 @@ fn main() {
             messages_processed: unsafe { drain_windows_messages(MAX_MESSAGES_PER_TICK) },
             ..LoopDiagnostics::default()
         };
+        let runtime_config = runtime_config_snapshot();
 
         process_ui_hint_query_timeout();
         process_ui_hint_query_results();
         loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
 
-        if should_run_modifier_reconcile(&config.input, last_modifier_reconcile.elapsed()) {
+        if should_run_modifier_reconcile(&runtime_config.input, last_modifier_reconcile.elapsed()) {
             APP_STATE
                 .write()
                 .unwrap()
@@ -4921,7 +4956,7 @@ fn main() {
             last_heartbeat_sample = now;
         }
 
-        sleep(Duration::from_millis(config.polling_rate));
+        sleep(Duration::from_millis(runtime_config.polling_rate));
     }
 }
 
@@ -5000,6 +5035,7 @@ mod tests {
 
     lazy_static! {
         static ref CONFIG_WARNING_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        static ref RUNTIME_CONFIG_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
     }
     fn parse_config(toml: &str) -> Config {
         toml::from_str::<Config>(toml).unwrap().normalize().unwrap()
@@ -5171,6 +5207,100 @@ mod tests {
 
         assert!(handler.active_keys.is_empty());
         assert!(!handler.mouse_master.left_button_held());
+    }
+
+    #[test]
+    fn reload_updates_runtime_polling_rate() {
+        let _guard = RUNTIME_CONFIG_TEST_MUTEX.lock().unwrap();
+        let mut old_config = Config::default().normalize().unwrap();
+        old_config.polling_rate = 8;
+        set_runtime_config(old_config.clone());
+        let mut new_config = old_config.clone();
+        new_config.polling_rate = 33;
+
+        let mut action_handler = ActionHandler::new(MouseMaster::new_with_backend(
+            old_config,
+            FakeBackend::default(),
+        ));
+        let mut app_state = AppState::default();
+
+        apply_loaded_config(&mut action_handler, &mut app_state, new_config).unwrap();
+
+        assert_eq!(runtime_config_snapshot().polling_rate, 33);
+    }
+
+    #[test]
+    fn reload_updates_input_reconcile_interval() {
+        let _guard = RUNTIME_CONFIG_TEST_MUTEX.lock().unwrap();
+        let mut old_config = Config::default().normalize().unwrap();
+        old_config.input.modifier_reconcile_interval_ms = 50;
+        set_runtime_config(old_config.clone());
+        let mut new_config = old_config.clone();
+        new_config.input.modifier_reconcile_interval_ms = 250;
+
+        let mut action_handler = ActionHandler::new(MouseMaster::new_with_backend(
+            old_config,
+            FakeBackend::default(),
+        ));
+        let mut app_state = AppState::default();
+
+        apply_loaded_config(&mut action_handler, &mut app_state, new_config).unwrap();
+
+        assert_eq!(
+            runtime_config_snapshot()
+                .input
+                .modifier_reconcile_interval_ms,
+            250
+        );
+    }
+
+    #[test]
+    fn reload_preserves_previous_config_when_new_config_invalid() {
+        let _guard = RUNTIME_CONFIG_TEST_MUTEX.lock().unwrap();
+        let mut previous_config = Config::default().normalize().unwrap();
+        previous_config.polling_rate = 21;
+        set_runtime_config(previous_config.clone());
+        let mut invalid_config = previous_config.clone();
+        invalid_config.polling_rate = 99;
+        invalid_config.system_bindings.toggle_active = Some("Ctrl+DefinitelyNotAKey".to_string());
+
+        let mut action_handler = ActionHandler::new(MouseMaster::new_with_backend(
+            previous_config,
+            FakeBackend::default(),
+        ));
+        let mut app_state = AppState::default();
+
+        let result = apply_loaded_config(&mut action_handler, &mut app_state, invalid_config);
+
+        assert!(result.is_err());
+        assert_eq!(runtime_config_snapshot().polling_rate, 21);
+        assert_eq!(action_handler.mouse_master.config.polling_rate, 21);
+    }
+
+    #[test]
+    fn main_loop_reads_runtime_config_snapshot() {
+        let _guard = RUNTIME_CONFIG_TEST_MUTEX.lock().unwrap();
+        let mut config = Config::default().normalize().unwrap();
+        config.polling_rate = 42;
+        config.input.modifier_reconcile_on_tick = true;
+        config.input.modifier_reconcile_interval_ms = 125;
+        config.input.stuck_key_timeout_ms = 9_000;
+        set_runtime_config(config);
+
+        let snapshot = runtime_config_snapshot();
+
+        assert_eq!(snapshot.polling_rate, 42);
+        assert!(snapshot.input.modifier_reconcile_on_tick);
+        assert_eq!(snapshot.input.modifier_reconcile_interval_ms, 125);
+        assert_eq!(snapshot.input.stuck_key_timeout_ms, 9_000);
+        assert!(!should_run_modifier_reconcile(
+            &snapshot.input,
+            Duration::from_millis(124),
+        ));
+        assert!(should_run_modifier_reconcile(
+            &snapshot.input,
+            Duration::from_millis(125),
+        ));
     }
 
     #[test]
