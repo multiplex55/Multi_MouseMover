@@ -4964,6 +4964,7 @@ fn main() {
 mod tests {
     use super::*;
     use crate::jump_session::JumpRegion;
+    use crate::key_chord::ModifierSideRequirement;
     use enigo::{Axis, Button};
 
     const LEGACY_PACKAGE_NAME: &str = concat!("Learn", "ing", "_", "Ru", "st");
