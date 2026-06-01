@@ -547,54 +547,44 @@ impl Default for InputConfig {
 
 fn default_key_bindings() -> Vec<(String, String)> {
     [
-        ("W", "move_up"),
-        ("A", "move_left"),
-        ("S", "move_down"),
-        ("D", "move_right"),
+        ("E", "move_up"),
+        ("S", "move_left"),
+        ("D", "move_down"),
+        ("F", "move_right"),
         ("LeftShift", "slow_mouse"),
-        ("SPACE", "left_click"),
-        ("L", "right_click"),
-        ("RightShift", "middle_click"),
+        ("Z", "surgical_mode"),
+        ("J", "left_click"),
+        ("K", "right_click"),
+        ("L", "middle_click"),
         ("N", "toggle_drag_mode"),
         (".", "click_then_disable"),
         ("W", "wheel_up"),
         ("R", "wheel_down"),
-        ("X", "mouse_speed_down"),
-        ("Z", "mouse_speed_reset"),
-        ("U", "wheel_speed_up"),
-        ("I", "wheel_speed_down"),
+        ("M", "mouse_speed_down"),
+        (",", "mouse_speed_up"),
+        ("U", "wheel_speed_down"),
+        ("I", "wheel_speed_up"),
         ("RightAlt+C", "movement_profile_next"),
         ("RightAlt+X", "movement_profile_previous"),
         ("RightAlt+V", "wheel_profile_next"),
         ("RightAlt+B", "wheel_profile_previous"),
-        ("F", "jump_mode"),
+        ("T", "jump_mode"),
         ("G", "grid_mode"),
         ("C", "screen_select"),
-        ("Shift+B", "bookmark_mode"),
-        ("Shift+Ctrl+B", "clear_all_bookmarks"),
-        ("1", "bookmark_slot_1"),
-        ("2", "bookmark_slot_2"),
-        ("3", "bookmark_slot_3"),
-        ("4", "bookmark_slot_4"),
-        ("5", "bookmark_slot_5"),
-        ("6", "bookmark_slot_6"),
-        ("7", "bookmark_slot_7"),
-        ("8", "bookmark_slot_8"),
-        ("9", "bookmark_slot_9"),
         ("H", "navigate_back"),
         ("Y", "navigate_forward"),
         ("Q", "disable"),
         ("P", "disable"),
-        ("RightAlt+W", "move_to_top_edge"),
-        ("RightAlt+A", "move_to_left_edge"),
-        ("RightAlt+S", "move_to_bottom_edge"),
-        ("RightAlt+D", "move_to_right_edge"),
-        ("RightAlt+Ctrl+W", "move_to_window_top_edge"),
-        ("RightAlt+Ctrl+A", "move_to_window_left_edge"),
-        ("RightAlt+Ctrl+S", "move_to_window_bottom_edge"),
-        ("RightAlt+Ctrl+D", "move_to_window_right_edge"),
-        ("RightAlt+Ctrl+Q", "move_to_window_center"),
-        ("RightAlt+Ctrl+E", "move_to_window_titlebar"),
+        ("RightAlt+E", "move_to_top_edge"),
+        ("RightAlt+S", "move_to_left_edge"),
+        ("RightAlt+D", "move_to_bottom_edge"),
+        ("RightAlt+F", "move_to_right_edge"),
+        ("RightAlt+Ctrl+E", "move_to_window_top_edge"),
+        ("RightAlt+Ctrl+S", "move_to_window_left_edge"),
+        ("RightAlt+Ctrl+D", "move_to_window_bottom_edge"),
+        ("RightAlt+Ctrl+F", "move_to_window_right_edge"),
+        ("RightAlt+Ctrl+H", "move_to_window_center"),
+        ("RightAlt+Ctrl+Y", "move_to_window_titlebar"),
         ("RightAlt+R", "reload_config"),
         ("RightAlt+Escape", "panic_reset"),
         ("Alt+E", "step_move_up"),
@@ -610,6 +600,18 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("Alt+Shift+D", "step_move_large_down"),
         ("Alt+Shift+F", "step_move_large_right"),
         ("/", "show_help"),
+        ("0", "ui_hint_mode"),
+        ("B", "bookmark_mode"),
+        ("1", "bookmark_slot_1"),
+        ("2", "bookmark_slot_2"),
+        ("3", "bookmark_slot_3"),
+        ("4", "bookmark_slot_4"),
+        ("5", "bookmark_slot_5"),
+        ("6", "bookmark_slot_6"),
+        ("7", "bookmark_slot_7"),
+        ("8", "bookmark_slot_8"),
+        ("9", "bookmark_slot_9"),
+        ("`", "show_bookmarks"),
     ]
     .into_iter()
     .map(|(key, action)| (key.to_string(), action.to_string()))
@@ -1179,8 +1181,8 @@ struct SystemBindings {
 impl Default for SystemBindings {
     fn default() -> Self {
         Self {
-            toggle_active: "Ctrl+E".to_string(),
-            exit: "Escape".to_string(),
+            toggle_active: "Ctrl+Q".to_string(),
+            exit: "Ctrl+Escape".to_string(),
             exit_ignore_extra_modifiers: true,
             panic_reset: Some("RightAlt+Escape".to_string()),
             panic_reset_ignore_extra_modifiers: true,
@@ -5060,6 +5062,23 @@ mod tests {
         parse_config(include_str!("../config.toml"))
     }
 
+    fn docs_toml_block_after(marker: &str) -> &'static str {
+        let docs = include_str!("../docs/config.md");
+        let marker_start = docs
+            .find(marker)
+            .unwrap_or_else(|| panic!("missing docs marker {marker}"));
+        let after_marker = &docs[marker_start..];
+        let block_start = after_marker
+            .find("```toml")
+            .unwrap_or_else(|| panic!("missing TOML block after {marker}"))
+            + "```toml".len();
+        let after_fence = &after_marker[block_start..];
+        let block_end = after_fence
+            .find("```")
+            .unwrap_or_else(|| panic!("unterminated TOML block after {marker}"));
+        after_fence[..block_end].trim()
+    }
+
     fn readme_section(heading: &str, next_heading: &str) -> &'static str {
         let readme = include_str!("../README.md");
         let start = readme
@@ -5689,7 +5708,11 @@ mod tests {
         assert!(config
             .key_bindings
             .iter()
-            .any(|(key, action)| key == "RightShift" && action == "middle_click"));
+            .any(|(key, action)| key == "Z" && action == "surgical_mode"));
+        assert!(config
+            .key_bindings
+            .iter()
+            .any(|(key, action)| key == "B" && action == "bookmark_mode"));
         for (key, action) in &config.key_bindings {
             assert!(KeyChord::parse(key).is_ok(), "{key}");
             assert!(Action::from_string(action).is_some(), "{key} -> {action}");
@@ -5730,10 +5753,100 @@ mod tests {
     }
 
     #[test]
+    fn checked_in_config_matches_runtime_defaults() {
+        let config = checked_in_config();
+        let defaults = Config::default().normalize().unwrap();
+
+        assert_eq!(config.key_bindings, defaults.key_bindings);
+        assert_eq!(
+            config.system_bindings.toggle_active,
+            defaults.system_bindings.toggle_active
+        );
+        assert_eq!(config.system_bindings.exit, defaults.system_bindings.exit);
+        assert_eq!(
+            config.system_bindings.panic_reset,
+            defaults.system_bindings.panic_reset
+        );
+        assert_eq!(
+            config.system_bindings.panic_reset_sets_idle,
+            defaults.system_bindings.panic_reset_sets_idle
+        );
+        for (key, action) in &config.key_bindings {
+            assert!(KeyChord::parse(key).is_ok(), "{key}");
+            assert!(Action::from_string(action).is_some(), "{key} -> {action}");
+        }
+    }
+
+    #[test]
+    fn help_overlay_defaults_match_config() {
+        let config = checked_in_config();
+        let view = help_overlay::help_view_from_bindings(
+            config.key_bindings.iter().map(|(key, action)| {
+                (
+                    KeyChord::parse(key).unwrap(),
+                    Action::from_string(action).unwrap(),
+                )
+            }),
+            crate::app_state::ModeContext::Active,
+        );
+        let labels: std::collections::HashSet<_> = view
+            .bindings
+            .iter()
+            .map(|binding| (binding.key.clone(), binding.action.clone()))
+            .collect();
+        let label_pair = |key: &str, action: &str| {
+            (
+                KeyChord::parse(key).unwrap().display_label(),
+                action.to_string(),
+            )
+        };
+
+        for expected in [
+            label_pair("E", "Move up"),
+            label_pair("S", "Move left"),
+            label_pair("D", "Move down"),
+            label_pair("F", "Move right"),
+            label_pair("Z", "Held precision modifier (surgical)"),
+            label_pair("J", "Left click"),
+            label_pair("K", "Right click"),
+            label_pair("L", "Middle click"),
+            label_pair("T", "Jump"),
+            label_pair("G", "Grid"),
+            label_pair("0", "UI Hints"),
+            label_pair("B", "Bookmark mode"),
+            label_pair("/", "Hints / Help"),
+            label_pair("RightAlt+E", "Jump to monitor top edge"),
+            label_pair("RightAlt+S", "Jump to monitor left edge"),
+            label_pair("RightAlt+D", "Jump to monitor bottom edge"),
+            label_pair("RightAlt+F", "Jump to monitor right edge"),
+        ] {
+            assert!(labels.contains(&expected), "missing {expected:?}");
+        }
+        for stale in [
+            label_pair("W", "Move up"),
+            label_pair("A", "Move left"),
+            label_pair("B", "Held precision modifier (surgical)"),
+            label_pair("RightAlt+W", "Jump to monitor top edge"),
+            label_pair("RightAlt+A", "Jump to monitor left edge"),
+        ] {
+            assert!(!labels.contains(&stale), "stale label present {stale:?}");
+        }
+    }
+
+    #[test]
+    fn docs_default_keymap_snapshot_matches_config() {
+        let snippet = docs_toml_block_after("Full default `key_bindings` list:");
+        let docs_config = parse_config(snippet);
+        let checked_in = checked_in_config();
+
+        assert_eq!(docs_config.key_bindings, checked_in.key_bindings);
+    }
+
+    #[test]
     fn default_bindings_are_known_and_defaults_are_sane() {
         let config = Config::default().normalize().unwrap();
 
-        assert_eq!(config.system_bindings.exit, "Escape");
+        assert_eq!(config.system_bindings.exit, "Ctrl+Escape");
         assert_eq!(config.key_bindings, default_key_bindings());
         for (key, action) in &config.key_bindings {
             assert!(KeyChord::parse(key).is_ok(), "{key}");
@@ -5787,60 +5900,104 @@ mod tests {
         let config = parse_config(
             r#"
             key_bindings = [
-                ["A", "move_left"],
-                ["D", "move_right"],
+                ["E", "move_up"],
+                ["S", "move_left"],
+                ["D", "move_down"],
+                ["F", "move_right"],
+                ["LeftShift", "slow_mouse"],
+                ["Z", "surgical_mode"],
+                ["J", "left_click"],
+                ["K", "right_click"],
+                ["L", "middle_click"],
                 ["N", "toggle_drag_mode"],
-                [";", "middle_click"],
+                [".", "click_then_disable"],
                 ["W", "wheel_up"],
                 ["R", "wheel_down"],
-                ["H", "center_current_monitor"],
-                [".", "click_then_disable"],
-                ["RightAlt+W", "move_to_top_edge"],
-                ["RightAlt+A", "move_to_left_edge"],
-                ["RightAlt+S", "move_to_bottom_edge"],
-                ["RightAlt+D", "move_to_right_edge"],
-                ["RightAlt+Ctrl+W", "move_to_window_top_edge"],
-                ["RightAlt+Ctrl+A", "move_to_window_left_edge"],
-                ["RightAlt+Ctrl+S", "move_to_window_bottom_edge"],
-                ["RightAlt+Ctrl+D", "move_to_window_right_edge"],
-                ["RightAlt+Ctrl+Q", "move_to_window_center"],
-                ["RightAlt+Ctrl+E", "move_to_window_titlebar"],
-                ["U", "wheel_speed_up"],
-                ["I", "wheel_speed_down"],
-                ["C", "mouse_speed_up"],
-                ["X", "mouse_speed_down"],
-                ["Z", "mouse_speed_reset"]
+                ["M", "mouse_speed_down"],
+                [",", "mouse_speed_up"],
+                ["U", "wheel_speed_down"],
+                ["I", "wheel_speed_up"],
+                ["RightAlt+C", "movement_profile_next"],
+                ["RightAlt+X", "movement_profile_previous"],
+                ["RightAlt+V", "wheel_profile_next"],
+                ["RightAlt+B", "wheel_profile_previous"],
+                ["T", "jump_mode"],
+                ["G", "grid_mode"],
+                ["C", "screen_select"],
+                ["H", "navigate_back"],
+                ["Y", "navigate_forward"],
+                ["Q", "disable"],
+                ["P", "disable"],
+                ["RightAlt+E", "move_to_top_edge"],
+                ["RightAlt+S", "move_to_left_edge"],
+                ["RightAlt+D", "move_to_bottom_edge"],
+                ["RightAlt+F", "move_to_right_edge"],
+                ["RightAlt+Ctrl+E", "move_to_window_top_edge"],
+                ["RightAlt+Ctrl+S", "move_to_window_left_edge"],
+                ["RightAlt+Ctrl+D", "move_to_window_bottom_edge"],
+                ["RightAlt+Ctrl+F", "move_to_window_right_edge"],
+                ["RightAlt+Ctrl+H", "move_to_window_center"],
+                ["RightAlt+Ctrl+Y", "move_to_window_titlebar"],
+                ["RightAlt+R", "reload_config"],
+                ["RightAlt+Escape", "panic_reset"],
+                ["Alt+E", "step_move_up"],
+                ["Alt+S", "step_move_left"],
+                ["Alt+D", "step_move_down"],
+                ["Alt+F", "step_move_right"],
+                ["Alt+Ctrl+E", "step_move_small_up"],
+                ["Alt+Ctrl+S", "step_move_small_left"],
+                ["Alt+Ctrl+D", "step_move_small_down"],
+                ["Alt+Ctrl+F", "step_move_small_right"],
+                ["Alt+Shift+E", "step_move_large_up"],
+                ["Alt+Shift+S", "step_move_large_left"],
+                ["Alt+Shift+D", "step_move_large_down"],
+                ["Alt+Shift+F", "step_move_large_right"],
+                ["/", "show_help"],
+                ["0", "ui_hint_mode"],
+                ["B", "bookmark_mode"],
+                ["1", "bookmark_slot_1"],
+                ["2", "bookmark_slot_2"],
+                ["3", "bookmark_slot_3"],
+                ["4", "bookmark_slot_4"],
+                ["5", "bookmark_slot_5"],
+                ["6", "bookmark_slot_6"],
+                ["7", "bookmark_slot_7"],
+                ["8", "bookmark_slot_8"],
+                ["9", "bookmark_slot_9"],
+                ["`", "show_bookmarks"],
             ]
             "#,
         );
 
         let expected = [
-            ("A", Action::MoveLeft),
-            ("D", Action::MoveRight),
-            ("N", Action::ToggleDragMode),
-            (";", Action::MiddleClick),
-            ("W", Action::WheelUp),
-            ("R", Action::WheelDown),
-            ("H", Action::CenterCurrentMonitor),
-            (".", Action::ClickThenDisable),
-            ("RightAlt+W", Action::MoveToTopEdge),
-            ("RightAlt+A", Action::MoveToLeftEdge),
-            ("RightAlt+S", Action::MoveToBottomEdge),
-            ("RightAlt+D", Action::MoveToRightEdge),
-            ("RightAlt+Ctrl+W", Action::MoveToWindowTopEdge),
-            ("RightAlt+Ctrl+A", Action::MoveToWindowLeftEdge),
-            ("RightAlt+Ctrl+S", Action::MoveToWindowBottomEdge),
-            ("RightAlt+Ctrl+D", Action::MoveToWindowRightEdge),
-            ("RightAlt+Ctrl+Q", Action::MoveToWindowCenter),
-            ("RightAlt+Ctrl+E", Action::MoveToWindowTitlebar),
-            ("U", Action::WheelSpeedUp),
-            ("I", Action::WheelSpeedDown),
-            ("C", Action::MouseSpeedUp),
-            ("X", Action::MouseSpeedDown),
-            ("Z", Action::MouseSpeedReset),
+            ("E", Action::MoveUp),
+            ("S", Action::MoveLeft),
+            ("D", Action::MoveDown),
+            ("F", Action::MoveRight),
+            ("Z", Action::SurgicalMode),
+            ("J", Action::LeftClick),
+            ("K", Action::RightClick),
+            ("L", Action::MiddleClick),
+            ("T", Action::JumpMode),
+            ("G", Action::GridMode),
+            ("0", Action::UiHintMode),
+            ("B", Action::BookmarkMode),
+            ("RightAlt+E", Action::MoveToTopEdge),
+            ("RightAlt+S", Action::MoveToLeftEdge),
+            ("RightAlt+D", Action::MoveToBottomEdge),
+            ("RightAlt+F", Action::MoveToRightEdge),
+            ("RightAlt+Ctrl+E", Action::MoveToWindowTopEdge),
+            ("RightAlt+Ctrl+S", Action::MoveToWindowLeftEdge),
+            ("RightAlt+Ctrl+D", Action::MoveToWindowBottomEdge),
+            ("RightAlt+Ctrl+F", Action::MoveToWindowRightEdge),
+            ("RightAlt+Ctrl+H", Action::MoveToWindowCenter),
+            ("RightAlt+Ctrl+Y", Action::MoveToWindowTitlebar),
+            ("M", Action::MouseSpeedDown),
+            (",", Action::MouseSpeedUp),
+            ("/", Action::ShowHelp),
         ];
 
-        assert_eq!(config.key_bindings.len(), expected.len());
+        assert_eq!(config.key_bindings.len(), default_key_bindings().len());
         for (key, action) in expected {
             let parsed = config
                 .key_bindings
@@ -6995,15 +7152,19 @@ mod tests {
         let cases = [
             Case {
                 name: "surgical_mode",
-                config_toml: "[surgical_mode]
-enabled = true",
+                config_toml: r#"key_bindings = []
+
+[surgical_mode]
+enabled = true"#,
                 expected_substring:
                     "surgical_mode.enabled=true but no key binding targets action \"surgical_mode\"",
             },
             Case {
                 name: "scroll_mode",
-                config_toml: "[scroll_mode]
-enabled = true",
+                config_toml: r#"key_bindings = []
+
+[scroll_mode]
+enabled = true"#,
                 expected_substring:
                     "scroll_mode.enabled=true but no key binding targets action \"scroll_modifier\"",
             },
@@ -7108,7 +7269,7 @@ enabled = true"#,
         assert!(summary.contains("wheel default=1 range=1..10 step=1 tick=120ms"));
         assert!(summary.contains("slow_mouse strategy=Fixed speed=1 (default 1, range 1..2) acceleration=0 every 1 tick(s)"));
         assert!(summary.contains("features: [enabled, bindings]"));
-        assert!(summary.contains("surgical_mode: enabled=false bindings=0"));
+        assert!(summary.contains("surgical_mode: enabled=false bindings=1"));
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
         assert!(summary.contains("window_jump: enabled=true bindings=6"));
         assert!(summary.contains("warnings=1"));

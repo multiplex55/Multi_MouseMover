@@ -67,28 +67,71 @@ Full default `key_bindings` list:
 
 ```toml
 key_bindings = [
-  ["E", "move_up"], ["S", "move_left"], ["D", "move_down"], ["F", "move_right"],
+  ["E", "move_up"],
+  ["S", "move_left"],
+  ["D", "move_down"],
+  ["F", "move_right"],
   ["LeftShift", "slow_mouse"],
-  ["J", "left_click"], ["K", "right_click"], ["L", "middle_click"],
-  ["N", "toggle_drag_mode"], [".", "click_then_disable"],
-  ["W", "wheel_up"], ["R", "wheel_down"],
-  ["M", "mouse_speed_down"], [",", "mouse_speed_up"],
-  ["U", "wheel_speed_down"], ["I", "wheel_speed_up"],
-  ["RightAlt+C", "movement_profile_next"], ["RightAlt+X", "movement_profile_previous"],
-  ["RightAlt+V", "wheel_profile_next"], ["RightAlt+B", "wheel_profile_previous"],
-  ["T", "jump_mode"], ["G", "grid_mode"], ["C", "screen_select"],
-  ["H", "navigate_back"], ["Y", "navigate_forward"],
-  ["Q", "disable"], ["P", "disable"],
-  ["RightAlt+E", "move_to_top_edge"], ["RightAlt+S", "move_to_left_edge"],
-  ["RightAlt+D", "move_to_bottom_edge"], ["RightAlt+F", "move_to_right_edge"],
-  ["RightAlt+Ctrl+E", "move_to_window_top_edge"], ["RightAlt+Ctrl+S", "move_to_window_left_edge"],
-  ["RightAlt+Ctrl+D", "move_to_window_bottom_edge"], ["RightAlt+Ctrl+F", "move_to_window_right_edge"],
-  ["RightAlt+Ctrl+H", "move_to_window_center"], ["RightAlt+Ctrl+Y", "move_to_window_titlebar"],
-  ["RightAlt+R", "reload_config"], ["RightAlt+Escape", "panic_reset"],
-  ["Alt+E", "step_move_up"], ["Alt+S", "step_move_left"], ["Alt+D", "step_move_down"], ["Alt+F", "step_move_right"],
-  ["Alt+Ctrl+E", "step_move_small_up"], ["Alt+Ctrl+S", "step_move_small_left"], ["Alt+Ctrl+D", "step_move_small_down"], ["Alt+Ctrl+F", "step_move_small_right"],
-  ["Alt+Shift+E", "step_move_large_up"], ["Alt+Shift+S", "step_move_large_left"], ["Alt+Shift+D", "step_move_large_down"], ["Alt+Shift+F", "step_move_large_right"],
-  ["/", "show_help"]
+  ["Z", "surgical_mode"],
+  ["J", "left_click"],
+  ["K", "right_click"],
+  ["L", "middle_click"],
+  ["N", "toggle_drag_mode"],
+  [".", "click_then_disable"],
+  ["W", "wheel_up"],
+  ["R", "wheel_down"],
+  ["M", "mouse_speed_down"],
+  [",", "mouse_speed_up"],
+  ["U", "wheel_speed_down"],
+  ["I", "wheel_speed_up"],
+  ["RightAlt+C", "movement_profile_next"],
+  ["RightAlt+X", "movement_profile_previous"],
+  ["RightAlt+V", "wheel_profile_next"],
+  ["RightAlt+B", "wheel_profile_previous"],
+  ["T", "jump_mode"],
+  ["G", "grid_mode"],
+  ["C", "screen_select"],
+  ["H", "navigate_back"],
+  ["Y", "navigate_forward"],
+  ["Q", "disable"],
+  ["P", "disable"],
+  ["RightAlt+E", "move_to_top_edge"],
+  ["RightAlt+S", "move_to_left_edge"],
+  ["RightAlt+D", "move_to_bottom_edge"],
+  ["RightAlt+F", "move_to_right_edge"],
+  ["RightAlt+Ctrl+E", "move_to_window_top_edge"],
+  ["RightAlt+Ctrl+S", "move_to_window_left_edge"],
+  ["RightAlt+Ctrl+D", "move_to_window_bottom_edge"],
+  ["RightAlt+Ctrl+F", "move_to_window_right_edge"],
+  ["RightAlt+Ctrl+H", "move_to_window_center"],
+  ["RightAlt+Ctrl+Y", "move_to_window_titlebar"],
+  ["RightAlt+R", "reload_config"],
+  ["RightAlt+Escape", "panic_reset"],
+  ["Alt+E", "step_move_up"],
+  ["Alt+S", "step_move_left"],
+  ["Alt+D", "step_move_down"],
+  ["Alt+F", "step_move_right"],
+  ["Alt+Ctrl+E", "step_move_small_up"],
+  ["Alt+Ctrl+S", "step_move_small_left"],
+  ["Alt+Ctrl+D", "step_move_small_down"],
+  ["Alt+Ctrl+F", "step_move_small_right"],
+  ["Alt+Shift+E", "step_move_large_up"],
+  ["Alt+Shift+S", "step_move_large_left"],
+  ["Alt+Shift+D", "step_move_large_down"],
+  ["Alt+Shift+F", "step_move_large_right"],
+  ["/", "show_help"],
+  ["0", "ui_hint_mode"],
+  ["B", "bookmark_mode"],
+  ["1", "bookmark_slot_1"],
+  ["2", "bookmark_slot_2"],
+  ["3", "bookmark_slot_3"],
+  ["4", "bookmark_slot_4"],
+  ["5", "bookmark_slot_5"],
+  ["6", "bookmark_slot_6"],
+  ["7", "bookmark_slot_7"],
+  ["8", "bookmark_slot_8"],
+  ["9", "bookmark_slot_9"],
+  ["`", "show_bookmarks"],
 ]
 ```
 
@@ -157,12 +200,12 @@ Swallow precedence is:
 | --- | --- | --- | --- | --- | --- |
 | `polling_rate` | integer milliseconds | `8` | Yes | Active | Main input loop delay. Lower values poll more often. |
 | `key_bindings` | array of `[key, action]` pairs | built-in movement/click/jump bindings | Yes | Active | Active-mode action bindings. |
-| `system_bindings.toggle_active` | key chord string | `"Ctrl+E"` | Yes | Active | Global active/idle toggle. |
-| `system_bindings.exit` | key chord string | `"Escape"` | Yes | Active | Global exit binding. Routed before mode-local handlers. |
+| `system_bindings.toggle_active` | key chord string | `"Ctrl+Q"` | Yes | Active | Global active/idle toggle. |
+| `system_bindings.exit` | key chord string | `"Ctrl+Escape"` | Yes | Active | Global exit binding. Routed before mode-local handlers. |
 | `system_bindings.exit_ignore_extra_modifiers` | boolean | `true` | Yes | Active | When true, `exit` matches if required modifiers are present even when extra modifiers are held. |
 | `system_bindings.panic_reset` | key chord string | `"RightAlt+Escape"` | Yes | Active | Global non-exiting panic cleanup binding, routed before mode-local handlers. |
 | `system_bindings.panic_reset_ignore_extra_modifiers` | boolean | `true` | Yes | Active | When true, `panic_reset` allows extra held modifiers. |
-| `system_bindings.panic_reset_sets_idle` | boolean | `true` | Yes | Active | When true, panic reset also sets idle mode (`SetActiveMode { active = false }`). |
+| `system_bindings.panic_reset_sets_idle` | boolean | `true` | Yes | Active | When true, panic reset stays non-exiting and sets idle mode (`SetActiveMode { active = false }`). |
 | `input.swallow_owned_modifiers` | boolean | `true` | Yes | Active | Swallow app-owned modifier down/up transitions while active mode is enabled. |
 | `input.modifier_reconcile_on_tick` | boolean | `true` | Yes | Active | Enables periodic modifier reconciliation checks. |
 | `input.modifier_reconcile_interval_ms` | integer milliseconds | `50` | Yes | Active | Polling interval for periodic modifier reconciliation; normalized to `10..=5000` and reset to default when `0`. |
