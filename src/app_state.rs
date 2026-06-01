@@ -467,6 +467,20 @@ impl AppState {
         self.debug_input = enabled;
     }
 
+    fn is_modifier_reconcile_candidate(key: VirtualKey) -> bool {
+        matches!(
+            key,
+            VirtualKey::LeftShift
+                | VirtualKey::RightShift
+                | VirtualKey::LeftCtrl
+                | VirtualKey::RightCtrl
+                | VirtualKey::LeftAlt
+                | VirtualKey::RightAlt
+                | VirtualKey::LeftWin
+                | VirtualKey::RightWin
+        )
+    }
+
     pub fn reconcile_stale_keys<F>(&mut self, stale_after: Duration, mut is_key_physically_down: F)
     where
         F: FnMut(VirtualKey) -> bool,
@@ -475,7 +489,9 @@ impl AppState {
             .held_physical_keys
             .iter()
             .filter_map(|(key, state)| {
-                (!is_key_physically_down(*key) && state.pressed_at.elapsed() >= stale_after)
+                (Self::is_modifier_reconcile_candidate(*key)
+                    && !is_key_physically_down(*key)
+                    && state.pressed_at.elapsed() >= stale_after)
                     .then_some((*key, *state))
             })
             .collect();
@@ -3948,36 +3964,54 @@ mod tests {
 
     #[test]
     fn reconcile_does_not_release_before_timeout() {
-        let mut state = state_with_bound_key(VirtualKey::E);
-        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        let mut state = state_with_bound_key(VirtualKey::LeftShift);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::LeftShift, true),
+            Some(Action::SlowMouse),
+        );
         assert_eq!(collect_commands(&mut state).len(), 1);
-        age_held_key(&mut state, VirtualKey::E, Duration::from_millis(100));
+        age_held_key(
+            &mut state,
+            VirtualKey::LeftShift,
+            Duration::from_millis(100),
+        );
 
         state.reconcile_stale_keys(Duration::from_secs(60), |_| false);
 
         assert_eq!(collect_commands(&mut state), Vec::new());
-        assert!(state.held_physical_keys.contains_key(&VirtualKey::E));
-        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
+        assert!(state
+            .held_physical_keys
+            .contains_key(&VirtualKey::LeftShift));
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
     }
 
     #[test]
     fn reconcile_releases_after_timeout() {
-        let mut state = state_with_bound_key(VirtualKey::E);
-        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        let mut state = state_with_bound_key(VirtualKey::LeftShift);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::LeftShift, true),
+            Some(Action::SlowMouse),
+        );
         assert_eq!(collect_commands(&mut state).len(), 1);
-        age_held_key(&mut state, VirtualKey::E, Duration::from_millis(500));
+        age_held_key(
+            &mut state,
+            VirtualKey::LeftShift,
+            Duration::from_millis(500),
+        );
 
         state.reconcile_stale_keys(Duration::from_millis(500), |_| false);
 
         assert_eq!(
             collect_commands(&mut state),
             vec![AppCommand::KeyAction {
-                action: Action::MoveUp,
+                action: Action::SlowMouse,
                 is_down: false,
             }]
         );
-        assert!(!state.held_physical_keys.contains_key(&VirtualKey::E));
-        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
+        assert!(!state
+            .held_physical_keys
+            .contains_key(&VirtualKey::LeftShift));
+        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
     }
 
     #[test]
@@ -3995,20 +4029,21 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_releases_stale_move_trigger() {
+    fn reconcile_ignores_stale_move_trigger() {
         let mut state = state_with_bound_key(VirtualKey::E);
         state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
         assert_eq!(collect_commands(&mut state).len(), 1);
 
-        state.reconcile_stale_keys(Duration::ZERO, |_| false);
+        state.reconcile_stale_keys(Duration::ZERO, |_| {
+            panic!("non-modifier keys should not be physically queried")
+        });
 
-        assert_eq!(
-            collect_commands(&mut state),
-            vec![AppCommand::KeyAction {
-                action: Action::MoveUp,
-                is_down: false,
-            }]
-        );
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(state.held_physical_keys.contains_key(&VirtualKey::E));
+        assert!(state.active_keys.contains(&VirtualKey::E));
+        assert!(state.active_triggers.contains_key(&VirtualKey::E));
+        assert!(!state.reconciled_released_keys.contains(&VirtualKey::E));
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
     }
 
     #[test]
@@ -4054,31 +4089,61 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_releases_only_physically_up_keys() {
-        let mut state = state_with_bound_key(VirtualKey::E);
-        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
-        state.route_key_event(KeyEvent::new(VirtualKey::W, true), Some(Action::MoveDown));
+    fn reconcile_releases_only_physically_up_modifier_keys() {
+        let mut state = AppState::default();
+        state.set_bound_keys([VirtualKey::LeftShift, VirtualKey::RightAlt]);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::LeftShift, true),
+            Some(Action::SlowMouse),
+        );
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::RightAlt, true),
+            Some(Action::MoveDown),
+        );
         let _ = collect_commands(&mut state);
 
-        state.reconcile_stale_keys(Duration::ZERO, |key| key == VirtualKey::W);
+        state.reconcile_stale_keys(Duration::ZERO, |key| key == VirtualKey::RightAlt);
 
         let cmds = collect_commands(&mut state);
         assert_eq!(cmds.len(), 1);
         assert_eq!(
             cmds[0],
             AppCommand::KeyAction {
-                action: Action::MoveUp,
+                action: Action::SlowMouse,
                 is_down: false,
             }
         );
-        assert!(state.held_physical_keys.contains_key(&VirtualKey::W));
-        assert!(!state.held_physical_keys.contains_key(&VirtualKey::E));
+        assert!(state.held_physical_keys.contains_key(&VirtualKey::RightAlt));
+        assert!(!state
+            .held_physical_keys
+            .contains_key(&VirtualKey::LeftShift));
     }
+
     #[test]
-    fn reconcile_removes_active_trigger_for_stale_key() {
+    fn reconcile_ignores_non_modifier_movement_keys_entirely() {
         let mut state = state_with_bound_key(VirtualKey::E);
         state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
-        let up = KeyEvent::new(VirtualKey::E, false);
+        let _ = collect_commands(&mut state);
+
+        state.reconcile_stale_keys(Duration::ZERO, |_| {
+            panic!("non-modifier keys should not be physically queried")
+        });
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(state.held_physical_keys.contains_key(&VirtualKey::E));
+        assert!(state.active_keys.contains(&VirtualKey::E));
+        assert!(state.active_triggers.contains_key(&VirtualKey::E));
+        assert!(!state.reconciled_released_keys.contains(&VirtualKey::E));
+    }
+
+    #[test]
+    fn reconcile_removes_active_trigger_for_stale_modifier_key() {
+        let mut state = state_with_bound_key(VirtualKey::LeftShift);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::LeftShift, true),
+            Some(Action::SlowMouse),
+        );
+        let up = KeyEvent::new(VirtualKey::LeftShift, false);
         assert!(state.should_swallow_key(&up));
 
         state.reconcile_stale_keys(Duration::ZERO, |_| false);
