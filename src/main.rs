@@ -2813,9 +2813,10 @@ fn should_run_modifier_reconcile(
     if !config.modifier_reconcile_on_tick {
         return false;
     }
-    // Reconciliation cadence is controlled only by modifier_reconcile_interval_ms.
-    // stuck_key_timeout_ms is the stale-key release classification threshold.
-    let cadence_ms = config.modifier_reconcile_interval_ms;
+    // Reconciliation should not run more frequently than the stale-key timeout.
+    let cadence_ms = config
+        .modifier_reconcile_interval_ms
+        .max(config.stuck_key_timeout_ms);
     elapsed_since_last_reconcile >= Duration::from_millis(cadence_ms)
 }
 
@@ -5451,11 +5452,11 @@ mod tests {
         assert_eq!(snapshot.input.stuck_key_timeout_ms, 9_000);
         assert!(!should_run_modifier_reconcile(
             &snapshot.input,
-            Duration::from_millis(124),
+            Duration::from_millis(8_999),
         ));
         assert!(should_run_modifier_reconcile(
             &snapshot.input,
-            Duration::from_millis(125),
+            Duration::from_millis(9_000),
         ));
     }
 
@@ -8723,7 +8724,7 @@ mod bookmark_runtime_logic_tests {
     }
 
     #[test]
-    fn modifier_reconcile_interval_is_independent_from_timeout() {
+    fn modifier_reconcile_interval_is_gated_by_stuck_timeout() {
         let mut input = InputConfig::default();
         input.modifier_reconcile_on_tick = true;
         input.modifier_reconcile_interval_ms = 50;
@@ -8731,16 +8732,11 @@ mod bookmark_runtime_logic_tests {
 
         assert!(!should_run_modifier_reconcile(
             &input,
-            Duration::from_millis(49)
-        ));
-        assert!(should_run_modifier_reconcile(
-            &input,
-            Duration::from_millis(50)
-        ));
-
-        assert!(should_run_modifier_reconcile(
-            &input,
             Duration::from_millis(9_999)
+        ));
+        assert!(should_run_modifier_reconcile(
+            &input,
+            Duration::from_millis(10_000)
         ));
 
         input.modifier_reconcile_on_tick = false;
