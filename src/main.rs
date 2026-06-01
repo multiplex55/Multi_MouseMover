@@ -6089,6 +6089,7 @@ mod tests {
                 ["Alt+Shift+D", "step_move_large_down"],
                 ["Alt+Shift+F", "step_move_large_right"],
                 ["/", "show_help"],
+                ["RightAlt+/", "keybind_lookup_mode"],
                 ["0", "ui_hint_mode"],
                 ["B", "bookmark_mode"],
                 ["1", "bookmark_slot_1"],
@@ -6131,6 +6132,7 @@ mod tests {
             ("M", Action::MouseSpeedDown),
             (",", Action::MouseSpeedUp),
             ("/", Action::ShowHelp),
+            ("RightAlt+/", Action::KeybindLookupMode),
         ];
 
         assert_eq!(config.key_bindings.len(), default_key_bindings().len());

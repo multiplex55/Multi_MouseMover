@@ -1059,7 +1059,11 @@ mod tests {
     #[test]
     fn lookup_reports_system_binding() {
         let bindings = KeyBindings::new();
-        let app_state = crate::app_state::AppState::default();
+        let mut app_state = crate::app_state::AppState::default();
+        app_state.set_system_bindings(crate::key_chord::RuntimeSystemBindings::new(
+            KeyChord::parse("Ctrl+Q").unwrap(),
+            KeyChord::parse("Ctrl+Escape").unwrap(),
+        ));
 
         let result = bindings.lookup_keybind_event(&ctrl_event(VirtualKey::Q), true, &app_state);
 
