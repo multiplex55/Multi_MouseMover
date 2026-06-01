@@ -125,12 +125,14 @@ key_bindings = [
 # Input ownership/reconciliation controls.
 [input]
 swallow_owned_modifiers = true
+# Stuck-modifier recovery only: periodically checks held modifiers
+# (Alt, Ctrl, Shift, Win) and does not reconcile normal movement keys.
 modifier_reconcile_on_tick = true
+# How often the app is allowed to check held modifiers.
 modifier_reconcile_interval_ms = 50
-# Stale-key recovery: modifier_reconcile_interval_ms controls how often
-# physical key state is checked. stuck_key_timeout_ms controls how long a
-# tracked key must be physically up before cleanup is synthesized. Panic reset
-# ignores both timing settings and clears held/synthetic state immediately.
+# How long a modifier must appear physically released before a synthetic
+# key-up is sent. Panic reset ignores both timing settings and clears
+# held/synthetic state immediately.
 stuck_key_timeout_ms = 10000
 debug_input = false
 shift_can_modify_plain_movement = true
