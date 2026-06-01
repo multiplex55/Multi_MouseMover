@@ -5452,11 +5452,11 @@ mod tests {
         assert_eq!(snapshot.input.stuck_key_timeout_ms, 9_000);
         assert!(!should_run_modifier_reconcile(
             &snapshot.input,
-            Duration::from_millis(124),
+            Duration::from_millis(8_999),
         ));
         assert!(should_run_modifier_reconcile(
             &snapshot.input,
-            Duration::from_millis(125),
+            Duration::from_millis(9_000),
         ));
     }
 
