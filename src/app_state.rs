@@ -472,8 +472,8 @@ impl AppState {
             key,
             VirtualKey::LeftShift
                 | VirtualKey::RightShift
-                | VirtualKey::LeftControl
-                | VirtualKey::RightControl
+                | VirtualKey::LeftCtrl
+                | VirtualKey::RightCtrl
                 | VirtualKey::LeftAlt
                 | VirtualKey::RightAlt
                 | VirtualKey::LeftWin
