@@ -163,6 +163,7 @@ pub struct AppState {
 pub struct HeldKeyState {
     pub pressed_at: std::time::Instant,
     pub last_event_at: std::time::Instant,
+    pub physically_up_since: Option<std::time::Instant>,
     pub was_action_trigger: bool,
     pub was_owned_modifier: bool,
     pub reconciled_release_sent: bool,
@@ -485,16 +486,24 @@ impl AppState {
     where
         F: FnMut(VirtualKey) -> bool,
     {
-        let stale_keys: Vec<(VirtualKey, HeldKeyState)> = self
-            .held_physical_keys
-            .iter()
-            .filter_map(|(key, state)| {
-                (Self::is_modifier_reconcile_candidate(*key)
-                    && !is_key_physically_down(*key)
-                    && state.pressed_at.elapsed() >= stale_after)
-                    .then_some((*key, *state))
-            })
-            .collect();
+        let now = std::time::Instant::now();
+        let mut stale_keys = Vec::new();
+
+        for (key, state) in self.held_physical_keys.iter_mut() {
+            if !Self::is_modifier_reconcile_candidate(*key) {
+                continue;
+            }
+
+            if is_key_physically_down(*key) {
+                state.physically_up_since = None;
+                continue;
+            }
+
+            let up_since = state.physically_up_since.get_or_insert(now);
+            if now.duration_since(*up_since) >= stale_after {
+                stale_keys.push((*key, *state));
+            }
+        }
 
         for (key, held_state) in stale_keys {
             let stale_owned_modifier = held_state.was_owned_modifier;
@@ -1342,6 +1351,7 @@ impl AppState {
                 .entry(event.key)
                 .and_modify(|state| {
                     state.last_event_at = now;
+                    state.physically_up_since = None;
                     state.was_action_trigger |= was_action_trigger;
                     state.was_owned_modifier |= self.owned_modifiers.owns_key(event.key);
                     state.reconciled_release_sent = false;
@@ -1349,6 +1359,7 @@ impl AppState {
                 .or_insert(HeldKeyState {
                     pressed_at: now,
                     last_event_at: now,
+                    physically_up_since: None,
                     was_action_trigger,
                     was_owned_modifier: self.owned_modifiers.owns_key(event.key),
                     reconciled_release_sent: false,
@@ -3962,6 +3973,14 @@ mod tests {
         held_state.pressed_at = std::time::Instant::now() - age;
     }
 
+    fn age_physically_up_since(state: &mut AppState, key: VirtualKey, age: Duration) {
+        let held_state = state
+            .held_physical_keys
+            .get_mut(&key)
+            .expect("held key should be tracked");
+        held_state.physically_up_since = Some(std::time::Instant::now() - age);
+    }
+
     #[test]
     fn reconcile_does_not_release_before_timeout() {
         let mut state = state_with_bound_key(VirtualKey::LeftShift);
@@ -3986,6 +4005,60 @@ mod tests {
     }
 
     #[test]
+    fn reconcile_first_physically_up_observation_does_not_release_modifier_before_timeout() {
+        let mut state = state_with_bound_key(VirtualKey::LeftShift);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::LeftShift, true),
+            Some(Action::SlowMouse),
+        );
+        assert_eq!(collect_commands(&mut state).len(), 1);
+
+        state.reconcile_stale_keys(Duration::from_millis(500), |_| false);
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(state
+            .held_physical_keys
+            .contains_key(&VirtualKey::LeftShift));
+        assert!(state
+            .held_physical_keys
+            .get(&VirtualKey::LeftShift)
+            .expect("held key should be tracked")
+            .physically_up_since
+            .is_some());
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
+    }
+
+    #[test]
+    fn reconcile_releases_stale_modifier_after_physically_up_timeout() {
+        let mut state = state_with_bound_key(VirtualKey::LeftShift);
+        state.route_key_event(
+            KeyEvent::new(VirtualKey::LeftShift, true),
+            Some(Action::SlowMouse),
+        );
+        assert_eq!(collect_commands(&mut state).len(), 1);
+
+        state.reconcile_stale_keys(Duration::from_millis(500), |_| false);
+        age_physically_up_since(
+            &mut state,
+            VirtualKey::LeftShift,
+            Duration::from_millis(500),
+        );
+        state.reconcile_stale_keys(Duration::from_millis(500), |_| false);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::SlowMouse,
+                is_down: false,
+            }]
+        );
+        assert!(!state
+            .held_physical_keys
+            .contains_key(&VirtualKey::LeftShift));
+        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
+    }
+
+    #[test]
     fn reconcile_releases_after_timeout() {
         let mut state = state_with_bound_key(VirtualKey::LeftShift);
         state.route_key_event(
@@ -3993,7 +4066,8 @@ mod tests {
             Some(Action::SlowMouse),
         );
         assert_eq!(collect_commands(&mut state).len(), 1);
-        age_held_key(
+        state.reconcile_stale_keys(Duration::from_millis(500), |_| false);
+        age_physically_up_since(
             &mut state,
             VirtualKey::LeftShift,
             Duration::from_millis(500),
