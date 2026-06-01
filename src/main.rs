@@ -540,7 +540,7 @@ impl Default for InputConfig {
             swallow_owned_modifiers: true,
             modifier_reconcile_on_tick: true,
             modifier_reconcile_interval_ms: 50,
-            stuck_key_timeout_ms: 500,
+            stuck_key_timeout_ms: 10_000,
             debug_input: false,
             shift_can_modify_plain_movement: true,
             right_alt_suppresses_synthetic_ctrl: true,
@@ -7009,7 +7009,7 @@ mod tests {
     #[test]
     fn input_config_default_uses_safer_stuck_timeout() {
         let config = parse_config("");
-        assert_eq!(config.input.stuck_key_timeout_ms, 500);
+        assert_eq!(config.input.stuck_key_timeout_ms, 10_000);
     }
 
     #[test]
