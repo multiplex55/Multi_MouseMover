@@ -87,6 +87,7 @@ pub enum AppCommand {
     PanicReset,
     ToggleHelp,
     HideHelp,
+    HelpInput(crate::help_overlay::HelpInput),
     EnterJumpMode {
         activation_key: VirtualKey,
         profile: Option<String>,
@@ -242,6 +243,90 @@ pub struct GridDirectionLabels {
     pub left: String,
     pub down: String,
     pub right: String,
+}
+
+fn help_input_from_event(
+    event: &KeyEvent,
+    action: Option<&Action>,
+) -> Option<crate::help_overlay::HelpInput> {
+    if event.key == VirtualKey::Escape {
+        return Some(crate::help_overlay::HelpInput::Escape);
+    }
+    match action {
+        Some(Action::HelpSearch) | Some(Action::ShowHelp) | Some(Action::HelpMode) => {
+            return Some(crate::help_overlay::HelpInput::Search);
+        }
+        Some(Action::HelpNextSection) => return Some(crate::help_overlay::HelpInput::NextSection),
+        Some(Action::HelpPreviousSection) => {
+            return Some(crate::help_overlay::HelpInput::PreviousSection)
+        }
+        Some(Action::HelpNextPage) => return Some(crate::help_overlay::HelpInput::NextPage),
+        Some(Action::HelpPreviousPage) => {
+            return Some(crate::help_overlay::HelpInput::PreviousPage)
+        }
+        _ => {}
+    }
+    match event.key {
+        VirtualKey::Oem2 => Some(crate::help_overlay::HelpInput::Search),
+        VirtualKey::Tab if event.shift_down => {
+            Some(crate::help_overlay::HelpInput::PreviousSection)
+        }
+        VirtualKey::Tab => Some(crate::help_overlay::HelpInput::NextSection),
+        VirtualKey::PageDown => Some(crate::help_overlay::HelpInput::NextPage),
+        VirtualKey::PageUp => Some(crate::help_overlay::HelpInput::PreviousPage),
+        VirtualKey::Backspace => Some(crate::help_overlay::HelpInput::Backspace),
+        _ => help_text_char(event).map(crate::help_overlay::HelpInput::Append),
+    }
+}
+
+fn help_text_char(event: &KeyEvent) -> Option<char> {
+    if event.ctrl_down || event.alt_down || event.win_down {
+        return None;
+    }
+    let shifted = event.shift_down;
+    match event.key {
+        VirtualKey::A => Some(if shifted { 'A' } else { 'a' }),
+        VirtualKey::B => Some(if shifted { 'B' } else { 'b' }),
+        VirtualKey::C => Some(if shifted { 'C' } else { 'c' }),
+        VirtualKey::D => Some(if shifted { 'D' } else { 'd' }),
+        VirtualKey::E => Some(if shifted { 'E' } else { 'e' }),
+        VirtualKey::F => Some(if shifted { 'F' } else { 'f' }),
+        VirtualKey::G => Some(if shifted { 'G' } else { 'g' }),
+        VirtualKey::H => Some(if shifted { 'H' } else { 'h' }),
+        VirtualKey::I => Some(if shifted { 'I' } else { 'i' }),
+        VirtualKey::J => Some(if shifted { 'J' } else { 'j' }),
+        VirtualKey::K => Some(if shifted { 'K' } else { 'k' }),
+        VirtualKey::L => Some(if shifted { 'L' } else { 'l' }),
+        VirtualKey::M => Some(if shifted { 'M' } else { 'm' }),
+        VirtualKey::N => Some(if shifted { 'N' } else { 'n' }),
+        VirtualKey::O => Some(if shifted { 'O' } else { 'o' }),
+        VirtualKey::P => Some(if shifted { 'P' } else { 'p' }),
+        VirtualKey::Q => Some(if shifted { 'Q' } else { 'q' }),
+        VirtualKey::R => Some(if shifted { 'R' } else { 'r' }),
+        VirtualKey::S => Some(if shifted { 'S' } else { 's' }),
+        VirtualKey::T => Some(if shifted { 'T' } else { 't' }),
+        VirtualKey::U => Some(if shifted { 'U' } else { 'u' }),
+        VirtualKey::V => Some(if shifted { 'V' } else { 'v' }),
+        VirtualKey::W => Some(if shifted { 'W' } else { 'w' }),
+        VirtualKey::X => Some(if shifted { 'X' } else { 'x' }),
+        VirtualKey::Y => Some(if shifted { 'Y' } else { 'y' }),
+        VirtualKey::Z => Some(if shifted { 'Z' } else { 'z' }),
+        VirtualKey::Num0 => Some('0'),
+        VirtualKey::Num1 => Some('1'),
+        VirtualKey::Num2 => Some('2'),
+        VirtualKey::Num3 => Some('3'),
+        VirtualKey::Num4 => Some('4'),
+        VirtualKey::Num5 => Some('5'),
+        VirtualKey::Num6 => Some('6'),
+        VirtualKey::Num7 => Some('7'),
+        VirtualKey::Num8 => Some('8'),
+        VirtualKey::Num9 => Some('9'),
+        VirtualKey::Space => Some(' '),
+        VirtualKey::OemMinus => Some(if shifted { '_' } else { '-' }),
+        VirtualKey::OemPeriod => Some('.'),
+        VirtualKey::OemComma => Some(','),
+        _ => None,
+    }
 }
 
 impl Default for GridDirectionLabels {
@@ -1050,9 +1135,16 @@ impl AppState {
             self.enqueue_command(AppCommand::PanicReset);
             return;
         }
-        if self.help_visible && event.is_down && event.key == VirtualKey::Escape {
-            self.enqueue_command(AppCommand::HideHelp);
-            return;
+        if self.help_visible && event.is_down {
+            if let Some(input) = help_input_from_event(&event, action.as_ref()) {
+                match input {
+                    crate::help_overlay::HelpInput::Escape => {
+                        self.enqueue_command(AppCommand::HideHelp)
+                    }
+                    other => self.enqueue_command(AppCommand::HelpInput(other)),
+                }
+                return;
+            }
         }
         if self.active_mode && event.is_down && matches!(action.as_ref(), Some(Action::Disable)) {
             self.exit_ui_hint_mode();

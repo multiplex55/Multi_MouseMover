@@ -356,7 +356,12 @@ Wheel levels are interpreted by the target application. Some apps map level chan
 | `tooltip_overlay.duration_ms` | integer milliseconds | `900` | Yes | Active | Temporary tooltip duration. |
 | `tooltip_overlay.help_positioning` | enum string | `"center"` | Yes | Active | Help overlay placement. |
 | `tooltip_overlay.help_width` | integer pixels | `420` | Yes | Active | Help overlay width before clamping. |
-| `tooltip_overlay.help_max_bindings` | integer | `40` | Yes | Active | Maximum bindings shown in help. |
+| `tooltip_overlay.help_max_bindings` | integer | `40` | Yes | Active | Legacy static help cap; interactive help uses pages so filtered bindings remain reachable. |
+| `tooltip_overlay.help.interactive` | boolean | `true` | Yes | Active | Enables stateful help routing for search, sections, and paging. |
+| `tooltip_overlay.help.page_size` | integer | `18` | Yes | Active | Number of binding rows shown per interactive help page. |
+| `tooltip_overlay.help.show_unbound_actions` | boolean | `true` | Yes | Active | Includes known actions without current key bindings. |
+| `tooltip_overlay.help.show_conflicts` | boolean | `true` | Yes | Active | Shows conflict/shadow warnings from config audit beside affected bindings. |
+| `tooltip_overlay.help.show_mode_specific_sections` | boolean | `true` | Yes | Active | Keeps mode/scope information visible for Jump, Grid, UI Hints, Bookmarks, and Help controls. |
 | `tooltip_overlay.events.*` | booleans | `true` | Yes | Active | Enables tooltip event categories (including `surgical` and `bookmarks`). |
 | `ui_hints.enabled` | boolean | `true` | Yes | Active | Enables UI hint mode and query workflow. |
 | `ui_hints.debug` | boolean | `false` | Yes | Active | Enables UI hint debug logging. |
@@ -673,14 +678,29 @@ key_bindings = [
 
 Warning: modifier-key triggers are supported, but they are also part of owned-modifier swallowing. Recommended fix: verify `input.swallow_owned_modifiers` behavior, or choose a non-modifier trigger when you need the key event to reach other applications.
 
-### Help overlay limit
+### Interactive help overlay
+
+```toml
+[tooltip_overlay.help]
+interactive = true
+page_size = 18
+show_unbound_actions = true
+show_conflicts = true
+show_mode_specific_sections = true
+```
+
+Help opens from the configured `show_help` binding (default `/`). While help is visible, input is routed to the overlay first: `/` focuses/continues search, normal text edits the filter, `Backspace` removes filter text, `Tab` and `Shift+Tab` change section, `PageDown` and `PageUp` move between pages, and `Escape` closes help. Configured help actions (`help_search`, `help_next_section`, `help_previous_section`, `help_next_page`, and `help_previous_page`) can also drive the same controls.
+
+Interactive help is paged rather than truncated: every filtered binding remains reachable by changing pages. `show_conflicts` displays shadow/overlap warnings found by config audit, and `show_unbound_actions` lists known actions that currently do not have a key binding.
+
+### Help overlay legacy limit
 
 ```toml
 [tooltip_overlay]
 help_max_bindings = 20
 ```
 
-Warning: when the visible binding count exceeds `tooltip_overlay.help_max_bindings`, the help overlay hides the remaining bindings. Recommended fix: raise `tooltip_overlay.help_max_bindings` (or use paged help when available) so important bindings remain discoverable.
+`tooltip_overlay.help_max_bindings` is retained for legacy/static help sizing. Prefer `[tooltip_overlay.help].page_size` for interactive help because pagination keeps all filtered bindings discoverable.
 
 ## Manual smoke-test checklist
 
