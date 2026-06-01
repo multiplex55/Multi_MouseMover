@@ -1667,6 +1667,25 @@ mod tests {
     }
 
     #[test]
+    fn separate_down_and_left_actions_produce_diagonal_movement() {
+        let config = test_config();
+        let mut current_speed = config.starting_speed;
+        let mut acceleration_counter = 0;
+        let active_actions = HashSet::from([Action::MoveDown, Action::MoveLeft]);
+
+        let movement = tick(
+            &active_actions,
+            &config,
+            config.starting_speed,
+            &mut current_speed,
+            &mut acceleration_counter,
+        );
+
+        assert!(movement.dx < 0.0);
+        assert!(movement.dy > 0.0);
+    }
+
+    #[test]
     fn acceleration_progresses_over_ticks() {
         let config = test_config();
         let mut current_speed = config.starting_speed;
