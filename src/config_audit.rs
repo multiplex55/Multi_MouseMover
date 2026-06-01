@@ -1,4 +1,5 @@
-use crate::key_chord::{KeyChord, ModifierSideRequirement};
+use crate::key_chord::{KeyChord, ModifierRequirements, ModifierSideRequirement};
+use crate::keyboard::{preserved_shortcut_risk_for_chord, VirtualKey};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,79 @@ pub struct ConfigAuditWarning {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConfigAuditReport {
     pub warnings: Vec<ConfigAuditWarning>,
+    pub keybind_report: KeybindAuditReport,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct KeybindAuditReport {
+    pub issues: Vec<KeybindIssue>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeybindIssueKind {
+    DuplicateExactChord,
+    OverlappingGenericAndSideSpecificModifier,
+    PlainBindingShadowedByModifierRelaxation,
+    ReservedWindowsShortcut,
+    SystemBindingAlsoUsedAsActionBinding,
+    BindingUsesOwnedModifier,
+    BindingLikelyAltGrAmbiguous,
+    BindingNotShownInHelpDueToLimit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeybindIssue {
+    pub kind: KeybindIssueKind,
+    pub severity: ConfigAuditSeverity,
+    pub chord_display: String,
+    pub action_id: String,
+    pub action_name: String,
+    pub message: String,
+    pub suggestion: String,
+    pub winning_chord_display: Option<String>,
+    pub winning_action_id: Option<String>,
+    pub winning_action_name: Option<String>,
+}
+
+impl KeybindIssue {
+    fn warning(
+        kind: KeybindIssueKind,
+        chord_display: impl Into<String>,
+        action_id: impl Into<String>,
+        message: impl Into<String>,
+        suggestion: impl Into<String>,
+    ) -> Self {
+        let action_id = action_id.into();
+        Self {
+            kind,
+            severity: ConfigAuditSeverity::Warning,
+            chord_display: chord_display.into(),
+            action_name: action_id.clone(),
+            action_id,
+            message: message.into(),
+            suggestion: suggestion.into(),
+            winning_chord_display: None,
+            winning_action_id: None,
+            winning_action_name: None,
+        }
+    }
+
+    fn with_severity(mut self, severity: ConfigAuditSeverity) -> Self {
+        self.severity = severity;
+        self
+    }
+
+    fn with_winner(
+        mut self,
+        chord_display: impl Into<String>,
+        action_id: impl Into<String>,
+    ) -> Self {
+        let action_id = action_id.into();
+        self.winning_chord_display = Some(chord_display.into());
+        self.winning_action_name = Some(action_id.clone());
+        self.winning_action_id = Some(action_id);
+        self
+    }
 }
 
 pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
@@ -33,6 +107,7 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
                     message: format!("Config TOML could not be parsed: {err}"),
                     suggestion: "Fix the TOML syntax before changing config paths.".to_string(),
                 }],
+                keybind_report: KeybindAuditReport::default(),
             };
         }
     };
@@ -47,8 +122,7 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
         audit_explicit_path(path, &path_set, &mut report);
     }
     audit_key_binding_aliases(&value, &mut report);
-    audit_key_binding_duplicates(&value, &mut report);
-    audit_key_binding_overlap_warnings(&value, &mut report);
+    audit_keybind_report(&value, &mut report);
 
     for path in &paths {
         if is_explicitly_audited_path(path, &path_set) || is_known_active_path(path) {
@@ -68,108 +142,470 @@ pub fn audit_config_toml(raw_toml: &str) -> ConfigAuditReport {
     report
 }
 
-fn audit_key_binding_overlap_warnings(value: &toml::Value, report: &mut ConfigAuditReport) {
+#[derive(Debug, Clone)]
+struct ParsedKeyBinding {
+    index: usize,
+    chord_source: String,
+    action: String,
+    chord: KeyChord,
+}
+
+fn audit_keybind_report(value: &toml::Value, report: &mut ConfigAuditReport) {
+    let parsed = parsed_key_bindings(value);
+    audit_keybind_duplicates(&parsed, report);
+    audit_keybind_overlaps(&parsed, report);
+    audit_shift_relaxation_shadowing(&parsed, report);
+    audit_reserved_windows_shortcuts(&parsed, report);
+    audit_system_binding_reuse(value, &parsed, report);
+    audit_owned_modifier_bindings(&parsed, report);
+    audit_altgr_ambiguity(&parsed, report);
+    audit_help_limit(value, &parsed, report);
+}
+
+fn parsed_key_bindings(value: &toml::Value) -> Vec<ParsedKeyBinding> {
     let Some(bindings) = value.get("key_bindings").and_then(toml::Value::as_array) else {
-        return;
+        return Vec::new();
     };
 
-    let mut parsed = Vec::new();
-    for (index, binding) in bindings.iter().enumerate() {
-        let Some(items) = binding.as_array() else {
-            continue;
-        };
-        let Some(chord_str) = items.first().and_then(toml::Value::as_str) else {
-            continue;
-        };
-        let Some(action) = items.get(1).and_then(toml::Value::as_str) else {
-            continue;
-        };
-        let Ok(chord) = KeyChord::parse(chord_str) else {
-            continue;
-        };
-        parsed.push((index, action.to_string(), chord));
+    bindings
+        .iter()
+        .enumerate()
+        .filter_map(|(index, binding)| {
+            let items = binding.as_array()?;
+            let chord_source = items.first()?.as_str()?;
+            let action = items.get(1)?.as_str()?;
+            let chord = KeyChord::parse(chord_source).ok()?;
+            Some(ParsedKeyBinding {
+                index,
+                chord_source: chord_source.to_string(),
+                action: action.to_string(),
+                chord,
+            })
+        })
+        .collect()
+}
+
+fn audit_keybind_duplicates(parsed: &[ParsedKeyBinding], report: &mut ConfigAuditReport) {
+    let mut chord_indexes: HashMap<KeyChord, Vec<&ParsedKeyBinding>> = HashMap::new();
+    for binding in parsed {
+        chord_indexes
+            .entry(binding.chord)
+            .or_default()
+            .push(binding);
     }
 
-    for i in 0..parsed.len() {
-        for j in (i + 1)..parsed.len() {
-            let (left_index, left_action, left) = &parsed[i];
-            let (right_index, right_action, right) = &parsed[j];
-            if left.key != right.key || left_action != right_action {
-                continue;
-            }
-            emit_overlap_warning(
-                left_index,
-                right_index,
-                left,
-                right,
-                "Alt",
-                |c| c.modifiers.alt,
-                report,
-            );
-            emit_overlap_warning(
-                left_index,
-                right_index,
-                left,
-                right,
-                "Shift",
-                |c| c.modifiers.shift,
-                report,
-            );
-        }
-    }
+    let mut duplicates: Vec<Vec<&ParsedKeyBinding>> = chord_indexes
+        .into_values()
+        .filter(|bindings| bindings.len() > 1)
+        .collect();
+    duplicates.sort_by(|left, right| left[0].chord_source.cmp(&right[0].chord_source));
 
-    if parsed.iter().any(|(_, _, chord)| {
-        chord.modifiers.alt == ModifierSideRequirement::Right
-            || (chord.modifiers.alt == ModifierSideRequirement::Any
-                && chord.modifiers.ctrl == ModifierSideRequirement::Any)
-    }) {
+    for bindings in duplicates {
+        let winner = bindings.last().expect("duplicate group has a winner");
+        let binding_refs = bindings
+            .iter()
+            .map(|binding| format!("key_bindings[{}]", binding.index))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let chord_display = bindings[0].chord.display_label();
+        let message = format!(
+            "Duplicate key chord '{chord_display}' appears in multiple bindings ({binding_refs}); later entry wins."
+        );
+        let suggestion = "Use unique chords in key_bindings to avoid unintentional overrides.";
         report.warnings.push(ConfigAuditWarning {
             path: "key_bindings".to_string(),
-            severity: ConfigAuditSeverity::Info,
-            message: "AltGr advisory: some layouts report AltGr as RightAlt+Ctrl, so RightAlt and generic Alt/Ctrl combinations can overlap.".to_string(),
-            suggestion: "Prefer explicit side requirements (e.g. RightAlt without generic Alt/Ctrl alternatives) or avoid ambiguous AltGr-adjacent bindings.".to_string(),
+            severity: ConfigAuditSeverity::Warning,
+            message: message.clone(),
+            suggestion: suggestion.to_string(),
         });
+        report.keybind_report.issues.push(
+            KeybindIssue::warning(
+                KeybindIssueKind::DuplicateExactChord,
+                chord_display,
+                bindings[0].action.clone(),
+                message,
+                suggestion,
+            )
+            .with_winner(winner.chord.display_label(), winner.action.clone()),
+        );
     }
 }
 
-fn emit_overlap_warning<F: Fn(&KeyChord) -> ModifierSideRequirement>(
-    left_index: &usize,
-    right_index: &usize,
-    left: &KeyChord,
-    right: &KeyChord,
-    family_name: &str,
-    requirement: F,
+fn audit_keybind_overlaps(parsed: &[ParsedKeyBinding], report: &mut ConfigAuditReport) {
+    for i in 0..parsed.len() {
+        for j in (i + 1)..parsed.len() {
+            let left = &parsed[i];
+            let right = &parsed[j];
+            if left.chord.key != right.chord.key || left.chord == right.chord {
+                continue;
+            }
+            if !chords_overlap_by_generic_and_side_specific_modifier(left.chord, right.chord) {
+                continue;
+            }
+            let winner = winning_binding_for_overlap(left, right);
+            let loser = if winner.index == left.index {
+                right
+            } else {
+                left
+            };
+            let message = format!(
+                "Key chord overlap: '{}' ({}) overlaps '{}' ({}); both may match a single event, and '{}' wins due to resolver specificity.",
+                left.chord.display_label(),
+                left.action,
+                right.chord.display_label(),
+                right.action,
+                winner.chord.display_label()
+            );
+            let suggestion = format!(
+                "Review key_bindings[{}] and key_bindings[{}]: avoid mixing generic and side-specific modifiers for the same key unless the winner is intentional.",
+                left.index, right.index
+            );
+            report.warnings.push(ConfigAuditWarning {
+                path: "key_bindings".to_string(),
+                severity: ConfigAuditSeverity::Warning,
+                message: message.clone(),
+                suggestion: suggestion.clone(),
+            });
+            report.keybind_report.issues.push(
+                KeybindIssue::warning(
+                    KeybindIssueKind::OverlappingGenericAndSideSpecificModifier,
+                    loser.chord.display_label(),
+                    loser.action.clone(),
+                    message,
+                    suggestion,
+                )
+                .with_winner(winner.chord.display_label(), winner.action.clone()),
+            );
+        }
+    }
+}
+
+fn audit_shift_relaxation_shadowing(parsed: &[ParsedKeyBinding], report: &mut ConfigAuditReport) {
+    for plain in parsed
+        .iter()
+        .filter(|binding| is_plain_chord(binding.chord))
+    {
+        for shifted in parsed.iter().filter(|binding| {
+            binding.chord.key == plain.chord.key
+                && binding.chord.modifiers.shift != ModifierSideRequirement::NotRequired
+        }) {
+            let message = format!(
+                "Plain binding '{}' can also match shifted events when input.shift_can_modify_plain_movement is enabled, but '{}' wins for Shift+{}.",
+                plain.chord.display_label(),
+                shifted.chord.display_label(),
+                shifted.chord.display_label().rsplit('+').next().unwrap_or("key")
+            );
+            let suggestion = "Use separate non-overlapping keys or disable input.shift_can_modify_plain_movement if shifted movement should never share plain bindings.";
+            report.keybind_report.issues.push(
+                KeybindIssue::warning(
+                    KeybindIssueKind::PlainBindingShadowedByModifierRelaxation,
+                    plain.chord.display_label(),
+                    plain.action.clone(),
+                    message.clone(),
+                    suggestion,
+                )
+                .with_winner(shifted.chord.display_label(), shifted.action.clone()),
+            );
+            report.warnings.push(ConfigAuditWarning {
+                path: "key_bindings".to_string(),
+                severity: ConfigAuditSeverity::Warning,
+                message,
+                suggestion: suggestion.to_string(),
+            });
+        }
+    }
+}
+
+fn audit_reserved_windows_shortcuts(parsed: &[ParsedKeyBinding], report: &mut ConfigAuditReport) {
+    for binding in parsed {
+        if let Some(risk) = preserved_shortcut_risk_for_chord(&binding.chord) {
+            let message = format!(
+                "Binding '{}' for '{}' may conflict with a preserved Windows/app shortcut: {risk}.",
+                binding.chord.display_label(),
+                binding.action
+            );
+            let suggestion = "Choose a non-reserved chord, or make this a deliberate system binding if it must override preserved shortcuts.";
+            push_keybind_issue(
+                report,
+                binding,
+                KeybindIssueKind::ReservedWindowsShortcut,
+                message,
+                suggestion,
+            );
+        }
+    }
+}
+
+fn audit_system_binding_reuse(
+    value: &toml::Value,
+    parsed: &[ParsedKeyBinding],
     report: &mut ConfigAuditReport,
 ) {
-    let left_req = requirement(left);
-    let right_req = requirement(right);
-    let overlaps = matches!(
-        (left_req, right_req),
-        (ModifierSideRequirement::Any, ModifierSideRequirement::Left)
-            | (ModifierSideRequirement::Any, ModifierSideRequirement::Right)
-            | (ModifierSideRequirement::Left, ModifierSideRequirement::Any)
-            | (ModifierSideRequirement::Right, ModifierSideRequirement::Any)
-    );
-    if !overlaps {
+    let system_bindings = system_bindings_from_value(value);
+    for (system_name, system_chord) in system_bindings {
+        for binding in parsed
+            .iter()
+            .filter(|binding| binding.chord == system_chord)
+        {
+            let message = format!(
+                "Action binding '{}' for '{}' reuses system binding '{}'. System routing wins before action dispatch.",
+                binding.chord.display_label(), binding.action, system_name
+            );
+            let suggestion = format!(
+                "Move either key_bindings[{}] or system_bindings.{system_name} to a unique chord.",
+                binding.index
+            );
+            report.warnings.push(ConfigAuditWarning {
+                path: "key_bindings".to_string(),
+                severity: ConfigAuditSeverity::Warning,
+                message: message.clone(),
+                suggestion: suggestion.clone(),
+            });
+            report.keybind_report.issues.push(
+                KeybindIssue::warning(
+                    KeybindIssueKind::SystemBindingAlsoUsedAsActionBinding,
+                    binding.chord.display_label(),
+                    binding.action.clone(),
+                    message,
+                    suggestion,
+                )
+                .with_winner(binding.chord.display_label(), system_name.to_string()),
+            );
+        }
+    }
+}
+
+fn audit_owned_modifier_bindings(parsed: &[ParsedKeyBinding], report: &mut ConfigAuditReport) {
+    for binding in parsed
+        .iter()
+        .filter(|binding| is_modifier_key(binding.chord.key))
+    {
+        let message = format!(
+            "Binding '{}' uses a modifier key as the trigger; owned-modifier swallowing can make this surprising while the binding is active.",
+            binding.chord.display_label()
+        );
+        let suggestion = "Prefer a non-modifier trigger key, or verify input.swallow_owned_modifiers behavior matches your workflow.";
+        push_keybind_issue(
+            report,
+            binding,
+            KeybindIssueKind::BindingUsesOwnedModifier,
+            message,
+            suggestion,
+        );
+    }
+}
+
+fn audit_altgr_ambiguity(parsed: &[ParsedKeyBinding], report: &mut ConfigAuditReport) {
+    let ambiguous: Vec<&ParsedKeyBinding> = parsed
+        .iter()
+        .filter(|binding| {
+            binding.chord.modifiers.alt == ModifierSideRequirement::Right
+                || (binding.chord.modifiers.alt != ModifierSideRequirement::NotRequired
+                    && binding.chord.modifiers.ctrl != ModifierSideRequirement::NotRequired)
+        })
+        .collect();
+    if ambiguous.is_empty() {
         return;
     }
-    let (generic, specific) = if left_req == ModifierSideRequirement::Any {
-        (left, right)
-    } else {
-        (right, left)
-    };
+
+    for binding in ambiguous {
+        let message = format!(
+            "AltGr advisory: '{}' may be ambiguous on keyboard layouts that report AltGr as RightAlt+Ctrl.",
+            binding.chord.display_label()
+        );
+        let suggestion = "Prefer explicit side requirements that do not compete with AltGr text input, or avoid AltGr-adjacent chords for actions used while typing.";
+        report.warnings.push(ConfigAuditWarning {
+            path: "key_bindings".to_string(),
+            severity: ConfigAuditSeverity::Info,
+            message: message.clone(),
+            suggestion: suggestion.to_string(),
+        });
+        report.keybind_report.issues.push(
+            KeybindIssue::warning(
+                KeybindIssueKind::BindingLikelyAltGrAmbiguous,
+                binding.chord.display_label(),
+                binding.action.clone(),
+                message,
+                suggestion,
+            )
+            .with_severity(ConfigAuditSeverity::Info),
+        );
+    }
+}
+
+fn audit_help_limit(
+    value: &toml::Value,
+    parsed: &[ParsedKeyBinding],
+    report: &mut ConfigAuditReport,
+) {
+    let max_bindings = value
+        .get("tooltip_overlay")
+        .and_then(|tooltip| tooltip.get("help_max_bindings"))
+        .and_then(toml::Value::as_integer)
+        .unwrap_or(40);
+    if max_bindings <= 0 || parsed.len() as i64 <= max_bindings {
+        return;
+    }
+
+    let hidden_count = parsed.len() as i64 - max_bindings;
+    let message = format!(
+        "Help overlay will show at most {max_bindings} bindings, hiding {hidden_count} of {} configured bindings.",
+        parsed.len()
+    );
+    let suggestion = "Raise tooltip_overlay.help_max_bindings or split bindings across a paged/help workflow when available.";
+    report.warnings.push(ConfigAuditWarning {
+        path: "tooltip_overlay.help_max_bindings".to_string(),
+        severity: ConfigAuditSeverity::Info,
+        message: message.clone(),
+        suggestion: suggestion.to_string(),
+    });
+    report.keybind_report.issues.push(
+        KeybindIssue::warning(
+            KeybindIssueKind::BindingNotShownInHelpDueToLimit,
+            "<help overlay>",
+            "show_help",
+            message,
+            suggestion,
+        )
+        .with_severity(ConfigAuditSeverity::Info),
+    );
+}
+
+fn push_keybind_issue(
+    report: &mut ConfigAuditReport,
+    binding: &ParsedKeyBinding,
+    kind: KeybindIssueKind,
+    message: String,
+    suggestion: &str,
+) {
     report.warnings.push(ConfigAuditWarning {
         path: "key_bindings".to_string(),
         severity: ConfigAuditSeverity::Warning,
-        message: format!(
-            "{family_name} overlap: '{}' overlaps '{}'; both may match a single event, and the more specific chord wins due to resolver specificity.",
-            generic.display_label(),
-            specific.display_label()
-        ),
-        suggestion: format!(
-            "Review key_bindings[{left_index}] and key_bindings[{right_index}]: this can shadow the generic binding when the side-specific modifier is pressed."
-        ),
+        message: message.clone(),
+        suggestion: suggestion.to_string(),
     });
+    report.keybind_report.issues.push(KeybindIssue::warning(
+        kind,
+        binding.chord.display_label(),
+        binding.action.clone(),
+        message,
+        suggestion,
+    ));
+}
+
+fn system_bindings_from_value(value: &toml::Value) -> Vec<(&'static str, KeyChord)> {
+    let system = value.get("system_bindings");
+    [
+        (
+            "toggle_active",
+            system
+                .and_then(|s| s.get("toggle_active"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("Ctrl+Q"),
+        ),
+        (
+            "exit",
+            system
+                .and_then(|s| s.get("exit"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("Ctrl+Escape"),
+        ),
+        (
+            "panic_reset",
+            system
+                .and_then(|s| s.get("panic_reset"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or("RightAlt+Escape"),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(name, chord)| KeyChord::parse(chord).ok().map(|chord| (name, chord)))
+    .collect()
+}
+
+fn chords_overlap_by_generic_and_side_specific_modifier(left: KeyChord, right: KeyChord) -> bool {
+    modifier_requirements_overlap(left.modifiers.ctrl, right.modifiers.ctrl)
+        && modifier_requirements_overlap(left.modifiers.alt, right.modifiers.alt)
+        && modifier_requirements_overlap(left.modifiers.shift, right.modifiers.shift)
+        && modifier_requirements_overlap(left.modifiers.win, right.modifiers.win)
+        && [
+            (left.modifiers.ctrl, right.modifiers.ctrl),
+            (left.modifiers.alt, right.modifiers.alt),
+            (left.modifiers.shift, right.modifiers.shift),
+            (left.modifiers.win, right.modifiers.win),
+        ]
+        .iter()
+        .any(|(left, right)| {
+            matches!(
+                (left, right),
+                (
+                    ModifierSideRequirement::Any,
+                    ModifierSideRequirement::Left | ModifierSideRequirement::Right
+                ) | (
+                    ModifierSideRequirement::Left | ModifierSideRequirement::Right,
+                    ModifierSideRequirement::Any
+                )
+            )
+        })
+}
+
+fn modifier_requirements_overlap(
+    left: ModifierSideRequirement,
+    right: ModifierSideRequirement,
+) -> bool {
+    matches!(
+        (left, right),
+        (
+            ModifierSideRequirement::NotRequired,
+            ModifierSideRequirement::NotRequired
+        ) | (ModifierSideRequirement::Any, ModifierSideRequirement::Any)
+            | (
+                ModifierSideRequirement::Any,
+                ModifierSideRequirement::Left | ModifierSideRequirement::Right
+            )
+            | (
+                ModifierSideRequirement::Left | ModifierSideRequirement::Right,
+                ModifierSideRequirement::Any
+            )
+            | (ModifierSideRequirement::Left, ModifierSideRequirement::Left)
+            | (
+                ModifierSideRequirement::Right,
+                ModifierSideRequirement::Right
+            )
+    )
+}
+
+fn winning_binding_for_overlap<'a>(
+    left: &'a ParsedKeyBinding,
+    right: &'a ParsedKeyBinding,
+) -> &'a ParsedKeyBinding {
+    match left.chord.specificity().cmp(&right.chord.specificity()) {
+        std::cmp::Ordering::Greater => left,
+        std::cmp::Ordering::Less => right,
+        std::cmp::Ordering::Equal if left.index <= right.index => left,
+        std::cmp::Ordering::Equal => right,
+    }
+}
+
+fn is_plain_chord(chord: KeyChord) -> bool {
+    chord.modifiers == ModifierRequirements::default()
+}
+
+fn is_modifier_key(key: VirtualKey) -> bool {
+    matches!(
+        key,
+        VirtualKey::Alt
+            | VirtualKey::LeftAlt
+            | VirtualKey::RightAlt
+            | VirtualKey::Ctrl
+            | VirtualKey::LeftCtrl
+            | VirtualKey::RightCtrl
+            | VirtualKey::Shift
+            | VirtualKey::LeftShift
+            | VirtualKey::RightShift
+            | VirtualKey::LeftWin
+            | VirtualKey::RightWin
+    )
 }
 
 fn audit_key_binding_aliases(value: &toml::Value, report: &mut ConfigAuditReport) {
@@ -191,58 +627,6 @@ fn audit_key_binding_aliases(value: &toml::Value, report: &mut ConfigAuditReport
                 "Use \"ui_hint_mode\" for UI hint mode bindings.",
             ));
         }
-    }
-}
-
-fn audit_key_binding_duplicates(value: &toml::Value, report: &mut ConfigAuditReport) {
-    let Some(bindings) = value.get("key_bindings").and_then(toml::Value::as_array) else {
-        return;
-    };
-
-    let mut chord_indexes: HashMap<KeyChord, (String, Vec<usize>)> = HashMap::new();
-    for (index, binding) in bindings.iter().enumerate() {
-        let Some(items) = binding.as_array() else {
-            continue;
-        };
-        let Some(chord_str) = items.first().and_then(toml::Value::as_str) else {
-            continue;
-        };
-        let Ok(chord) = KeyChord::parse(chord_str) else {
-            continue;
-        };
-        chord_indexes
-            .entry(chord)
-            .and_modify(|(_, indexes)| indexes.push(index))
-            .or_insert_with(|| (chord_str.to_string(), vec![index]));
-    }
-
-    let mut duplicates: Vec<(String, Vec<usize>)> = chord_indexes
-        .into_iter()
-        .filter_map(|(_, (chord_display, indexes))| {
-            if indexes.len() > 1 {
-                Some((chord_display, indexes))
-            } else {
-                None
-            }
-        })
-        .collect();
-    duplicates.sort_by(|left, right| left.0.cmp(&right.0));
-
-    for (chord, indexes) in duplicates {
-        let binding_refs = indexes
-            .iter()
-            .map(|index| format!("key_bindings[{index}]"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        report.warnings.push(ConfigAuditWarning {
-            path: "key_bindings".to_string(),
-            severity: ConfigAuditSeverity::Warning,
-            message: format!(
-                "Duplicate key chord '{chord}' appears in multiple bindings ({binding_refs}); later entry wins."
-            ),
-            suggestion: "Use unique chords in key_bindings to avoid unintentional overrides."
-                .to_string(),
-        });
     }
 }
 
@@ -714,6 +1098,137 @@ mod tests {
             .iter()
             .find(|warning| warning.path == path)
             .unwrap_or_else(|| panic!("expected warning for {path}, got {:?}", report.warnings))
+    }
+
+    fn issue_for<'a>(report: &'a ConfigAuditReport, kind: KeybindIssueKind) -> &'a KeybindIssue {
+        report
+            .keybind_report
+            .issues
+            .iter()
+            .find(|issue| issue.kind == kind)
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected keybind issue {:?}, got {:?}",
+                    kind, report.keybind_report.issues
+                )
+            })
+    }
+
+    #[test]
+    fn audit_warns_when_help_will_hide_bindings() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+                ["A", "move_up"],
+                ["B", "move_down"],
+                ["C", "move_left"],
+            ]
+
+            [tooltip_overlay]
+            help_max_bindings = 2
+            "#,
+        );
+
+        let issue = issue_for(&report, KeybindIssueKind::BindingNotShownInHelpDueToLimit);
+        assert_eq!(issue.severity, ConfigAuditSeverity::Info);
+        assert!(issue.message.contains("hiding 1"));
+        assert!(issue
+            .suggestion
+            .contains("tooltip_overlay.help_max_bindings"));
+    }
+
+    #[test]
+    fn audit_warns_generic_and_specific_chords_even_with_different_actions() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+                ["Alt+E", "step_move_up"],
+                ["RightAlt+E", "move_to_top_edge"],
+            ]
+            "#,
+        );
+
+        let issue = issue_for(
+            &report,
+            KeybindIssueKind::OverlappingGenericAndSideSpecificModifier,
+        );
+        assert!(issue.message.contains("Alt+E"));
+        assert!(issue.message.contains("RightAlt+E"));
+        assert_eq!(issue.winning_chord_display.as_deref(), Some("RightAlt+E"));
+        assert_eq!(issue.winning_action_id.as_deref(), Some("move_to_top_edge"));
+    }
+
+    #[test]
+    fn audit_warns_system_binding_reused_in_key_bindings() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+                ["Ctrl+Escape", "disable"],
+            ]
+            "#,
+        );
+
+        let issue = issue_for(
+            &report,
+            KeybindIssueKind::SystemBindingAlsoUsedAsActionBinding,
+        );
+        assert!(issue.message.contains("system binding 'exit'"));
+        assert_eq!(issue.winning_action_id.as_deref(), Some("exit"));
+    }
+
+    #[test]
+    fn audit_reports_winning_binding_for_overlap() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+                ["Alt+E", "step_move_up"],
+                ["RightAlt+E", "move_to_top_edge"],
+            ]
+            "#,
+        );
+
+        let issue = issue_for(
+            &report,
+            KeybindIssueKind::OverlappingGenericAndSideSpecificModifier,
+        );
+        assert_eq!(issue.chord_display, "Alt+E");
+        assert_eq!(issue.winning_chord_display.as_deref(), Some("RightAlt+E"));
+        assert_eq!(
+            issue.winning_action_name.as_deref(),
+            Some("move_to_top_edge")
+        );
+    }
+
+    #[test]
+    fn audit_warns_altgr_ambiguous_bindings() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+                ["RightAlt+E", "move_to_top_edge"],
+            ]
+            "#,
+        );
+
+        let issue = issue_for(&report, KeybindIssueKind::BindingLikelyAltGrAmbiguous);
+        assert_eq!(issue.severity, ConfigAuditSeverity::Info);
+        assert!(issue.message.contains("AltGr advisory"));
+    }
+
+    #[test]
+    fn audit_warns_duplicate_exact_chords() {
+        let report = audit_config_toml(
+            r#"
+            key_bindings = [
+                ["I", "wheel_left"],
+                ["I", "wheel_speed_down"],
+            ]
+            "#,
+        );
+
+        let issue = issue_for(&report, KeybindIssueKind::DuplicateExactChord);
+        assert_eq!(issue.chord_display, "I");
+        assert_eq!(issue.winning_action_id.as_deref(), Some("wheel_speed_down"));
+        assert!(issue.message.contains("later entry wins"));
     }
 
     #[test]
