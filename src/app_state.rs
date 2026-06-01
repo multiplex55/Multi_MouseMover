@@ -4130,7 +4130,7 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_ignores_stale_move_trigger() {
+    fn reconcile_does_not_release_plain_movement_key() {
         let mut state = state_with_bound_key(VirtualKey::E);
         state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
         assert_eq!(collect_commands(&mut state).len(), 1);
@@ -4201,6 +4201,30 @@ mod tests {
     }
 
     #[test]
+    fn real_movement_key_up_releases_action_through_normal_path() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveUp,
+                is_down: true,
+            }]
+        );
+
+        state.route_key_event(KeyEvent::new(VirtualKey::E, false), None);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveUp,
+                is_down: false,
+            }]
+        );
+        assert!(!state.held_physical_keys.contains_key(&VirtualKey::E));
+    }
+
+    #[test]
     fn reconcile_releases_only_physically_up_modifier_keys() {
         let mut state = AppState::default();
         state.set_bound_keys([VirtualKey::LeftShift, VirtualKey::RightAlt]);
@@ -4266,11 +4290,13 @@ mod tests {
         assert_eq!(collect_commands(&mut state), Vec::new());
         assert!(state.held_physical_keys.contains_key(&VirtualKey::S));
         assert!(state.held_physical_keys.contains_key(&VirtualKey::D));
+        assert!(!state.reconciled_released_keys.contains(&VirtualKey::S));
+        assert!(!state.reconciled_released_keys.contains(&VirtualKey::D));
         assert!(state.has_active_action_keys());
     }
 
     #[test]
-    fn reconcile_removes_active_trigger_for_stale_modifier_key() {
+    fn reconcile_removes_active_trigger_for_stale_key() {
         let mut state = state_with_bound_key(VirtualKey::LeftShift);
         state.route_key_event(
             KeyEvent::new(VirtualKey::LeftShift, true),
