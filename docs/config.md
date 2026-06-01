@@ -166,7 +166,7 @@ Swallow precedence is:
 | `input.swallow_owned_modifiers` | boolean | `true` | Yes | Active | Swallow app-owned modifier down/up transitions while active mode is enabled. |
 | `input.modifier_reconcile_on_tick` | boolean | `true` | Yes | Active | Enables periodic modifier reconciliation checks. |
 | `input.modifier_reconcile_interval_ms` | integer milliseconds | `50` | Yes | Active | Polling interval for periodic modifier reconciliation; normalized to `10..=5000` and reset to default when `0`. |
-| `input.stuck_key_timeout_ms` | integer milliseconds | `10000` | Yes | Active | Stale-duration threshold used to classify tracked held keys as stuck for diagnostics/recovery; normalized to `500..=60000` and reset to default when `0`. |
+| `input.stuck_key_timeout_ms` | integer milliseconds | `500` | Yes | Active | Threshold for how long a tracked key must be physically up before stale-key cleanup synthesizes release; normalized to `500..=60000` and reset to default when `0`. |
 | `input.debug_input` | boolean | `false` | Yes | Active | Enables verbose debug-input logs (raw keys, swallow reasons, system matches, trigger tracking). |
 | `input.shift_can_modify_plain_movement` | boolean | `true` | Yes | Active | Keeps shift-relaxed plain-movement matching enabled. |
 | `input.right_alt_suppresses_synthetic_ctrl` | boolean | `true` | Yes | Active | When true, AltGr-style synthetic Ctrl is ignored for matching/passthrough decisions while RightAlt is held, unless a physical Ctrl key is also down. |
@@ -441,7 +441,9 @@ font_scale = 1.1
 
 - `selection_keys` removes whitespace, uppercases alpha keys, and removes duplicates while preserving first occurrence order.
 - Values outside supported ranges are normalized and logged as config warnings so the mode remains usable.
-- For input stale-key recovery, reconcile ticks run every `input.modifier_reconcile_interval_ms`; `input.stuck_key_timeout_ms` only controls when a held key is considered stale/stuck.
+- For input stale-key recovery, `input.modifier_reconcile_interval_ms` is only the check cadence: it controls how often the app compares tracked held keys against current physical key state.
+- `input.stuck_key_timeout_ms` is the classification threshold: once a tracked key is physically up, it must have been tracked for at least this long before cleanup synthesizes release and clears held/synthetic state.
+- Panic reset ignores `input.modifier_reconcile_interval_ms` and `input.stuck_key_timeout_ms`; it clears held/synthetic input state immediately.
 - Duplicate and deeply nested UIA controls are common in complex apps; increase `min_hint_spacing_px` to reduce visual crowding.
 - When many controls are visible (for example browsers/Electron apps), results may be capped by `max_hints`; consider larger `selection_keys` and spacing tuning before raising the cap aggressively.
 

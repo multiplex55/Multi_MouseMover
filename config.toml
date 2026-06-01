@@ -126,12 +126,11 @@ key_bindings = [
 swallow_owned_modifiers = true
 modifier_reconcile_on_tick = true
 modifier_reconcile_interval_ms = 50
-# Stale-key recovery: if a tracked held key has not produced expected transitions
-# for this timeout window, it may be treated as stuck and reconciled against
-# current OS modifier state. Reconciliation runs every
-# modifier_reconcile_interval_ms; this timeout is only the stale-duration
-# threshold used for classification/diagnostics.
-stuck_key_timeout_ms = 10000
+# Stale-key recovery: modifier_reconcile_interval_ms controls how often
+# physical key state is checked. stuck_key_timeout_ms controls how long a
+# tracked key must be physically up before cleanup is synthesized. Panic reset
+# ignores both timing settings and clears held/synthetic state immediately.
+stuck_key_timeout_ms = 500
 debug_input = false
 shift_can_modify_plain_movement = true
 
