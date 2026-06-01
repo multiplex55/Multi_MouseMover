@@ -5792,36 +5792,42 @@ mod tests {
         let labels: std::collections::HashSet<_> = view
             .bindings
             .iter()
-            .map(|binding| (binding.key.as_str(), binding.action.as_str()))
+            .map(|binding| (binding.key.clone(), binding.action.clone()))
             .collect();
+        let label_pair = |key: &str, action: &str| {
+            (
+                KeyChord::parse(key).unwrap().display_label(),
+                action.to_string(),
+            )
+        };
 
         for expected in [
-            ("E", "Move up"),
-            ("S", "Move left"),
-            ("D", "Move down"),
-            ("F", "Move right"),
-            ("Z", "Held precision modifier (surgical)"),
-            ("J", "Left click"),
-            ("K", "Right click"),
-            ("L", "Middle click"),
-            ("T", "Jump"),
-            ("G", "Grid"),
-            ("0", "UI Hints"),
-            ("B", "Bookmark mode"),
-            ("/", "Hints / Help"),
-            ("RightAlt+E", "Jump to monitor top edge"),
-            ("RightAlt+S", "Jump to monitor left edge"),
-            ("RightAlt+D", "Jump to monitor bottom edge"),
-            ("RightAlt+F", "Jump to monitor right edge"),
+            label_pair("E", "Move up"),
+            label_pair("S", "Move left"),
+            label_pair("D", "Move down"),
+            label_pair("F", "Move right"),
+            label_pair("Z", "Held precision modifier (surgical)"),
+            label_pair("J", "Left click"),
+            label_pair("K", "Right click"),
+            label_pair("L", "Middle click"),
+            label_pair("T", "Jump"),
+            label_pair("G", "Grid"),
+            label_pair("0", "UI Hints"),
+            label_pair("B", "Bookmark mode"),
+            label_pair("/", "Hints / Help"),
+            label_pair("RightAlt+E", "Jump to monitor top edge"),
+            label_pair("RightAlt+S", "Jump to monitor left edge"),
+            label_pair("RightAlt+D", "Jump to monitor bottom edge"),
+            label_pair("RightAlt+F", "Jump to monitor right edge"),
         ] {
             assert!(labels.contains(&expected), "missing {expected:?}");
         }
         for stale in [
-            ("W", "Move up"),
-            ("A", "Move left"),
-            ("B", "Held precision modifier (surgical)"),
-            ("RightAlt+W", "Jump to monitor top edge"),
-            ("RightAlt+A", "Jump to monitor left edge"),
+            label_pair("W", "Move up"),
+            label_pair("A", "Move left"),
+            label_pair("B", "Held precision modifier (surgical)"),
+            label_pair("RightAlt+W", "Jump to monitor top edge"),
+            label_pair("RightAlt+A", "Jump to monitor left edge"),
         ] {
             assert!(!labels.contains(&stale), "stale label present {stale:?}");
         }
@@ -7146,15 +7152,19 @@ mod tests {
         let cases = [
             Case {
                 name: "surgical_mode",
-                config_toml: "[surgical_mode]
-enabled = true",
+                config_toml: r#"key_bindings = []
+
+[surgical_mode]
+enabled = true"#,
                 expected_substring:
                     "surgical_mode.enabled=true but no key binding targets action \"surgical_mode\"",
             },
             Case {
                 name: "scroll_mode",
-                config_toml: "[scroll_mode]
-enabled = true",
+                config_toml: r#"key_bindings = []
+
+[scroll_mode]
+enabled = true"#,
                 expected_substring:
                     "scroll_mode.enabled=true but no key binding targets action \"scroll_modifier\"",
             },
@@ -7259,7 +7269,7 @@ enabled = true"#,
         assert!(summary.contains("wheel default=1 range=1..10 step=1 tick=120ms"));
         assert!(summary.contains("slow_mouse strategy=Fixed speed=1 (default 1, range 1..2) acceleration=0 every 1 tick(s)"));
         assert!(summary.contains("features: [enabled, bindings]"));
-        assert!(summary.contains("surgical_mode: enabled=false bindings=0"));
+        assert!(summary.contains("surgical_mode: enabled=false bindings=1"));
         assert!(summary.contains("scroll_mode: enabled=false bindings=0"));
         assert!(summary.contains("window_jump: enabled=true bindings=6"));
         assert!(summary.contains("warnings=1"));
