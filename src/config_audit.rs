@@ -249,7 +249,7 @@ fn audit_keybind_overlaps(parsed: &[ParsedKeyBinding], report: &mut ConfigAuditR
                 left
             };
             let message = format!(
-                "Key chord overlap: '{}' ({}) overlaps '{}' ({}); both may match a single event, and '{}' wins due to resolver specificity.",
+                "Key chord overlap: '{}' ({}) overlaps '{}' ({}); both may match a single event, and the more specific chord wins ('{}') due to resolver specificity.",
                 left.chord.display_label(),
                 left.action,
                 right.chord.display_label(),
