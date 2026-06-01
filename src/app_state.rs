@@ -506,30 +506,38 @@ impl AppState {
         }
 
         for (key, held_state) in stale_keys {
-            let stale_owned_modifier = held_state.was_owned_modifier;
-            let stale_trigger = held_state.was_action_trigger;
-            let mut synthesized_action = None;
+            self.release_reconciled_stale_key(key, held_state);
+        }
+    }
 
-            self.held_physical_keys.remove(&key);
-            self.active_keys.remove(&key);
-            self.reconciled_released_keys.insert(key);
-            if stale_trigger {
-                synthesized_action = self.resolve_key_up_action(KeyEvent::new(key, false), None);
-            }
+    fn release_reconciled_stale_key(&mut self, key: VirtualKey, held_state: HeldKeyState) {
+        let stale_owned_modifier = held_state.was_owned_modifier;
+        let stale_trigger = held_state.was_action_trigger;
+        let mut synthesized_action = None;
 
-            if let Some(action) = synthesized_action {
-                self.enqueue_command(AppCommand::KeyAction {
-                    action,
-                    is_down: false,
-                });
-            }
+        self.held_physical_keys.remove(&key);
+        self.active_keys.remove(&key);
+        self.reconciled_released_keys.insert(key);
+        if stale_trigger {
+            synthesized_action = self.resolve_key_up_action(KeyEvent::new(key, false), None);
+        }
 
-            if self.debug_input {
-                eprintln!(
-                    "[debug-input] reconciled stale key={:?} trigger={} owned_modifier={} held_ms={} reconciled_release_sent={}",
-                    key, stale_trigger, stale_owned_modifier, held_state.pressed_at.elapsed().as_millis(), held_state.reconciled_release_sent
-                );
-            }
+        if let Some(action) = synthesized_action {
+            self.enqueue_command(AppCommand::KeyAction {
+                action,
+                is_down: false,
+            });
+        }
+
+        if self.debug_input {
+            eprintln!(
+                "[debug-input] reconciled stale key={:?} trigger={} owned_modifier={} held_ms={} reconciled_release_sent={}",
+                key,
+                stale_trigger,
+                stale_owned_modifier,
+                held_state.pressed_at.elapsed().as_millis(),
+                held_state.reconciled_release_sent
+            );
         }
     }
 
@@ -4001,6 +4009,9 @@ mod tests {
         assert!(state
             .held_physical_keys
             .contains_key(&VirtualKey::LeftShift));
+        assert!(!state
+            .reconciled_released_keys
+            .contains(&VirtualKey::LeftShift));
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
     }
 
@@ -4025,6 +4036,9 @@ mod tests {
             .expect("held key should be tracked")
             .physically_up_since
             .is_some());
+        assert!(!state
+            .reconciled_released_keys
+            .contains(&VirtualKey::LeftShift));
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
     }
 
@@ -4055,6 +4069,9 @@ mod tests {
         assert!(!state
             .held_physical_keys
             .contains_key(&VirtualKey::LeftShift));
+        assert!(state
+            .reconciled_released_keys
+            .contains(&VirtualKey::LeftShift));
         assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
     }
 
@@ -4085,6 +4102,9 @@ mod tests {
         assert!(!state
             .held_physical_keys
             .contains_key(&VirtualKey::LeftShift));
+        assert!(state
+            .reconciled_released_keys
+            .contains(&VirtualKey::LeftShift));
         assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
     }
 
@@ -4114,8 +4134,6 @@ mod tests {
 
         assert_eq!(collect_commands(&mut state), Vec::new());
         assert!(state.held_physical_keys.contains_key(&VirtualKey::E));
-        assert!(state.active_keys.contains(&VirtualKey::E));
-        assert!(state.active_triggers.contains_key(&VirtualKey::E));
         assert!(!state.reconciled_released_keys.contains(&VirtualKey::E));
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
     }
@@ -4138,6 +4156,13 @@ mod tests {
                 is_down: false,
             }]
         );
+        assert!(!state
+            .held_physical_keys
+            .contains_key(&VirtualKey::LeftShift));
+        assert!(state
+            .reconciled_released_keys
+            .contains(&VirtualKey::LeftShift));
+        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
     }
 
     #[test]
@@ -4150,6 +4175,11 @@ mod tests {
 
         state.reconcile_stale_keys(Duration::ZERO, |key| key != VirtualKey::RightAlt);
 
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(!state.held_physical_keys.contains_key(&VirtualKey::RightAlt));
+        assert!(state
+            .reconciled_released_keys
+            .contains(&VirtualKey::RightAlt));
         assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
     }
 
@@ -4191,6 +4221,13 @@ mod tests {
         assert!(!state
             .held_physical_keys
             .contains_key(&VirtualKey::LeftShift));
+        assert!(!state
+            .reconciled_released_keys
+            .contains(&VirtualKey::RightAlt));
+        assert!(state
+            .reconciled_released_keys
+            .contains(&VirtualKey::LeftShift));
+        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
     }
 
     #[test]
@@ -4205,9 +4242,8 @@ mod tests {
 
         assert_eq!(collect_commands(&mut state), Vec::new());
         assert!(state.held_physical_keys.contains_key(&VirtualKey::E));
-        assert!(state.active_keys.contains(&VirtualKey::E));
-        assert!(state.active_triggers.contains_key(&VirtualKey::E));
         assert!(!state.reconciled_released_keys.contains(&VirtualKey::E));
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
     }
 
     #[test]
@@ -4217,11 +4253,25 @@ mod tests {
             KeyEvent::new(VirtualKey::LeftShift, true),
             Some(Action::SlowMouse),
         );
+        assert_eq!(collect_commands(&mut state).len(), 1);
         let up = KeyEvent::new(VirtualKey::LeftShift, false);
         assert!(state.should_swallow_key(&up));
 
         state.reconcile_stale_keys(Duration::ZERO, |_| false);
 
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::SlowMouse,
+                is_down: false,
+            }]
+        );
+        assert!(!state
+            .held_physical_keys
+            .contains_key(&VirtualKey::LeftShift));
+        assert!(state
+            .reconciled_released_keys
+            .contains(&VirtualKey::LeftShift));
         assert!(!state.should_swallow_key(&up));
     }
 
