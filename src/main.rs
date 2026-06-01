@@ -537,7 +537,7 @@ impl Default for InputConfig {
             swallow_owned_modifiers: true,
             modifier_reconcile_on_tick: true,
             modifier_reconcile_interval_ms: 50,
-            stuck_key_timeout_ms: 10_000,
+            stuck_key_timeout_ms: 500,
             debug_input: false,
             shift_can_modify_plain_movement: true,
             right_alt_suppresses_synthetic_ctrl: true,
@@ -2762,7 +2762,7 @@ fn should_run_modifier_reconcile(
         return false;
     }
     // Reconciliation cadence is controlled only by modifier_reconcile_interval_ms.
-    // stuck_key_timeout_ms is used by stale-key diagnostics/classification logic.
+    // stuck_key_timeout_ms is the stale-key release classification threshold.
     let cadence_ms = config.modifier_reconcile_interval_ms;
     elapsed_since_last_reconcile >= Duration::from_millis(cadence_ms)
 }
@@ -4874,10 +4874,10 @@ fn main() {
         loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
 
         if should_run_modifier_reconcile(&runtime_config.input, last_modifier_reconcile.elapsed()) {
-            APP_STATE
-                .write()
-                .unwrap()
-                .reconcile_stale_keys(|key| modifier_down(key.to_vk_code() as i32));
+            APP_STATE.write().unwrap().reconcile_stale_keys(
+                Duration::from_millis(runtime_config.input.stuck_key_timeout_ms),
+                |key| modifier_down(key.to_vk_code() as i32),
+            );
             last_modifier_reconcile = Instant::now();
             loop_diagnostics.add(process_queued_key_events(debug_diagnostics));
         }
@@ -5120,7 +5120,7 @@ mod tests {
             KeyEvent::new(VirtualKey::Left, true),
             Some(Action::MoveLeft),
         );
-        app_state.reconcile_stale_keys(|_| false);
+        app_state.reconcile_stale_keys(Duration::ZERO, |_| false);
         app_state.route_key_event(
             KeyEvent::new(VirtualKey::Right, true),
             Some(Action::MoveRight),
@@ -6711,9 +6711,9 @@ mod tests {
     }
 
     #[test]
-    fn input_config_default_uses_ten_second_stuck_timeout() {
+    fn input_config_default_uses_safer_stuck_timeout() {
         let config = parse_config("");
-        assert_eq!(config.input.stuck_key_timeout_ms, 10_000);
+        assert_eq!(config.input.stuck_key_timeout_ms, 500);
     }
 
     #[test]
@@ -8424,7 +8424,7 @@ mod bookmark_runtime_logic_tests {
     }
 
     #[test]
-    fn bug_alt_stuck_reconcile_interval_not_gated_by_stuck_timeout() {
+    fn modifier_reconcile_interval_is_independent_from_timeout() {
         let mut input = InputConfig::default();
         input.modifier_reconcile_on_tick = true;
         input.modifier_reconcile_interval_ms = 50;

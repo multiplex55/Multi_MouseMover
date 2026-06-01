@@ -12,6 +12,7 @@ use crate::keyboard::{OwnedModifierKeys, VirtualKey};
 use crate::Config;
 use crate::JumpConfig;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyEvent {
@@ -352,14 +353,17 @@ impl AppState {
         self.debug_input = enabled;
     }
 
-    pub fn reconcile_stale_keys<F>(&mut self, mut is_key_physically_down: F)
+    pub fn reconcile_stale_keys<F>(&mut self, stale_after: Duration, mut is_key_physically_down: F)
     where
         F: FnMut(VirtualKey) -> bool,
     {
         let stale_keys: Vec<(VirtualKey, HeldKeyState)> = self
             .held_physical_keys
             .iter()
-            .filter_map(|(key, state)| (!is_key_physically_down(*key)).then_some((*key, *state)))
+            .filter_map(|(key, state)| {
+                (!is_key_physically_down(*key) && state.pressed_at.elapsed() >= stale_after)
+                    .then_some((*key, *state))
+            })
             .collect();
 
         for (key, held_state) in stale_keys {
@@ -3611,13 +3615,69 @@ mod tests {
         }
     }
 
+    fn age_held_key(state: &mut AppState, key: VirtualKey, age: Duration) {
+        let held_state = state
+            .held_physical_keys
+            .get_mut(&key)
+            .expect("held key should be tracked");
+        held_state.pressed_at = std::time::Instant::now() - age;
+    }
+
+    #[test]
+    fn reconcile_does_not_release_before_timeout() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        assert_eq!(collect_commands(&mut state).len(), 1);
+        age_held_key(&mut state, VirtualKey::E, Duration::from_millis(100));
+
+        state.reconcile_stale_keys(Duration::from_secs(60), |_| false);
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(state.held_physical_keys.contains_key(&VirtualKey::E));
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
+    }
+
+    #[test]
+    fn reconcile_releases_after_timeout() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        assert_eq!(collect_commands(&mut state).len(), 1);
+        age_held_key(&mut state, VirtualKey::E, Duration::from_millis(500));
+
+        state.reconcile_stale_keys(Duration::from_millis(500), |_| false);
+
+        assert_eq!(
+            collect_commands(&mut state),
+            vec![AppCommand::KeyAction {
+                action: Action::MoveUp,
+                is_down: false,
+            }]
+        );
+        assert!(!state.held_physical_keys.contains_key(&VirtualKey::E));
+        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
+    }
+
+    #[test]
+    fn panic_reset_ignores_stuck_timeout() {
+        let mut state = state_with_bound_key(VirtualKey::E);
+        state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
+        assert_eq!(collect_commands(&mut state).len(), 1);
+
+        state.clear_runtime_input_state();
+
+        assert_eq!(state.held_physical_key_count(), 0);
+        assert_eq!(state.reconciled_released_key_count(), 0);
+        assert!(!state.has_active_action_keys());
+        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
+    }
+
     #[test]
     fn reconcile_releases_stale_move_trigger() {
         let mut state = state_with_bound_key(VirtualKey::E);
         state.route_key_event(KeyEvent::new(VirtualKey::E, true), Some(Action::MoveUp));
         assert_eq!(collect_commands(&mut state).len(), 1);
 
-        state.reconcile_stale_keys(|_| false);
+        state.reconcile_stale_keys(Duration::ZERO, |_| false);
 
         assert_eq!(
             collect_commands(&mut state),
@@ -3637,7 +3697,7 @@ mod tests {
         );
         assert_eq!(collect_commands(&mut state).len(), 1);
 
-        state.reconcile_stale_keys(|_| false);
+        state.reconcile_stale_keys(Duration::ZERO, |_| false);
 
         assert_eq!(
             collect_commands(&mut state),
@@ -3656,7 +3716,7 @@ mod tests {
         state.route_key_event(KeyEvent::new(VirtualKey::A, true), Some(Action::MoveLeft));
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
 
-        state.reconcile_stale_keys(|key| key != VirtualKey::RightAlt);
+        state.reconcile_stale_keys(Duration::ZERO, |key| key != VirtualKey::RightAlt);
 
         assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
     }
@@ -3677,7 +3737,7 @@ mod tests {
         state.route_key_event(KeyEvent::new(VirtualKey::W, true), Some(Action::MoveDown));
         let _ = collect_commands(&mut state);
 
-        state.reconcile_stale_keys(|key| key == VirtualKey::W);
+        state.reconcile_stale_keys(Duration::ZERO, |key| key == VirtualKey::W);
 
         let cmds = collect_commands(&mut state);
         assert_eq!(cmds.len(), 1);
@@ -3698,7 +3758,7 @@ mod tests {
         let up = KeyEvent::new(VirtualKey::E, false);
         assert!(state.should_swallow_key(&up));
 
-        state.reconcile_stale_keys(|_| false);
+        state.reconcile_stale_keys(Duration::ZERO, |_| false);
 
         assert!(!state.should_swallow_key(&up));
     }
@@ -3798,7 +3858,7 @@ mod tests {
         );
 
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
-        state.reconcile_stale_keys(|key| key != VirtualKey::RightAlt);
+        state.reconcile_stale_keys(Duration::ZERO, |key| key != VirtualKey::RightAlt);
         assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
         assert_eq!(collect_commands(&mut state), Vec::new());
     }
