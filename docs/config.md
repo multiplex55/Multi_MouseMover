@@ -590,6 +590,98 @@ list_tooltip_duration_ms = 1200
 `SurgicalMode` is a **held precision modifier**: movement requires both the surgical key and a movement key. Holding surgical alone produces no cursor movement. While active, movement runs at fixed `surgical_mode.speed_px` with no acceleration ramp.
 
 
+
+## Keybind audit report examples
+
+Startup config auditing now builds a structured keybind audit report in addition to the existing warning text. Each issue records severity, chord display, action id/name, an operator-facing message, a suggested fix, and (when resolution order matters) the winning chord/action. Typical warnings and fixes include:
+
+### Duplicate exact chords
+
+```toml
+key_bindings = [
+  ["I", "wheel_left"],
+  ["I", "wheel_speed_down"],
+]
+```
+
+Warning: `I` appears more than once, and the later `key_bindings` entry wins. Recommended fix: keep only one action on `I`, or move one action to a unique chord.
+
+### Generic and side-specific modifier overlap
+
+```toml
+key_bindings = [
+  ["Alt+E", "step_move_up"],
+  ["RightAlt+E", "move_to_top_edge"],
+]
+```
+
+Warning: both chords can match a right-Alt key event. The resolver uses `KeyChord::specificity()`, so the side-specific `RightAlt+E` binding wins over generic `Alt+E`. Recommended fix: avoid mixing generic and side-specific modifier families on the same key unless that winner is intentional.
+
+### System binding reused as an action binding
+
+```toml
+[system_bindings]
+exit = "Ctrl+Escape"
+
+key_bindings = [
+  ["Ctrl+Escape", "disable"],
+]
+```
+
+Warning: system routing runs before action dispatch, so `system_bindings.exit` wins and the `disable` action is not reached. Recommended fix: give either the system binding or action binding a unique chord.
+
+### Reserved Windows/app shortcuts
+
+```toml
+key_bindings = [
+  ["Alt+Tab", "jump_mode"],
+  ["Ctrl+W", "disable"],
+]
+```
+
+Warning: preserved shortcuts such as Win shortcuts, `Alt+Tab`, `Alt+F4`, and common `Ctrl+letter` app shortcuts are risky because they are expected to pass through to Windows or the foreground app unless deliberately configured as system bindings. Recommended fix: choose a non-reserved chord.
+
+### AltGr ambiguity
+
+```toml
+key_bindings = [
+  ["RightAlt+E", "move_to_top_edge"],
+  ["Ctrl+Alt+E", "step_move_small_up"],
+]
+```
+
+Warning: some layouts report AltGr as `RightAlt+Ctrl`, making `RightAlt` and `Ctrl+Alt` chords ambiguous while typing. Recommended fix: avoid AltGr-adjacent chords for text-heavy workflows, or use explicit side requirements that do not compete with AltGr input.
+
+### Plain binding shadowed by shift relaxation
+
+```toml
+key_bindings = [
+  ["E", "move_up"],
+  ["Shift+E", "step_move_large_up"],
+]
+```
+
+Warning: when `input.shift_can_modify_plain_movement` is enabled, the plain `E` binding can match shifted movement as a fallback, but an explicit `Shift+E` binding wins first. Recommended fix: keep the explicit shifted action if that is intended, or move one binding if shifted keypresses should never share the plain action.
+
+### Binding uses an owned modifier key
+
+```toml
+key_bindings = [
+  ["LeftShift", "slow_mouse"],
+]
+```
+
+Warning: modifier-key triggers are supported, but they are also part of owned-modifier swallowing. Recommended fix: verify `input.swallow_owned_modifiers` behavior, or choose a non-modifier trigger when you need the key event to reach other applications.
+
+### Help overlay limit
+
+```toml
+[tooltip_overlay]
+help_max_bindings = 20
+```
+
+Warning: when the visible binding count exceeds `tooltip_overlay.help_max_bindings`, the help overlay hides the remaining bindings. Recommended fix: raise `tooltip_overlay.help_max_bindings` (or use paged help when available) so important bindings remain discoverable.
+
 ## Manual smoke-test checklist
 
 Use this checklist after changing key routing, modifier handling, or panic-reset behavior:

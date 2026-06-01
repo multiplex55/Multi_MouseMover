@@ -762,6 +762,48 @@ pub fn is_injected_keyboard_hook_flags(flags: u32) -> bool {
     flags & (LLKHF_INJECTED_BITS | LLKHF_LOWER_IL_INJECTED_BITS) != 0
 }
 
+/// Returns a short description when a chord is also a preserved Windows/app shortcut.
+pub fn preserved_shortcut_risk_for_chord(chord: &KeyChord) -> Option<&'static str> {
+    if chord.modifiers.win != crate::key_chord::ModifierSideRequirement::NotRequired {
+        return Some("Win shortcuts are reserved by Windows or the foreground app");
+    }
+
+    if chord.modifiers.ctrl != crate::key_chord::ModifierSideRequirement::NotRequired
+        && chord.modifiers.alt == crate::key_chord::ModifierSideRequirement::NotRequired
+        && chord.modifiers.shift == crate::key_chord::ModifierSideRequirement::NotRequired
+        && chord.modifiers.win == crate::key_chord::ModifierSideRequirement::NotRequired
+        && matches!(
+            chord.key,
+            VirtualKey::A
+                | VirtualKey::C
+                | VirtualKey::F
+                | VirtualKey::N
+                | VirtualKey::O
+                | VirtualKey::P
+                | VirtualKey::S
+                | VirtualKey::T
+                | VirtualKey::V
+                | VirtualKey::W
+                | VirtualKey::X
+                | VirtualKey::Y
+                | VirtualKey::Z
+        )
+    {
+        return Some("Ctrl+letter shortcuts are preserved for the foreground app");
+    }
+
+    if chord.modifiers.alt != crate::key_chord::ModifierSideRequirement::NotRequired
+        && chord.modifiers.ctrl == crate::key_chord::ModifierSideRequirement::NotRequired
+        && chord.modifiers.shift == crate::key_chord::ModifierSideRequirement::NotRequired
+        && chord.modifiers.win == crate::key_chord::ModifierSideRequirement::NotRequired
+        && matches!(chord.key, VirtualKey::F4 | VirtualKey::Tab)
+    {
+        return Some("Alt+Tab and Alt+F4 are preserved Windows shortcuts");
+    }
+
+    None
+}
+
 /// Struct for managing keybindings
 #[derive(Debug)]
 pub struct KeyBindings {
