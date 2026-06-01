@@ -1,5 +1,5 @@
 use crate::action::Action;
-use crate::app_state::KeyEvent;
+use crate::app_state::{KeyEvent, KeybindLookupResult};
 use crate::key_chord::KeyChord;
 use std::collections::HashSet;
 use std::mem::size_of;
@@ -816,6 +816,12 @@ pub struct ResolvedBinding {
     pub action: Action,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindingCandidate {
+    pub chord: KeyChord,
+    pub action: Action,
+}
+
 impl KeyBindings {
     /// Create a new KeyBindings instance
     pub fn new() -> Self {
@@ -860,31 +866,45 @@ impl KeyBindings {
         event: &KeyEvent,
         shift_can_modify_plain_movement: bool,
     ) -> Option<ResolvedBinding> {
-        if !event.is_down {
-            return None;
-        }
-
-        if let Some(resolved) = self.resolve_best_match(|chord| chord.matches_event(event)) {
-            return Some(resolved);
-        }
-
-        if !shift_can_modify_plain_movement {
-            return None;
-        }
-
-        self.resolve_best_match(|chord| chord.matches_event_allowing_shift_modifier(event))
+        self.resolve_candidates_for_key_down_event(event, shift_can_modify_plain_movement)
+            .into_iter()
+            .next()
+            .map(|candidate| ResolvedBinding {
+                chord: candidate.chord,
+                action: candidate.action,
+            })
     }
 
-    fn resolve_best_match(&self, matcher: impl Fn(&KeyChord) -> bool) -> Option<ResolvedBinding> {
-        self.bindings
+    pub fn resolve_candidates_for_key_down_event(
+        &self,
+        event: &KeyEvent,
+        shift_can_modify_plain_movement: bool,
+    ) -> Vec<BindingCandidate> {
+        if !event.is_down {
+            return Vec::new();
+        }
+
+        let exact = self.matching_candidates(|chord| chord.matches_event(event));
+        if !exact.is_empty() || !shift_can_modify_plain_movement {
+            return exact;
+        }
+
+        self.matching_candidates(|chord| chord.matches_event_allowing_shift_modifier(event))
+    }
+
+    fn matching_candidates(&self, matcher: impl Fn(&KeyChord) -> bool) -> Vec<BindingCandidate> {
+        let mut candidates: Vec<_> = self
+            .bindings
             .iter()
             .enumerate()
             .filter(|(_, (chord, _))| matcher(chord))
-            .max_by_key(|(idx, (chord, _))| (chord.specificity(), std::cmp::Reverse(*idx)))
-            .map(|(_, (chord, action))| ResolvedBinding {
-                chord: *chord,
-                action: action.clone(),
-            })
+            .map(|(idx, (chord, action))| (idx, *chord, action.clone()))
+            .collect();
+        candidates.sort_by_key(|(idx, chord, _)| (std::cmp::Reverse(chord.specificity()), *idx));
+        candidates
+            .into_iter()
+            .map(|(_, chord, action)| BindingCandidate { chord, action })
+            .collect()
     }
 
     pub fn get_action_for_event(
@@ -894,6 +914,15 @@ impl KeyBindings {
     ) -> Option<Action> {
         self.resolve_for_key_down_event(event, shift_can_modify_plain_movement)
             .map(|resolved| resolved.action)
+    }
+
+    pub fn lookup_keybind_event(
+        &self,
+        event: &KeyEvent,
+        shift_can_modify_plain_movement: bool,
+        app_state: &crate::app_state::AppState,
+    ) -> KeybindLookupResult {
+        app_state.resolve_keybind_lookup(event, self, shift_can_modify_plain_movement)
     }
 
     pub fn bound_chords(&self) -> impl Iterator<Item = KeyChord> + '_ {
@@ -966,6 +995,113 @@ mod tests {
             self.events.push(event);
             Ok(())
         }
+    }
+
+    fn ctrl_event(key: VirtualKey) -> KeyEvent {
+        let mut event = KeyEvent::new(key, true);
+        event.ctrl_down = true;
+        event.left_ctrl_down = true;
+        event
+    }
+
+    fn alt_event(key: VirtualKey) -> KeyEvent {
+        let mut event = KeyEvent::new(key, true);
+        event.alt_down = true;
+        event.left_alt_down = true;
+        event
+    }
+
+    fn right_alt_event(key: VirtualKey) -> KeyEvent {
+        let mut event = KeyEvent::new(key, true);
+        event.alt_down = true;
+        event.right_alt_down = true;
+        event
+    }
+
+    #[test]
+    fn lookup_reports_unbound_ctrl_w_passthrough() {
+        let bindings = KeyBindings::new();
+        let app_state = crate::app_state::AppState::default();
+
+        let result = bindings.lookup_keybind_event(&ctrl_event(VirtualKey::W), true, &app_state);
+
+        assert_eq!(result.chord_display, "LeftCtrl+W");
+        assert_eq!(result.matched_action, None);
+        assert!(!result.swallowed);
+        assert!(result.preserved_shortcut);
+        assert!(result.explanation.contains("preserved"));
+    }
+
+    #[test]
+    fn lookup_reports_rightalt_binding_wins_over_alt_binding() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("Alt+E").unwrap(), Action::MoveUp);
+        bindings.add_chord_binding(
+            KeyChord::parse("RightAlt+E").unwrap(),
+            Action::MoveToTopEdge,
+        );
+        let app_state = crate::app_state::AppState::default();
+
+        let result =
+            bindings.lookup_keybind_event(&right_alt_event(VirtualKey::E), true, &app_state);
+
+        assert_eq!(result.matched_action, Some(Action::MoveToTopEdge));
+        assert_eq!(
+            result.matched_binding.map(|chord| chord.display_label()),
+            Some("RightAlt+E".to_string())
+        );
+        assert!(result.swallowed);
+        assert_eq!(result.competing_bindings.len(), 1);
+        assert_eq!(result.competing_bindings[0].action, Action::MoveUp);
+        assert!(result.explanation.contains("wins over 1 competing"));
+    }
+
+    #[test]
+    fn lookup_reports_system_binding() {
+        let bindings = KeyBindings::new();
+        let app_state = crate::app_state::AppState::default();
+
+        let result = bindings.lookup_keybind_event(&ctrl_event(VirtualKey::Q), true, &app_state);
+
+        assert_eq!(result.matched_action, None);
+        assert_eq!(
+            result.matched_binding.map(|chord| chord.display_label()),
+            Some("Ctrl+Q".to_string())
+        );
+        assert!(result.swallowed);
+        assert!(result.explanation.contains("system binding toggle_active"));
+    }
+
+    #[test]
+    fn lookup_reports_action_binding_only_active_when_enabled() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("Alt+E").unwrap(), Action::MoveUp);
+        let mut app_state = crate::app_state::AppState::default();
+        app_state.set_active_mode(false);
+
+        let result = bindings.lookup_keybind_event(&alt_event(VirtualKey::E), true, &app_state);
+
+        assert_eq!(result.matched_action, Some(Action::MoveUp));
+        assert!(!result.swallowed);
+        assert!(result.explanation.contains("active mode is disabled"));
+    }
+
+    #[test]
+    fn lookup_reports_competing_bindings() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding(KeyChord::parse("Alt+E").unwrap(), Action::MoveUp);
+        bindings.add_chord_binding(
+            KeyChord::parse("RightAlt+E").unwrap(),
+            Action::MoveToTopEdge,
+        );
+        let app_state = crate::app_state::AppState::default();
+
+        let result =
+            bindings.lookup_keybind_event(&right_alt_event(VirtualKey::E), true, &app_state);
+
+        assert_eq!(result.competing_bindings.len(), 1);
+        assert_eq!(result.competing_bindings[0].chord.display_label(), "Alt+E");
+        assert_eq!(result.competing_bindings[0].action, Action::MoveUp);
     }
 
     #[test]

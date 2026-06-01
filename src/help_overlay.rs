@@ -1262,6 +1262,7 @@ fn action_description(action: &Action) -> String {
         Action::HelpMode | Action::ShowHelp => {
             "Open or close this searchable help overlay".to_string()
         }
+        Action::KeybindLookupMode => "Inspect the next key chord routing decision".to_string(),
         Action::StepMove { .. } => "Move once by the configured step size".to_string(),
         _ => format_action(action),
     }
@@ -1329,6 +1330,7 @@ fn format_action(action: &Action) -> String {
         Action::HelpNextPage => "Help next page".to_string(),
         Action::HelpPreviousPage => "Help previous page".to_string(),
         Action::UiHintMode => "UI Hints".to_string(),
+        Action::KeybindLookupMode => "Keybind lookup".to_string(),
         Action::BookmarkMode => "Bookmark mode".to_string(),
         Action::ShowBookmarks => "Show bookmark list".to_string(),
         Action::BookmarkSlot(slot) => format!("Jump to bookmark slot {slot}"),
@@ -1411,7 +1413,8 @@ fn action_section(action: &Action) -> HelpBindingSection {
         | Action::ReloadConfig
         | Action::PanicReset
         | Action::Disable
-        | Action::ShowHelp => HelpBindingSection::ProfilesRuntime,
+        | Action::ShowHelp
+        | Action::KeybindLookupMode => HelpBindingSection::ProfilesRuntime,
         Action::HelpMode
         | Action::HelpSearch
         | Action::HelpNextSection

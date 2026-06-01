@@ -225,6 +225,11 @@ Limitations and caveats:
 
 `[tooltip_overlay]` controls temporary explanatory messages and the larger help panel toggled by `/`. Temporary tooltips are short-lived notices for runtime changes such as mouse speed, wheel speed, profile changes, drag, reload, and panic reset. The help panel does not auto-expire; it shows current runtime stats plus configured keybinds until `/` toggles it again, Escape dismisses it, or the app enters an exclusive mode such as jump.
 
+
+### Keybind lookup
+
+Press `RightAlt+/` (or bind `keybind_lookup_mode` to another chord) to enter keybind lookup mode. The next key-down is swallowed and shown in the help/tooltip overlay with the matched action or system binding, competing bindings, preserved-shortcut status, and an explanation of the routing decision. This uses the same chord specificity as runtime dispatch, so side-specific bindings such as `RightAlt+E` are reported as winning over generic `Alt+E`.
+
 Use `enabled = false` to disable all tooltip/help overlay rendering, `show_temporary_tooltips = false` to keep `/` help while hiding short runtime notices, and `show_help = false` to keep runtime notices while disabling the help panel. Individual temporary trigger classes can be controlled under `[tooltip_overlay.events]`:
 
 ```toml

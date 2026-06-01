@@ -603,6 +603,7 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("Alt+Shift+D", "step_move_large_down"),
         ("Alt+Shift+F", "step_move_large_right"),
         ("/", "show_help"),
+        ("RightAlt+/", "keybind_lookup_mode"),
         ("0", "ui_hint_mode"),
         ("B", "bookmark_mode"),
         ("1", "bookmark_slot_1"),
@@ -2907,6 +2908,31 @@ fn routing_action_label(event: &KeyEvent, action: Option<Action>) -> String {
     }
 }
 
+fn format_keybind_lookup_result(result: &app_state::KeybindLookupResult) -> String {
+    let matched = match (&result.matched_binding, &result.matched_action) {
+        (Some(chord), Some(action)) => format!("Matched: {} -> {action:?}", chord.display_label()),
+        (Some(chord), None) => format!("Matched system binding: {}", chord.display_label()),
+        (None, _) => "Matched: <none>".to_string(),
+    };
+    let competing = if result.competing_bindings.is_empty() {
+        "Competing: none".to_string()
+    } else {
+        format!(
+            "Competing: {}",
+            result
+                .competing_bindings
+                .iter()
+                .map(|binding| format!("{} -> {:?}", binding.chord.display_label(), binding.action))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    format!(
+        "{matched}\nSwallowed: {}\nPreserved shortcut: {}\n{competing}\n{}",
+        result.swallowed, result.preserved_shortcut, result.explanation
+    )
+}
+
 fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
     let mut diagnostics = LoopDiagnostics::default();
 
@@ -3630,6 +3656,10 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             AppCommand::EnterUiHintMode { activation_key } => {
                 println!("[command] EnterUiHintMode activation_key={activation_key:?}")
             }
+            AppCommand::EnterKeybindLookupMode => println!("[command] EnterKeybindLookupMode"),
+            AppCommand::KeybindLookupInput(event) => {
+                println!("[command] KeybindLookupInput key={:?}", event.key)
+            }
             AppCommand::KeyAction { action, is_down } => {
                 println!(
                     "[command] KeyAction action={action:?} state={}",
@@ -3845,6 +3875,30 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if let Some(view) = view {
                 show_jump_overlay(view);
             }
+        }
+        AppCommand::EnterKeybindLookupMode => {
+            APP_STATE.write().unwrap().enter_keybind_lookup_mode();
+            help_overlay::show_temporary_tooltip(
+                "Keybind lookup",
+                "Press the chord to inspect. The next key-down will be swallowed and explained.",
+                Duration::from_secs(10),
+            );
+        }
+        AppCommand::KeybindLookupInput(event) => {
+            let shift_can_modify_plain_movement = *SHIFT_CAN_MODIFY_PLAIN_MOVEMENT.read().unwrap();
+            let result = {
+                let app_state = APP_STATE.read().unwrap();
+                KEY_ACTIONS.read().unwrap().lookup_keybind_event(
+                    &event,
+                    shift_can_modify_plain_movement,
+                    &app_state,
+                )
+            };
+            help_overlay::show_temporary_tooltip(
+                format!("Lookup: {}", result.chord_display),
+                format_keybind_lookup_result(&result),
+                Duration::from_secs(10),
+            );
         }
         AppCommand::EnterUiHintMode { activation_key } => {
             let config = ACTION_HANDLER

@@ -120,6 +120,7 @@ key_bindings = [
   ["Alt+Shift+D", "step_move_large_down"],
   ["Alt+Shift+F", "step_move_large_right"],
   ["/", "show_help"],
+  ["RightAlt+/", "keybind_lookup_mode"],
   ["0", "ui_hint_mode"],
   ["B", "bookmark_mode"],
   ["1", "bookmark_slot_1"],
@@ -690,6 +691,10 @@ show_mode_specific_sections = true
 ```
 
 Help opens from the configured `show_help` binding (default `/`). While help is visible, input is routed to the overlay first: `/` focuses/continues search, normal text edits the filter, `Backspace` removes filter text, `Tab` and `Shift+Tab` change section, `PageDown` and `PageUp` move between pages, and `Escape` closes help. Configured help actions (`help_search`, `help_next_section`, `help_previous_section`, `help_next_page`, and `help_previous_page`) can also drive the same controls.
+
+### Keybind lookup mode
+
+Bind `keybind_lookup_mode` (default `RightAlt+/`) to inspect how the next pressed chord routes. The lookup prompt swallows the next key-down event, resolves the same `KeyChord` specificity rules used by normal dispatch, and shows the matched action/system binding, whether the event would be swallowed, whether it is a preserved shortcut, any competing lower-priority bindings, and a short explanation. This is useful for confirming cases such as `RightAlt+E` winning over generic `Alt+E`.
 
 Interactive help is paged rather than truncated: every filtered binding remains reachable by changing pages. `show_conflicts` displays shadow/overlap warnings found by config audit, and `show_unbound_actions` lists known actions that currently do not have a key binding.
 
