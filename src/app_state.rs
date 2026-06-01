@@ -7,7 +7,9 @@ use crate::jump_view::{
     FinalAdjustOverlayView, GridOverlayMetadata, JumpOverlayView, JumpStageMetadata, JumpVisuals,
 };
 use crate::key_chord::{KeyChord, RuntimeSystemBindings};
-use crate::keyboard::{OwnedModifierKeys, VirtualKey};
+use crate::keyboard::{
+    preserved_shortcut_risk_for_chord, BindingCandidate, KeyBindings, OwnedModifierKeys, VirtualKey,
+};
 #[cfg(test)]
 use crate::Config;
 use crate::JumpConfig;
@@ -105,6 +107,8 @@ pub enum AppCommand {
     JumpInput(KeyEvent, Option<Action>),
     GridInput(KeyEvent, Option<Action>),
     UiHintInput(KeyEvent),
+    EnterKeybindLookupMode,
+    KeybindLookupInput(KeyEvent),
     EnterBookmarkMode {
         activation_key: VirtualKey,
     },
@@ -144,6 +148,7 @@ pub struct AppState {
     grid: GridState,
     ui_hints: UiHintState,
     bookmark_mode: BookmarkModeState,
+    keybind_lookup: KeybindLookupState,
     active_mode: bool,
     preserve_global_shortcuts: bool,
     right_alt_suppresses_synthetic_ctrl: bool,
@@ -185,6 +190,29 @@ pub enum UiHintState {
         query_id: u64,
         foreground_hwnd: isize,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeybindLookupState {
+    Inactive,
+    WaitingForChord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeybindLookupResult {
+    pub chord_display: String,
+    pub matched_action: Option<Action>,
+    pub matched_binding: Option<KeyChord>,
+    pub swallowed: bool,
+    pub preserved_shortcut: bool,
+    pub competing_bindings: Vec<KeybindLookupBinding>,
+    pub explanation: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeybindLookupBinding {
+    pub chord: KeyChord,
+    pub action: Action,
 }
 
 #[derive(Debug)]
@@ -380,6 +408,7 @@ impl Default for AppState {
             grid: GridState::Inactive,
             ui_hints: UiHintState::Inactive,
             bookmark_mode: BookmarkModeState::Inactive,
+            keybind_lookup: KeybindLookupState::Inactive,
             active_mode: true,
             preserve_global_shortcuts: true,
             right_alt_suppresses_synthetic_ctrl: true,
@@ -508,6 +537,7 @@ impl AppState {
         self.exit_grid_mode();
         self.exit_ui_hint_mode();
         self.exit_bookmark_mode();
+        self.exit_keybind_lookup_mode();
     }
 
     pub fn clear_runtime_input_state(&mut self) {
@@ -675,10 +705,28 @@ impl AppState {
             || self.is_ui_hint_active()
             || self.is_ui_hint_querying()
             || self.is_bookmark_mode_active()
+            || self.is_keybind_lookup_waiting()
     }
 
     pub fn is_bookmark_mode_active(&self) -> bool {
         matches!(self.bookmark_mode, BookmarkModeState::Active { .. })
+    }
+
+    pub fn is_keybind_lookup_waiting(&self) -> bool {
+        matches!(self.keybind_lookup, KeybindLookupState::WaitingForChord)
+    }
+
+    pub fn enter_keybind_lookup_mode(&mut self) {
+        self.clear_active_action_keys();
+        self.exit_jump_mode();
+        self.exit_grid_mode();
+        self.exit_ui_hint_mode();
+        self.exit_bookmark_mode();
+        self.keybind_lookup = KeybindLookupState::WaitingForChord;
+    }
+
+    pub fn exit_keybind_lookup_mode(&mut self) {
+        self.keybind_lookup = KeybindLookupState::Inactive;
     }
 
     pub fn enter_bookmark_mode(&mut self, activation_key: VirtualKey) {
@@ -1135,6 +1183,13 @@ impl AppState {
             self.enqueue_command(AppCommand::PanicReset);
             return;
         }
+        if self.is_keybind_lookup_waiting() {
+            if event.is_down {
+                self.exit_keybind_lookup_mode();
+                self.enqueue_command(AppCommand::KeybindLookupInput(event));
+            }
+            return;
+        }
         if self.help_visible && event.is_down {
             if let Some(input) = help_input_from_event(&event, action.as_ref()) {
                 match input {
@@ -1286,6 +1341,11 @@ impl AppState {
             self.active_keys.remove(&event.key);
             self.held_physical_keys.remove(&event.key);
             action = self.resolve_key_up_action(event, action);
+        }
+
+        if event.is_down && matches!(action.as_ref(), Some(Action::KeybindLookupMode)) {
+            self.enqueue_command(AppCommand::EnterKeybindLookupMode);
+            return;
         }
 
         if event.is_down && matches!(action.as_ref(), Some(Action::ShowHelp)) {
@@ -1519,6 +1579,177 @@ impl AppState {
 
     pub fn set_right_alt_suppresses_synthetic_ctrl(&mut self, enabled: bool) {
         self.right_alt_suppresses_synthetic_ctrl = enabled;
+    }
+
+    pub fn resolve_keybind_lookup(
+        &self,
+        event: &KeyEvent,
+        bindings: &KeyBindings,
+        shift_can_modify_plain_movement: bool,
+    ) -> KeybindLookupResult {
+        let normalized = self.with_effective_ctrl_state(event);
+        let chord_display = lookup_chord_display(&normalized);
+        let system_binding = self.lookup_system_binding(&normalized);
+        let candidates = bindings
+            .resolve_candidates_for_key_down_event(&normalized, shift_can_modify_plain_movement);
+        let winning_action_binding = candidates.first().cloned();
+        let competing_bindings: Vec<KeybindLookupBinding> = candidates
+            .iter()
+            .skip(1)
+            .map(|candidate| KeybindLookupBinding {
+                chord: candidate.chord,
+                action: candidate.action.clone(),
+            })
+            .collect();
+
+        let preserved_shortcut = self.preserve_global_shortcuts
+            && preserved_shortcut_risk_for_chord(&event_chord_for_lookup(&normalized)).is_some();
+
+        let (matched_action, matched_binding, swallowed, explanation) = if let Some((name, chord)) =
+            system_binding
+        {
+            let explanation = format!(
+                "{chord_display} matches system binding {name} ({}), so system routing wins before action dispatch and the key is swallowed.",
+                chord.display_label()
+            );
+            (None, Some(chord), true, explanation)
+        } else if let Some(BindingCandidate { chord, action }) = winning_action_binding {
+            let specificity_note = if competing_bindings.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " It wins over {} competing binding(s) by KeyChord specificity/order.",
+                    competing_bindings.len()
+                )
+            };
+            if self.active_mode {
+                let explanation = format!(
+                    "{chord_display} resolves to action {action:?} via binding {} while active mode is enabled, so the event is swallowed and dispatched.{specificity_note}",
+                    chord.display_label()
+                );
+                (Some(action.clone()), Some(chord), true, explanation)
+            } else {
+                let explanation = format!(
+                    "{chord_display} has action binding {} -> {action:?}, but active mode is disabled, so action bindings are inactive and the key passes through.",
+                    chord.display_label()
+                );
+                (Some(action.clone()), Some(chord), false, explanation)
+            }
+        } else if self.active_mode && preserved_shortcut {
+            let explanation = format!(
+                "{chord_display} is a preserved Windows/app shortcut and no explicit action binding matched, so it passes through."
+            );
+            (None, None, false, explanation)
+        } else if self.active_mode {
+            let explanation = format!(
+                "{chord_display} is unbound in active mode and is not a system binding, so it passes through."
+            );
+            (None, None, false, explanation)
+        } else {
+            let explanation = format!(
+                "{chord_display} was looked up while active mode is disabled; no system binding matched, so it passes through."
+            );
+            (None, None, false, explanation)
+        };
+
+        KeybindLookupResult {
+            chord_display,
+            matched_action,
+            matched_binding,
+            swallowed,
+            preserved_shortcut,
+            competing_bindings,
+            explanation,
+        }
+    }
+
+    fn lookup_system_binding(&self, event: &KeyEvent) -> Option<(String, KeyChord)> {
+        if self.system_bindings.toggle_active.matches_event(event) {
+            return Some((
+                "toggle_active".to_string(),
+                self.system_bindings.toggle_active,
+            ));
+        }
+        let exit_matches = if self.system_bindings.exit_ignore_extra_modifiers {
+            self.system_bindings
+                .exit
+                .matches_event_ignoring_extra_modifiers(event)
+        } else {
+            self.system_bindings.exit.matches_event(event)
+        };
+        if exit_matches {
+            return Some(("exit".to_string(), self.system_bindings.exit));
+        }
+        let panic_matches = if self.system_bindings.panic_reset_ignore_extra_modifiers {
+            self.system_bindings
+                .panic_reset
+                .matches_event_ignoring_extra_modifiers(event)
+        } else {
+            self.system_bindings.panic_reset.matches_event(event)
+        };
+        panic_matches.then_some(("panic_reset".to_string(), self.system_bindings.panic_reset))
+    }
+}
+
+fn lookup_chord_display(event: &KeyEvent) -> String {
+    let mut parts = Vec::new();
+    if event.left_ctrl_down {
+        parts.push("LeftCtrl".to_string());
+    } else if event.right_ctrl_down {
+        parts.push("RightCtrl".to_string());
+    } else if event.ctrl_down {
+        parts.push("Ctrl".to_string());
+    }
+    if event.left_alt_down {
+        parts.push("LeftAlt".to_string());
+    } else if event.right_alt_down {
+        parts.push("RightAlt".to_string());
+    } else if event.alt_down {
+        parts.push("Alt".to_string());
+    }
+    if event.left_shift_down {
+        parts.push("LeftShift".to_string());
+    } else if event.right_shift_down {
+        parts.push("RightShift".to_string());
+    } else if event.shift_down {
+        parts.push("Shift".to_string());
+    }
+    if event.left_win_down {
+        parts.push("LeftWin".to_string());
+    } else if event.right_win_down {
+        parts.push("RightWin".to_string());
+    } else if event.win_down {
+        parts.push("Win".to_string());
+    }
+    parts.push(KeyChord::from_key(event.key).display_label());
+    parts.join("+")
+}
+
+fn event_chord_for_lookup(event: &KeyEvent) -> KeyChord {
+    use crate::key_chord::{ModifierRequirements, ModifierSideRequirement};
+    fn req(any: bool, left: bool, right: bool) -> ModifierSideRequirement {
+        if right {
+            ModifierSideRequirement::Right
+        } else if left {
+            ModifierSideRequirement::Left
+        } else if any {
+            ModifierSideRequirement::Any
+        } else {
+            ModifierSideRequirement::NotRequired
+        }
+    }
+    KeyChord {
+        key: event.key,
+        modifiers: ModifierRequirements::new(
+            req(event.ctrl_down, event.left_ctrl_down, event.right_ctrl_down),
+            req(event.alt_down, event.left_alt_down, event.right_alt_down),
+            req(
+                event.shift_down,
+                event.left_shift_down,
+                event.right_shift_down,
+            ),
+            req(event.win_down, event.left_win_down, event.right_win_down),
+        ),
     }
 }
 

@@ -84,6 +84,7 @@ pub enum Action {
     BookmarkSlot(u8),
     ClearBookmarkSlot(u8),
     ClearAllBookmarks,
+    KeybindLookupMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -209,6 +210,9 @@ impl Action {
             "navigate_forward" | "browser_forward" => Some(Self::NavigateForward),
             "disable" | "disable_app" | "idle_mode" => Some(Self::Disable),
             "show_help" | "help" | "toggle_help" | "hints" | "show_hints" => Some(Self::ShowHelp),
+            "keybind_lookup_mode" | "lookup_keybind" | "keybind_lookup" => {
+                Some(Self::KeybindLookupMode)
+            }
             "help_mode" => Some(Self::HelpMode),
             "help_search" => Some(Self::HelpSearch),
             "help_next_section" => Some(Self::HelpNextSection),
@@ -362,6 +366,7 @@ mod tests {
             ("navigate_forward", Action::NavigateForward),
             ("disable", Action::Disable),
             ("show_help", Action::ShowHelp),
+            ("keybind_lookup_mode", Action::KeybindLookupMode),
             ("ui_hint_mode", Action::UiHintMode),
             (
                 "step_move_up",
