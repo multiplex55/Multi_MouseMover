@@ -1919,8 +1919,12 @@ mod tests {
     }
 
     fn state_with_bound_key(key: VirtualKey) -> AppState {
+        state_with_bound_keys([key])
+    }
+
+    fn state_with_bound_keys(keys: impl IntoIterator<Item = VirtualKey>) -> AppState {
         let mut state = AppState::default();
-        state.set_bound_keys([key]);
+        state.set_bound_keys(keys);
         state
     }
 
@@ -4248,6 +4252,21 @@ mod tests {
         assert!(state.held_physical_keys.contains_key(&VirtualKey::E));
         assert!(!state.reconciled_released_keys.contains(&VirtualKey::E));
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::E, false)));
+    }
+
+    #[test]
+    fn diagonal_movement_keys_survive_modifier_reconcile() {
+        let mut state = state_with_bound_keys([VirtualKey::S, VirtualKey::D]);
+        state.route_key_event(KeyEvent::new(VirtualKey::S, true), Some(Action::MoveLeft));
+        state.route_key_event(KeyEvent::new(VirtualKey::D, true), Some(Action::MoveDown));
+        let _ = collect_commands(&mut state);
+
+        state.reconcile_stale_keys(Duration::ZERO, |_| false);
+
+        assert_eq!(collect_commands(&mut state), Vec::new());
+        assert!(state.held_physical_keys.contains_key(&VirtualKey::S));
+        assert!(state.held_physical_keys.contains_key(&VirtualKey::D));
+        assert!(state.has_active_action_keys());
     }
 
     #[test]
