@@ -51,7 +51,7 @@ key_bindings = [
 # ["O", "wheel_right"]
 # ["Z", "mouse_speed_reset"]
 # ["RightAlt+F", "jump_mode_profile:precise"]
-# ["RightAlt+W", "jump_mode_profile.window"]
+# ["RightAlt+3", "jump_mode_profile.window"]
 # ["RightAlt+1", "movement_profile:precision"]
 # ["RightAlt+2", "wheel_profile:fast"]
 # ["Backspace+1", "clear_bookmark_1"]

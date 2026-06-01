@@ -27,56 +27,51 @@ System bindings are always available, even while the app is idle:
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+E` / `Ctrl+Q` | Toggle active/idle mode (depends on checked-in config) |
-| `Escape` | Exit |
+| `Ctrl+Q` | Toggle active/idle mode |
+| `Ctrl+Escape` | Exit |
+| `RightAlt+Escape` | Panic reset |
 
-Action bindings run only while active mode is enabled:
+Action bindings run only while active mode is enabled. The checked-in and runtime-default keymap is the ergonomic `E/S/D/F` layout:
 
 | Key | Action |
 | --- | --- |
-| `W` | Move up |
-| `A` | Move left |
-| `S` | Move down |
-| `D` | Move right |
+| `E` / `S` / `D` / `F` | Move up / left / down / right |
 | `LeftShift` | Slow held movement |
-| `B` | Surgical held precision modifier (hold with movement key) |
-| `SPACE` | Left click |
-| `L` | Right click |
-| `RightShift` | Middle click |
+| `Z` | Surgical held precision modifier (hold with movement key) |
+| `J` / `K` / `L` | Left / right / middle click |
 | `N` | Toggle left-button drag mode |
 | `.` | Click, then switch to idle |
 | `W` / `R` | Wheel up / down |
-| `X` / `Z` | Mouse speed down / reset |
-| `U` / `I` | Wheel speed up / down |
+| `M` / `,` | Mouse speed down / up |
+| `U` / `I` | Wheel speed down / up |
 | `RightAlt+C` / `RightAlt+X` | Next / previous movement profile |
 | `RightAlt+V` / `RightAlt+B` | Next / previous wheel profile |
-| `F` | Jump mode |
+| `T` | Jump mode |
 | `G` | Grid mode |
-| `C` | Screen select |
-| `Shift+B` | Enter bookmark mode (default binding) |
-| `Shift+Ctrl+B` | Clear all bookmarks (default binding) |
-| `B` | Enter bookmark mode (example ergonomic remap) |
-| `Backspace+1..9` | Clear bookmark slot 1..9 (in bookmark mode) |
+| `0` | UI Hints mode |
+| `B` | Enter bookmark mode |
 | `1..9` | Save bookmark slot 1..9 (in bookmark mode) / recall slot 1..9 (outside bookmark mode) |
-| `Escape` | Cancel bookmark mode |
+| `` ` `` | Show bookmark list |
+| `Backspace+1..9` | Clear bookmark slot 1..9 (in bookmark mode) |
+| `Escape` | Cancel bookmark mode or active exclusive overlays/modes |
+| `C` | Screen select |
 | `H` | Navigate back |
 | `Y` | Navigate forward |
 | `Q` / `P` | Switch to idle |
-| `RightAlt+W` / `RightAlt+A` / `RightAlt+S` / `RightAlt+D` | Jump to **monitor edge** (top / left / bottom / right) |
-| `RightAlt+Ctrl+W` / `RightAlt+Ctrl+A` / `RightAlt+Ctrl+S` / `RightAlt+Ctrl+D` | Jump to **active-window edge** (top / left / bottom / right) |
-| `RightAlt+Ctrl+Q` / `RightAlt+Ctrl+E` | Jump to active-window center / titlebar |
+| `RightAlt+E` / `RightAlt+S` / `RightAlt+D` / `RightAlt+F` | Jump to **monitor edge** (top / left / bottom / right) |
+| `RightAlt+Ctrl+E` / `RightAlt+Ctrl+S` / `RightAlt+Ctrl+D` / `RightAlt+Ctrl+F` | Jump to **active-window edge** (top / left / bottom / right) |
+| `RightAlt+Ctrl+H` / `RightAlt+Ctrl+Y` | Jump to active-window center / titlebar |
 | `Alt+E` / `Alt+S` / `Alt+D` / `Alt+F` | Step move up / left / down / right (normal tier) |
 | `Alt+Ctrl+E` / `Alt+Ctrl+S` / `Alt+Ctrl+D` / `Alt+Ctrl+F` | Step move up / left / down / right (small tier) |
 | `Alt+Shift+E` / `Alt+Shift+S` / `Alt+Shift+D` / `Alt+Shift+F` | Step move up / left / down / right (large tier) |
 | `RightAlt+R` | Reload `config.toml` |
-| `RightAlt+Escape` | Panic reset |
 | `/` | Toggle help tooltip/panel with runtime stats + keybinds |
 
 ## Active And Idle
 
-The app starts active. Press `Ctrl+E` (or `Ctrl+Q` in configs that set that as `system_bindings.toggle_active`) to switch between active and idle mode. In active mode, configured action bindings are swallowed and translated into mouse commands. In idle mode, normal action bindings are ignored so the same keys can pass through to Windows and other apps.
+The app starts active. Press `Ctrl+Q` to switch between active and idle mode. In active mode, configured action bindings are swallowed and translated into mouse commands. In idle mode, normal action bindings are ignored so the same keys can pass through to Windows and other apps.
 
-System bindings bypass the active-mode gate. The configured toggle-active chord (commonly `Ctrl+E` or `Ctrl+Q`) can always reactivate control, and `Escape` remains the configured exit key.
+System bindings bypass the active-mode gate. The configured toggle-active chord can always reactivate control, and `Ctrl+Escape` remains the configured exit key.
 
 Bookmark mode is configurable under `[bookmarks]` in `config.toml` (including slot count, key validation fallbacks, desktop behavior, and coordinate policy). The bookmark JSON file path is resolved relative to the resolved config file path when a relative `bookmarks.file` value is used.
 
@@ -84,13 +79,13 @@ Bookmark mode is configurable under `[bookmarks]` in `config.toml` (including sl
 
 Press `N` to toggle left-button drag mode. When drag is on, Multi MouseMover holds the left mouse button down so movement keys can drag windows, text selections, sliders, or canvas objects. Press `N` again to release it.
 
-`RightAlt+Escape` performs a panic reset: it releases drag, clears currently held actions, exits jump mode, hides overlays, resets runtime speed tiers, and returns to active mode.
+`RightAlt+Escape` performs a panic reset: it releases drag, clears currently held actions, exits jump mode, hides overlays, resets runtime speed tiers, and follows `system_bindings.panic_reset_sets_idle` (the default is `true`, so it returns to idle mode).
 
 ## Wheel And Speed Controls
 
 Hold `W` or `R` for repeated vertical wheel ticks. Horizontal wheel bindings are commented out in the checked-in `config.toml` by default. Wheel repeat timing comes from `[wheel].tick_interval`; wheel strength comes from the current wheel speed and axis multipliers.
 
-Mouse movement has two layers. `[mouse_speed]` controls the baseline tier changed by `X` and `Z`; `acceleration`, `acceleration_rate`, and `top_speed` then shape how held movement ramps while a direction key is down. `LeftShift` slows movement while held.
+Mouse movement has two layers. `[mouse_speed]` controls the baseline tier changed by `M` and `,`; `acceleration`, `acceleration_rate`, and `top_speed` then shape how held movement ramps while a direction key is down. `LeftShift` slows movement while held.
 
 Profiles let you swap groups of speed settings at runtime:
 
@@ -105,16 +100,16 @@ Runtime action syntax also supports direct profile selection with either `moveme
 
 ## Jump Stages And Profiles
 
-Press `F` to enter jump mode. A labeled grid appears over the start region. Type the visible cell label to narrow the target or complete the jump. The default config uses precision mode with `coarse`, `fine`, and `precise` stages.
+Press `T` to enter jump mode. A labeled grid appears over the start region. Type the visible cell label to narrow the target or complete the jump. The default config uses precision mode with `coarse`, `fine`, and `precise` stages.
 
 The base `[jump]` table chooses the mode, start region, cursor behavior between stages, preview edge behavior, and visuals. Each stage table controls grid size, target region behavior, zoom, context margin, aim point, and labels.
 
 Jump profiles live under `jump.profiles.<name>` and merge over the base jump settings for one launch. Profiles can override just the fields they need:
 
 ```toml
-["F", "jump_mode"]
+["T", "jump_mode"]
 ["RightAlt+F", "jump_mode_profile:precise"]
-["RightAlt+W", "jump_mode_profile.window"]
+["RightAlt+3", "jump_mode_profile.window"]
 ```
 
 The default config includes `fast`, `precise`, `window`, and `monitor` profiles. `fast` is a single-stage jump. `precise` keeps multiple stages and previews between them. `window` starts from the active window bounds. `monitor` starts from the current monitor.
@@ -259,7 +254,7 @@ Jump overlays are configured under `[jump.visuals]` and per-stage label tables. 
 
 ## Safety
 
-`Escape` exits through `[system_bindings]`. `RightAlt+Escape` is the runtime panic reset and is useful if drag is stuck, a jump overlay is active, or held keys need to be cleared.
+`Ctrl+Escape` exits through `[system_bindings]`. `RightAlt+Escape` is the runtime panic reset and is useful if drag is stuck, a jump overlay is active, or held keys need to be cleared.
 
 `RightAlt+R` reloads `config.toml` atomically from the user perspective: invalid configs are rejected and the last valid runtime config remains active. Compatibility fields are still accepted for older configs, but new configs should use the current field names documented in [DEVELOPMENT.md](DEVELOPMENT.md).
 
