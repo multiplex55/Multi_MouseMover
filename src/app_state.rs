@@ -4171,6 +4171,7 @@ mod tests {
         state.set_owned_modifiers([VirtualKey::RightAlt]);
         state.route_key_event(KeyEvent::new(VirtualKey::RightAlt, true), None);
         state.route_key_event(KeyEvent::new(VirtualKey::A, true), Some(Action::MoveLeft));
+        assert_eq!(collect_commands(&mut state).len(), 1);
         assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, true)));
 
         state.reconcile_stale_keys(Duration::ZERO, |key| key != VirtualKey::RightAlt);
@@ -4227,7 +4228,7 @@ mod tests {
         assert!(state
             .reconciled_released_keys
             .contains(&VirtualKey::LeftShift));
-        assert!(!state.should_swallow_key(&KeyEvent::new(VirtualKey::LeftShift, false)));
+        assert!(state.should_swallow_key(&KeyEvent::new(VirtualKey::RightAlt, false)));
     }
 
     #[test]
