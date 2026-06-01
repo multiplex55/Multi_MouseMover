@@ -30,7 +30,7 @@ use bookmarks::{
     normalize_bookmark_name, resolve_bookmarks_path, BookmarkRecord, BookmarkStore,
     MonitorRect as BookmarkMonitorRect, RemoveOutcome, SetOutcome,
 };
-use config_audit::{audit_config_toml, ConfigAuditSeverity, ConfigAuditWarning};
+use config_audit::{audit_config_toml, ConfigAuditSeverity, ConfigAuditWarning, KeybindIssue};
 #[cfg(test)]
 use indicator::IndicatorState;
 use indicator::{
@@ -176,6 +176,8 @@ const MIN_TOOLTIP_HELP_WIDTH: i32 = 240;
 const MAX_TOOLTIP_HELP_WIDTH: i32 = 800;
 const MIN_TOOLTIP_HELP_BINDINGS: i32 = 0;
 const MAX_TOOLTIP_HELP_BINDINGS: i32 = 200;
+const MIN_TOOLTIP_HELP_PAGE_SIZE: usize = 1;
+const MAX_TOOLTIP_HELP_PAGE_SIZE: usize = 200;
 const MIN_TOOLTIP_OFFSET: i32 = -200;
 const MAX_TOOLTIP_OFFSET: i32 = 200;
 const APP_CRATE_ID: &str = env!("CARGO_PKG_NAME");
@@ -369,6 +371,7 @@ lazy_static! {
     static ref SHIFT_CAN_MODIFY_PLAIN_MOVEMENT: RwLock<bool> = RwLock::new(true);
     static ref APP_STATE: RwLock<AppState> = RwLock::new(AppState::default());
     static ref CONFIG_WARNINGS: Mutex<Vec<StoredConfigWarning>> = Mutex::new(Vec::new());
+    static ref CONFIG_KEYBIND_ISSUES: Mutex<Vec<KeybindIssue>> = Mutex::new(Vec::new());
     static ref UI_HINT_QUERY_TX: Mutex<Option<Sender<UiHintQueryResult>>> = Mutex::new(None);
     static ref UI_HINT_QUERY_RX: Mutex<Option<Receiver<UiHintQueryResult>>> = Mutex::new(None);
     static ref UI_HINT_SESSION: Mutex<Option<UiHintSession>> = Mutex::new(None);
@@ -677,7 +680,30 @@ pub struct TooltipOverlayConfig {
     pub help_positioning: TooltipOverlayPositioning,
     pub help_width: i32,
     pub help_max_bindings: i32,
+    pub help: TooltipOverlayHelpConfig,
     pub events: TooltipOverlayEvents,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
+pub struct TooltipOverlayHelpConfig {
+    pub interactive: bool,
+    pub page_size: usize,
+    pub show_unbound_actions: bool,
+    pub show_conflicts: bool,
+    pub show_mode_specific_sections: bool,
+}
+
+impl Default for TooltipOverlayHelpConfig {
+    fn default() -> Self {
+        Self {
+            interactive: true,
+            page_size: 18,
+            show_unbound_actions: true,
+            show_conflicts: true,
+            show_mode_specific_sections: true,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
@@ -896,6 +922,7 @@ impl Default for TooltipOverlayConfig {
             help_positioning: TooltipOverlayPositioning::Center,
             help_width: 420,
             help_max_bindings: 40,
+            help: TooltipOverlayHelpConfig::default(),
             events: TooltipOverlayEvents::default(),
         }
     }
@@ -1732,6 +1759,12 @@ impl Config {
             MIN_TOOLTIP_HELP_BINDINGS,
             MAX_TOOLTIP_HELP_BINDINGS,
         );
+        self.tooltip_overlay.help.page_size = normalize_usize_range(
+            "tooltip_overlay.help.page_size",
+            self.tooltip_overlay.help.page_size,
+            MIN_TOOLTIP_HELP_PAGE_SIZE,
+            MAX_TOOLTIP_HELP_PAGE_SIZE,
+        );
         self.tooltip_overlay.offset_x = normalize_i32_range(
             "tooltip_overlay.offset_x",
             self.tooltip_overlay.offset_x,
@@ -2293,7 +2326,11 @@ impl Config {
     }
 
     fn parse_audited_config(config_str: &str) -> Result<Self, Box<dyn Error>> {
-        emit_config_audit_warnings(&audit_config_toml(config_str).warnings);
+        let audit = audit_config_toml(config_str);
+        emit_config_audit_warnings(&audit.warnings);
+        if let Ok(mut issues) = CONFIG_KEYBIND_ISSUES.lock() {
+            *issues = audit.keybind_report.issues;
+        }
         let config = toml::from_str::<Self>(config_str)?.normalize()?;
         emit_startup_feature_binding_warnings(&config);
         Ok(config)
@@ -2501,6 +2538,18 @@ fn recent_config_warnings_for_overlay() -> Vec<help_overlay::OverlayConfigWarnin
 }
 
 fn normalize_i32_range(name: &str, value: i32, min: i32, max: i32) -> i32 {
+    if value < min {
+        warn_config_normalized(&format!("{name} is below {min}; clamping to {min}"));
+        min
+    } else if value > max {
+        warn_config_normalized(&format!("{name} is above {max}; clamping to {max}"));
+        max
+    } else {
+        value
+    }
+}
+
+fn normalize_usize_range(name: &str, value: usize, min: usize, max: usize) -> usize {
     if value < min {
         warn_config_normalized(&format!("{name} is below {min}; clamping to {min}"));
         min
@@ -3374,8 +3423,33 @@ fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
     );
     view.stats = help_stats_from_snapshot(snapshot, slow_active, jump_active, mode_context);
     view.help_max_bindings = help_config.help_max_bindings;
+    view.help_config = help_config.help.clone();
+    apply_help_binding_warnings(&mut view);
+    if view.help_config.show_unbound_actions {
+        help_overlay::append_unbound_actions(&mut view);
+    }
     view.config_warnings = recent_config_warnings_for_overlay();
     view
+}
+
+fn apply_help_binding_warnings(view: &mut help_overlay::HelpOverlayView) {
+    let issues = CONFIG_KEYBIND_ISSUES
+        .lock()
+        .map(|issues| issues.clone())
+        .unwrap_or_default();
+    for binding in &mut view.bindings {
+        if let Some(issue) = issues.iter().find(|issue| {
+            issue.chord_display == binding.key
+                || issue.action_id.eq_ignore_ascii_case(&binding.action_id)
+        }) {
+            binding.warning = Some(help_overlay::HelpBindingWarning {
+                message: issue.message.clone(),
+                severity: overlay_warning_severity(issue.severity),
+                winning_key: issue.winning_chord_display.clone(),
+                winning_action_id: issue.winning_action_id.clone(),
+            });
+        }
+    }
 }
 
 fn help_stats_from_snapshot(
@@ -3541,6 +3615,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             AppCommand::PanicReset => println!("[command] PanicReset"),
             AppCommand::ToggleHelp => println!("[command] ToggleHelp"),
             AppCommand::HideHelp => println!("[command] HideHelp"),
+            AppCommand::HelpInput(input) => println!("[command] HelpInput {input:?}"),
             AppCommand::EnterJumpMode {
                 activation_key,
                 profile,
@@ -3686,6 +3761,13 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         AppCommand::HideHelp => {
             APP_STATE.write().unwrap().hide_help();
             help_overlay::hide_help_overlay();
+        }
+        AppCommand::HelpInput(input) => {
+            let hidden = matches!(input, help_overlay::HelpInput::Escape);
+            help_overlay::handle_help_input(input);
+            if hidden {
+                APP_STATE.write().unwrap().hide_help();
+            }
         }
         AppCommand::EnterJumpMode {
             activation_key,

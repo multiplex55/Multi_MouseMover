@@ -370,6 +370,12 @@ impl<B: MouseBackend> MouseMaster<B> {
             | Action::NavigateBack
             | Action::NavigateForward
             | Action::ShowHelp
+            | Action::HelpMode
+            | Action::HelpSearch
+            | Action::HelpNextSection
+            | Action::HelpPreviousSection
+            | Action::HelpNextPage
+            | Action::HelpPreviousPage
             | Action::UiHintMode
             | Action::BookmarkMode
             | Action::ShowBookmarks

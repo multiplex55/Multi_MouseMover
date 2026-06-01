@@ -2,9 +2,9 @@ use crate::action::{Action, Direction2D, StepMoveTier};
 use crate::action_handler::{RuntimeNotification, RuntimeNotificationKind};
 use crate::app_state::ModeContext;
 use crate::key_chord::KeyChord;
-use crate::TooltipOverlayConfig;
+use crate::{TooltipOverlayConfig, TooltipOverlayHelpConfig};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ptr;
 use std::time::{Duration, Instant};
 use windows::core::w;
@@ -31,10 +31,23 @@ const OVERLAY_ALPHA: u8 = 232;
 pub struct HelpBinding {
     pub key: String,
     pub action: String,
+    pub action_id: String,
     pub section: HelpBindingSection,
+    pub scope: String,
+    pub description: String,
+    pub warning: Option<HelpBindingWarning>,
+    pub bound: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelpBindingWarning {
+    pub message: String,
+    pub severity: OverlayWarningSeverity,
+    pub winning_key: Option<String>,
+    pub winning_action_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
 pub enum HelpBindingSection {
     Movement,
@@ -46,6 +59,13 @@ pub enum HelpBindingSection {
     StepMove,
     Surgical,
     ProfilesRuntime,
+    Help,
+}
+
+impl std::fmt::Display for HelpBindingSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.title())
+    }
 }
 
 impl HelpBindingSection {
@@ -60,6 +80,7 @@ impl HelpBindingSection {
             Self::StepMove => "Step Move",
             Self::Surgical => "Surgical",
             Self::ProfilesRuntime => "Profiles/Runtime",
+            Self::Help => "Help",
         }
     }
 }
@@ -70,6 +91,36 @@ pub struct HelpOverlayView {
     pub bindings: Vec<HelpBinding>,
     pub config_warnings: Vec<OverlayConfigWarning>,
     pub help_max_bindings: i32,
+    pub help_config: TooltipOverlayHelpConfig,
+    pub state: HelpState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelpState {
+    Hidden,
+    Visible {
+        filter: String,
+        section: Option<HelpBindingSection>,
+        page: usize,
+    },
+}
+
+impl Default for HelpState {
+    fn default() -> Self {
+        Self::Hidden
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelpInput {
+    Search,
+    NextSection,
+    PreviousSection,
+    NextPage,
+    PreviousPage,
+    Append(char),
+    Backspace,
+    Escape,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,14 +275,31 @@ impl HelpOverlayState {
         };
     }
 
-    fn show_help_overlay(&mut self, view: HelpOverlayView) {
+    fn show_help_overlay(&mut self, mut view: HelpOverlayView) {
+        if matches!(view.state, HelpState::Hidden) {
+            view.state = HelpState::Visible {
+                filter: String::new(),
+                section: None,
+                page: 0,
+            };
+        }
         self.content = HelpOverlayContent::Help {
             view: Box::new(view),
         };
     }
 
     fn hide(&mut self) {
+        if let HelpOverlayContent::Help { view } = &mut self.content {
+            view.state = HelpState::Hidden;
+        }
         self.content = HelpOverlayContent::Hidden;
+    }
+
+    fn handle_help_input(&mut self, input: HelpInput) -> bool {
+        let HelpOverlayContent::Help { view } = &mut self.content else {
+            return false;
+        };
+        apply_help_input(view, input)
     }
 
     fn update_overlay(&mut self, now: Instant) -> bool {
@@ -330,6 +398,14 @@ impl HelpOverlay {
     fn hide(&mut self) {
         self.state.hide();
         self.sync_window();
+    }
+
+    fn handle_help_input(&mut self, input: HelpInput) -> bool {
+        let changed = self.state.handle_help_input(input);
+        if changed {
+            self.sync_window();
+        }
+        changed
     }
 
     fn update_overlay(&mut self, now: Instant) {
@@ -637,26 +713,171 @@ pub fn format_tooltip_message(
 pub fn format_help_lines(view: &HelpOverlayView, config: TooltipOverlayConfig) -> Vec<String> {
     let mut lines = help_stats_lines(&view.stats);
     lines.extend(format_config_warning_lines(&view.config_warnings, 3));
-    let max_bindings = config.help_max_bindings.max(0) as usize;
-    let visible_bindings = sorted_bindings(&view.bindings, max_bindings);
+    let help_config = merged_help_config(view, &config);
+    let state = visible_help_state(view);
+    let filtered = filtered_bindings(view, &state, &help_config);
+    let sections = visible_sections_from_bindings(&filtered);
+    let selected_section = selected_section(&state, &sections);
+    let section_bindings: Vec<&HelpBinding> = filtered
+        .into_iter()
+        .filter(|binding| selected_section.is_none_or(|section| binding.section == section))
+        .collect();
+    let page_size = help_config.page_size.max(1) as usize;
+    let page_count = section_bindings.len().max(1).div_ceil(page_size).max(1);
+    let page = state_page(&state).min(page_count - 1);
+    let start = page * page_size;
+    let end = (start + page_size).min(section_bindings.len());
+    let page_bindings = &section_bindings[start..end];
 
-    if visible_bindings.is_empty() {
-        if view.bindings.len() > max_bindings {
-            lines.push(String::new());
-            lines.push(format!(
-                "  ... {} more binding(s)",
-                view.bindings.len() - max_bindings
-            ));
-        }
+    lines.push(String::new());
+    lines.push(format!(
+        "Help: / search | Tab sections | PageUp/PageDown pages | Esc close"
+    ));
+    lines.push(format!(
+        "Filter: {} | Section: {} | Page {}/{} | Showing {}-{} of {}",
+        state_filter(&state).map_or("".to_string(), ToString::to_string),
+        selected_section.map_or("All".to_string(), |section| section.title().to_string()),
+        page + 1,
+        page_count,
+        if section_bindings.is_empty() {
+            0
+        } else {
+            start + 1
+        },
+        end,
+        section_bindings.len()
+    ));
+
+    if page_bindings.is_empty() {
+        lines.push("No help bindings match the current filter.".to_string());
         return lines;
     }
 
-    lines.push(String::new());
     let mut grouped: BTreeMap<HelpBindingSection, Vec<&HelpBinding>> = BTreeMap::new();
-    for binding in visible_bindings {
+    for binding in page_bindings.iter().copied() {
         grouped.entry(binding.section).or_default().push(binding);
     }
-    for section in [
+    for section in section_order() {
+        let Some(entries) = grouped.get(&section) else {
+            continue;
+        };
+        lines.push(format!("{}:", section.title()));
+        for binding in entries {
+            let unbound = if binding.bound { "" } else { " (unbound)" };
+            let warning = binding
+                .warning
+                .as_ref()
+                .map(|warning| format!(" [WARN: {}]", warning.message))
+                .unwrap_or_default();
+            lines.push(format!(
+                "  {}  -  {}{} — {} [{}]{}",
+                binding.key, binding.action, unbound, binding.description, binding.scope, warning
+            ));
+        }
+    }
+
+    lines
+}
+
+fn merged_help_config(
+    view: &HelpOverlayView,
+    config: &TooltipOverlayConfig,
+) -> TooltipOverlayHelpConfig {
+    let mut help = config.help.clone();
+    if view.help_config != TooltipOverlayHelpConfig::default() {
+        help = view.help_config.clone();
+    }
+    help
+}
+
+fn visible_help_state(view: &HelpOverlayView) -> HelpState {
+    match &view.state {
+        HelpState::Visible { .. } => view.state.clone(),
+        HelpState::Hidden => HelpState::Visible {
+            filter: String::new(),
+            section: None,
+            page: 0,
+        },
+    }
+}
+
+fn state_filter(state: &HelpState) -> Option<&str> {
+    match state {
+        HelpState::Visible { filter, .. } => Some(filter.as_str()),
+        HelpState::Hidden => None,
+    }
+}
+
+fn state_page(state: &HelpState) -> usize {
+    match state {
+        HelpState::Visible { page, .. } => *page,
+        HelpState::Hidden => 0,
+    }
+}
+
+fn selected_section(
+    state: &HelpState,
+    sections: &[HelpBindingSection],
+) -> Option<HelpBindingSection> {
+    match state {
+        HelpState::Visible { section, .. } => section.filter(|s| sections.contains(s)),
+        HelpState::Hidden => None,
+    }
+}
+
+fn filtered_bindings<'a>(
+    view: &'a HelpOverlayView,
+    state: &HelpState,
+    config: &TooltipOverlayHelpConfig,
+) -> Vec<&'a HelpBinding> {
+    let filter = state_filter(state)
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    let mut bindings: Vec<_> = view
+        .bindings
+        .iter()
+        .filter(|binding| config.show_unbound_actions || binding.bound)
+        .filter(|binding| config.show_conflicts || binding.warning.is_none())
+        .filter(|binding| filter.is_empty() || help_binding_matches(binding, &filter))
+        .collect();
+    bindings.sort_by(|left, right| {
+        left.section
+            .cmp(&right.section)
+            .then(left.action.cmp(&right.action))
+            .then(left.key.cmp(&right.key))
+    });
+    bindings
+}
+
+pub fn help_binding_matches(binding: &HelpBinding, filter: &str) -> bool {
+    let filter = filter.trim().to_lowercase();
+    if filter.is_empty() {
+        return true;
+    }
+    [
+        binding.key.as_str(),
+        binding.action.as_str(),
+        binding.action_id.as_str(),
+        binding.section.title(),
+        binding.scope.as_str(),
+        binding.description.as_str(),
+    ]
+    .iter()
+    .any(|value| value.to_lowercase().contains(&filter))
+}
+
+fn visible_sections_from_bindings(bindings: &[&HelpBinding]) -> Vec<HelpBindingSection> {
+    bindings
+        .iter()
+        .map(|binding| binding.section)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn section_order() -> [HelpBindingSection; 10] {
+    [
         HelpBindingSection::Movement,
         HelpBindingSection::ClickDrag,
         HelpBindingSection::Wheel,
@@ -665,44 +886,94 @@ pub fn format_help_lines(view: &HelpOverlayView, config: TooltipOverlayConfig) -
         HelpBindingSection::UiHints,
         HelpBindingSection::StepMove,
         HelpBindingSection::Surgical,
+        HelpBindingSection::Help,
         HelpBindingSection::ProfilesRuntime,
-    ] {
-        let Some(entries) = grouped.get(&section) else {
-            continue;
-        };
-        lines.push(format!("{}:", section.title()));
-        for binding in entries {
-            lines.push(format!("  {}  -  {}", binding.key, binding.action));
-        }
-    }
-
-    if view.bindings.len() > max_bindings {
-        lines.push(format!(
-            "  ... {} more binding(s)",
-            view.bindings.len() - max_bindings
-        ));
-    }
-
-    lines
+    ]
 }
 
 fn view_format_config(view: &HelpOverlayView) -> TooltipOverlayConfig {
     TooltipOverlayConfig {
         help_max_bindings: view.help_max_bindings,
+        help: view.help_config.clone(),
         ..TooltipOverlayConfig::default()
     }
 }
 
-fn sorted_bindings(bindings: &[HelpBinding], max_bindings: usize) -> Vec<&HelpBinding> {
-    let mut bindings: Vec<_> = bindings.iter().collect();
-    bindings.sort_by(|left, right| {
-        left.section
-            .cmp(&right.section)
-            .then(left.action.cmp(&right.action))
-            .then(left.key.cmp(&right.key))
-    });
-    bindings.truncate(max_bindings);
-    bindings
+pub fn apply_help_input(view: &mut HelpOverlayView, input: HelpInput) -> bool {
+    if matches!(input, HelpInput::Escape) {
+        view.state = HelpState::Hidden;
+        return true;
+    }
+    if matches!(view.state, HelpState::Hidden) {
+        view.state = HelpState::Visible {
+            filter: String::new(),
+            section: None,
+            page: 0,
+        };
+    }
+    let (mut filter, mut section, mut page) = match &view.state {
+        HelpState::Visible {
+            filter,
+            section,
+            page,
+        } => (filter.clone(), *section, *page),
+        HelpState::Hidden => unreachable!(),
+    };
+
+    match input {
+        HelpInput::Search => {
+            page = 0;
+        }
+        HelpInput::NextSection | HelpInput::PreviousSection => {
+            let filtered = filtered_bindings(view, &view.state, &view.help_config);
+            let sections = visible_sections_from_bindings(&filtered);
+            if sections.is_empty() {
+                section = None;
+            } else {
+                let current = section
+                    .and_then(|s| sections.iter().position(|candidate| *candidate == s))
+                    .unwrap_or(0);
+                let next = match input {
+                    HelpInput::NextSection => (current + 1) % sections.len(),
+                    _ => (current + sections.len() - 1) % sections.len(),
+                };
+                section = Some(sections[next]);
+            }
+            page = 0;
+        }
+        HelpInput::NextPage | HelpInput::PreviousPage => {
+            let filtered = filtered_bindings(view, &view.state, &view.help_config);
+            let sections = visible_sections_from_bindings(&filtered);
+            let selected = section.filter(|s| sections.contains(s));
+            let count = filtered
+                .into_iter()
+                .filter(|binding| selected.is_none_or(|s| binding.section == s))
+                .count();
+            let page_count = count
+                .max(1)
+                .div_ceil(view.help_config.page_size.max(1) as usize)
+                .max(1);
+            page = match input {
+                HelpInput::NextPage => (page + 1).min(page_count - 1),
+                _ => page.saturating_sub(1),
+            };
+        }
+        HelpInput::Append(ch) => {
+            filter.push(ch);
+            page = 0;
+        }
+        HelpInput::Backspace => {
+            filter.pop();
+            page = 0;
+        }
+        HelpInput::Escape => unreachable!(),
+    }
+    view.state = HelpState::Visible {
+        filter,
+        section,
+        page,
+    };
+    true
 }
 
 fn overlay_position(size: (i32, i32)) -> (i32, i32) {
@@ -777,11 +1048,7 @@ where
     let mut bindings: Vec<HelpBinding> = bindings
         .into_iter()
         .filter(|(_, action)| mode_includes_action(mode, action))
-        .map(|(chord, action)| HelpBinding {
-            key: format_key_chord(chord),
-            action: format_action(&action),
-            section: action_section(&action),
-        })
+        .map(|(chord, action)| help_binding(format_key_chord(chord), action, true, None))
         .collect();
     bindings.sort_by(|left, right| {
         left.section
@@ -794,6 +1061,12 @@ where
         bindings,
         config_warnings: Vec::new(),
         help_max_bindings: TooltipOverlayConfig::default().help_max_bindings,
+        help_config: TooltipOverlayHelpConfig::default(),
+        state: HelpState::Visible {
+            filter: String::new(),
+            section: None,
+            page: 0,
+        },
     }
 }
 
@@ -826,8 +1099,172 @@ pub fn hide_help_overlay() {
     HELP_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
 }
 
+pub fn handle_help_input(input: HelpInput) -> bool {
+    HELP_OVERLAY.with(|overlay| overlay.borrow_mut().handle_help_input(input))
+}
+
 pub fn update_overlay(now: Instant) {
     HELP_OVERLAY.with(|overlay| overlay.borrow_mut().update_overlay(now));
+}
+
+fn help_binding(
+    key: String,
+    action: Action,
+    bound: bool,
+    warning: Option<HelpBindingWarning>,
+) -> HelpBinding {
+    HelpBinding {
+        key,
+        action: format_action(&action),
+        action_id: action_id(&action),
+        section: action_section(&action),
+        scope: action_scope(&action).to_string(),
+        description: action_description(&action),
+        warning,
+        bound,
+    }
+}
+
+pub fn append_unbound_actions(view: &mut HelpOverlayView) {
+    let bound_ids: HashSet<String> = view
+        .bindings
+        .iter()
+        .map(|binding| binding.action_id.clone())
+        .collect();
+    for action in all_help_actions() {
+        let id = action_id(&action);
+        if !bound_ids.contains(&id) {
+            view.bindings
+                .push(help_binding("—".to_string(), action, false, None));
+        }
+    }
+    view.bindings.sort_by(|left, right| {
+        left.section
+            .cmp(&right.section)
+            .then(left.action.cmp(&right.action))
+            .then(left.key.cmp(&right.key))
+    });
+}
+
+fn all_help_actions() -> Vec<Action> {
+    vec![
+        Action::MoveUp,
+        Action::MoveDown,
+        Action::MoveLeft,
+        Action::MoveRight,
+        Action::MoveUpRight,
+        Action::MoveUpLeft,
+        Action::MoveDownRight,
+        Action::MoveDownLeft,
+        Action::LeftClick,
+        Action::RightClick,
+        Action::MiddleClick,
+        Action::ClickThenDisable,
+        Action::ToggleDragMode,
+        Action::WheelUp,
+        Action::WheelDown,
+        Action::WheelLeft,
+        Action::WheelRight,
+        Action::WheelSpeedUp,
+        Action::WheelSpeedDown,
+        Action::WheelSpeedReset,
+        Action::MouseSpeedUp,
+        Action::MouseSpeedDown,
+        Action::MouseSpeedReset,
+        Action::JumpMode,
+        Action::GridMode,
+        Action::ScreenSelect,
+        Action::UiHintMode,
+        Action::BookmarkMode,
+        Action::ShowBookmarks,
+        Action::ReloadConfig,
+        Action::PanicReset,
+        Action::Disable,
+        Action::ShowHelp,
+        Action::HelpSearch,
+        Action::HelpNextSection,
+        Action::HelpPreviousSection,
+        Action::HelpNextPage,
+        Action::HelpPreviousPage,
+    ]
+}
+
+fn action_id(action: &Action) -> String {
+    match action {
+        Action::StepMove { direction, tier } => {
+            let dir = match direction {
+                Direction2D::Up => "up",
+                Direction2D::Down => "down",
+                Direction2D::Left => "left",
+                Direction2D::Right => "right",
+            };
+            let tier = match tier {
+                StepMoveTier::Normal => "",
+                StepMoveTier::Small => "small_",
+                StepMoveTier::Large => "large_",
+            };
+            format!("step_move_{tier}{dir}")
+        }
+        Action::WheelProfileSelect(profile) => format!("wheel_profile:{profile}"),
+        Action::MovementProfileSelect(profile) => format!("movement_profile:{profile}"),
+        Action::JumpModeProfile(profile) => format!("jump_mode:{profile}"),
+        Action::BookmarkSlot(slot) => format!("bookmark_slot_{slot}"),
+        Action::ClearBookmarkSlot(slot) => format!("clear_bookmark_{slot}"),
+        other => debug_action_id(other),
+    }
+}
+
+fn debug_action_id(action: &Action) -> String {
+    let raw = format!("{action:?}");
+    let mut output = String::new();
+    for (idx, ch) in raw.chars().enumerate() {
+        if ch == ' ' || ch == '{' || ch == '(' {
+            break;
+        }
+        if ch.is_ascii_uppercase() {
+            if idx > 0 {
+                output.push('_');
+            }
+            output.push(ch.to_ascii_lowercase());
+        } else {
+            output.push(ch);
+        }
+    }
+    output
+}
+
+fn action_scope(action: &Action) -> &'static str {
+    match action {
+        Action::NavigateBack | Action::NavigateForward => "jump/grid",
+        Action::BookmarkMode
+        | Action::ShowBookmarks
+        | Action::BookmarkSlot(_)
+        | Action::ClearBookmarkSlot(_)
+        | Action::ClearAllBookmarks => "bookmarks",
+        Action::UiHintMode => "ui-hints",
+        Action::HelpMode
+        | Action::HelpSearch
+        | Action::HelpNextSection
+        | Action::HelpPreviousSection
+        | Action::HelpNextPage
+        | Action::HelpPreviousPage => "help",
+        _ => "global",
+    }
+}
+
+fn action_description(action: &Action) -> String {
+    match action {
+        Action::HelpSearch => "Focus or edit the interactive help search filter".to_string(),
+        Action::HelpNextSection => "Move to the next help section".to_string(),
+        Action::HelpPreviousSection => "Move to the previous help section".to_string(),
+        Action::HelpNextPage => "Show the next help page without dropping results".to_string(),
+        Action::HelpPreviousPage => "Show the previous help page".to_string(),
+        Action::HelpMode | Action::ShowHelp => {
+            "Open or close this searchable help overlay".to_string()
+        }
+        Action::StepMove { .. } => "Move once by the configured step size".to_string(),
+        _ => format_action(action),
+    }
 }
 
 fn format_action(action: &Action) -> String {
@@ -885,7 +1322,12 @@ fn format_action(action: &Action) -> String {
         Action::NavigateBack => "Navigate back".to_string(),
         Action::NavigateForward => "Navigate forward".to_string(),
         Action::Disable => "Disable".to_string(),
-        Action::ShowHelp => "Hints / Help".to_string(),
+        Action::ShowHelp | Action::HelpMode => "Hints / Help".to_string(),
+        Action::HelpSearch => "Help search".to_string(),
+        Action::HelpNextSection => "Help next section".to_string(),
+        Action::HelpPreviousSection => "Help previous section".to_string(),
+        Action::HelpNextPage => "Help next page".to_string(),
+        Action::HelpPreviousPage => "Help previous page".to_string(),
         Action::UiHintMode => "UI Hints".to_string(),
         Action::BookmarkMode => "Bookmark mode".to_string(),
         Action::ShowBookmarks => "Show bookmark list".to_string(),
@@ -970,6 +1412,12 @@ fn action_section(action: &Action) -> HelpBindingSection {
         | Action::PanicReset
         | Action::Disable
         | Action::ShowHelp => HelpBindingSection::ProfilesRuntime,
+        Action::HelpMode
+        | Action::HelpSearch
+        | Action::HelpNextSection
+        | Action::HelpPreviousSection
+        | Action::HelpNextPage
+        | Action::HelpPreviousPage => HelpBindingSection::Help,
     }
 }
 
@@ -981,13 +1429,28 @@ fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
             Action::NavigateBack
                 | Action::Disable
                 | Action::ShowHelp
+                | Action::HelpMode
+                | Action::HelpSearch
+                | Action::HelpNextSection
+                | Action::HelpPreviousSection
+                | Action::HelpNextPage
+                | Action::HelpPreviousPage
                 | Action::JumpMode
                 | Action::GridMode
         ),
         ModeContext::UiHintQuerying | ModeContext::UiHintActive => {
             matches!(
                 action,
-                Action::NavigateBack | Action::Disable | Action::ShowHelp | Action::UiHintMode
+                Action::NavigateBack
+                    | Action::Disable
+                    | Action::ShowHelp
+                    | Action::HelpMode
+                    | Action::HelpSearch
+                    | Action::HelpNextSection
+                    | Action::HelpPreviousSection
+                    | Action::HelpNextPage
+                    | Action::HelpPreviousPage
+                    | Action::UiHintMode
             )
         }
         ModeContext::Bookmark => matches!(
@@ -999,6 +1462,12 @@ fn mode_includes_action(mode: ModeContext, action: &Action) -> bool {
                 | Action::ClearAllBookmarks
                 | Action::Disable
                 | Action::ShowHelp
+                | Action::HelpMode
+                | Action::HelpSearch
+                | Action::HelpNextSection
+                | Action::HelpPreviousSection
+                | Action::HelpNextPage
+                | Action::HelpPreviousPage
         ),
     }
 }
@@ -1012,16 +1481,35 @@ mod tests {
     use super::*;
     use crate::keyboard::VirtualKey;
 
+    fn test_binding(key: &str, action: &str, section: HelpBindingSection) -> HelpBinding {
+        HelpBinding {
+            key: key.to_string(),
+            action: action.to_string(),
+            action_id: action.to_lowercase().replace(' ', "_"),
+            section,
+            scope: "global".to_string(),
+            description: action.to_string(),
+            warning: None,
+            bound: true,
+        }
+    }
+
     fn sample_view() -> HelpOverlayView {
         HelpOverlayView {
             stats: HelpRuntimeStats::default(),
-            bindings: vec![HelpBinding {
-                key: "H".to_string(),
-                action: "Hints / Help".to_string(),
-                section: HelpBindingSection::ProfilesRuntime,
-            }],
+            bindings: vec![test_binding(
+                "H",
+                "Hints / Help",
+                HelpBindingSection::ProfilesRuntime,
+            )],
             config_warnings: Vec::new(),
             help_max_bindings: TooltipOverlayConfig::default().help_max_bindings,
+            help_config: TooltipOverlayHelpConfig::default(),
+            state: HelpState::Visible {
+                filter: String::new(),
+                section: None,
+                page: 0,
+            },
         }
     }
 
@@ -1213,39 +1701,21 @@ mod tests {
         let view = HelpOverlayView {
             stats: HelpRuntimeStats::default(),
             bindings: vec![
-                HelpBinding {
-                    key: "C".to_string(),
-                    action: "My custom action".to_string(),
-                    section: HelpBindingSection::ProfilesRuntime,
-                },
-                HelpBinding {
-                    key: "W".to_string(),
-                    action: "Move up".to_string(),
-                    section: HelpBindingSection::Movement,
-                },
-                HelpBinding {
-                    key: "L".to_string(),
-                    action: "Left click".to_string(),
-                    section: HelpBindingSection::ClickDrag,
-                },
-                HelpBinding {
-                    key: "J".to_string(),
-                    action: "Jump".to_string(),
-                    section: HelpBindingSection::JumpGrid,
-                },
-                HelpBinding {
-                    key: "U".to_string(),
-                    action: "Wheel up".to_string(),
-                    section: HelpBindingSection::Wheel,
-                },
-                HelpBinding {
-                    key: "H".to_string(),
-                    action: "Hints / Help".to_string(),
-                    section: HelpBindingSection::ProfilesRuntime,
-                },
+                test_binding("C", "My custom action", HelpBindingSection::ProfilesRuntime),
+                test_binding("W", "Move up", HelpBindingSection::Movement),
+                test_binding("L", "Left click", HelpBindingSection::ClickDrag),
+                test_binding("J", "Jump", HelpBindingSection::JumpGrid),
+                test_binding("U", "Wheel up", HelpBindingSection::Wheel),
+                test_binding("H", "Hints / Help", HelpBindingSection::ProfilesRuntime),
             ],
             config_warnings: Vec::new(),
             help_max_bindings: 40,
+            help_config: TooltipOverlayHelpConfig::default(),
+            state: HelpState::Visible {
+                filter: String::new(),
+                section: None,
+                page: 0,
+            },
         };
 
         let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
@@ -1476,6 +1946,95 @@ mod tests {
 
         assert!(on.body.contains("held"));
         assert!(off.body.contains("released"));
+    }
+
+    #[test]
+    fn help_filter_matches_action_name() {
+        let binding = test_binding("H", "Hints / Help", HelpBindingSection::ProfilesRuntime);
+        assert!(help_binding_matches(&binding, "hints"));
+    }
+
+    #[test]
+    fn help_filter_matches_key_name() {
+        let binding = test_binding("Ctrl+PageDown", "Help next page", HelpBindingSection::Help);
+        assert!(help_binding_matches(&binding, "pagedown"));
+    }
+
+    #[test]
+    fn help_filter_matches_description() {
+        let mut binding = test_binding("/", "Help search", HelpBindingSection::Help);
+        binding.description = "Focus or edit the interactive help search filter".to_string();
+        assert!(help_binding_matches(&binding, "interactive help search"));
+    }
+
+    #[test]
+    fn help_pages_do_not_drop_bindings() {
+        let mut view = sample_view();
+        view.help_config.page_size = 2;
+        view.bindings = (0..5)
+            .map(|idx| {
+                test_binding(
+                    &format!("K{idx}"),
+                    &format!("Action {idx}"),
+                    HelpBindingSection::Movement,
+                )
+            })
+            .collect();
+
+        let mut seen = HashSet::new();
+        for page in 0..3 {
+            view.state = HelpState::Visible {
+                filter: String::new(),
+                section: None,
+                page,
+            };
+            let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
+            for idx in 0..5 {
+                if lines.contains(&format!("Action {idx}")) {
+                    seen.insert(idx);
+                }
+            }
+        }
+        assert_eq!(seen.len(), 5);
+    }
+
+    #[test]
+    fn help_groups_mode_specific_bindings() {
+        let view = help_view_from_bindings(
+            [
+                (KeyChord::from_key(VirtualKey::H), Action::NavigateBack),
+                (KeyChord::from_key(VirtualKey::W), Action::MoveUp),
+            ],
+            ModeContext::Jump,
+        );
+        let back = view
+            .bindings
+            .iter()
+            .find(|binding| binding.action == "Navigate back")
+            .unwrap();
+        assert_eq!(back.scope, "jump/grid");
+        assert!(!view
+            .bindings
+            .iter()
+            .any(|binding| binding.action == "Move up"));
+    }
+
+    #[test]
+    fn help_shows_conflict_warning_for_shadowed_key() {
+        let mut view = sample_view();
+        view.bindings = vec![HelpBinding {
+            warning: Some(HelpBindingWarning {
+                message: "Plain binding is shadowed by Shift+H".to_string(),
+                severity: OverlayWarningSeverity::Warning,
+                winning_key: Some("Shift+H".to_string()),
+                winning_action_id: Some("help_search".to_string()),
+            }),
+            ..test_binding("H", "Hints / Help", HelpBindingSection::ProfilesRuntime)
+        }];
+        view.help_config.show_conflicts = true;
+        let lines = format_help_lines(&view, TooltipOverlayConfig::default()).join("\n");
+        assert!(lines.contains("WARN"));
+        assert!(lines.contains("shadowed"));
     }
 
     #[test]
