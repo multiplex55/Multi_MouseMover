@@ -1733,9 +1733,9 @@ mod tests {
     }
 
     #[test]
-    fn format_help_lines_truncates_bindings_deterministically() {
+    fn format_help_lines_pages_bindings_deterministically() {
         let mut config = TooltipOverlayConfig::default();
-        config.help_max_bindings = 2;
+        config.help.page_size = 2;
         let view = help_view_from_bindings(
             [
                 (KeyChord::from_key(VirtualKey::H), Action::ShowHelp),
@@ -1750,8 +1750,8 @@ mod tests {
 
         assert!(lines.contains("A  -  Move left"));
         assert!(lines.contains("D  -  Move right"));
-        assert!(!lines.contains("W  -  Move up"));
-        assert!(lines.contains("... 2 more binding(s)"));
+        assert!(!lines.contains("... 2 more binding(s)"));
+        assert!(lines.contains("Page 1/"));
     }
 
     #[test]
