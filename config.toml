@@ -130,7 +130,7 @@ modifier_reconcile_interval_ms = 50
 # physical key state is checked. stuck_key_timeout_ms controls how long a
 # tracked key must be physically up before cleanup is synthesized. Panic reset
 # ignores both timing settings and clears held/synthetic state immediately.
-stuck_key_timeout_ms = 500
+stuck_key_timeout_ms = 10000
 debug_input = false
 shift_can_modify_plain_movement = true
 
