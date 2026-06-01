@@ -531,12 +531,15 @@ impl AppState {
 
         if self.debug_input {
             eprintln!(
-                "[debug-input] reconciled stale key={:?} trigger={} owned_modifier={} held_ms={} reconciled_release_sent={}",
+                "[debug-input] reconciled stale modifier key={:?} trigger={} owned_modifier={} held_ms={} up_for_ms={}",
                 key,
                 stale_trigger,
                 stale_owned_modifier,
                 held_state.pressed_at.elapsed().as_millis(),
-                held_state.reconciled_release_sent
+                held_state
+                    .physically_up_since
+                    .map(|t| t.elapsed().as_millis())
+                    .unwrap_or(0)
             );
         }
     }
