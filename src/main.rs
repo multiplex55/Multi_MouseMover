@@ -681,8 +681,35 @@ pub struct TooltipOverlayConfig {
     pub help_positioning: TooltipOverlayPositioning,
     pub help_width: i32,
     pub help_max_bindings: i32,
+    pub mode_cards: TooltipOverlayModeCardsConfig,
     pub help: TooltipOverlayHelpConfig,
     pub events: TooltipOverlayEvents,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
+pub struct TooltipOverlayModeCardsConfig {
+    pub enabled: bool,
+    pub show_bookmark_mode: bool,
+    pub show_jump_mode: bool,
+    pub show_grid_mode: bool,
+    pub show_ui_hint_mode: bool,
+    pub show_final_adjust: bool,
+    pub duration_ms: u64,
+}
+
+impl Default for TooltipOverlayModeCardsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_bookmark_mode: true,
+            show_jump_mode: true,
+            show_grid_mode: true,
+            show_ui_hint_mode: true,
+            show_final_adjust: true,
+            duration_ms: DEFAULT_TOOLTIP_DURATION_MS,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
@@ -923,6 +950,7 @@ impl Default for TooltipOverlayConfig {
             help_positioning: TooltipOverlayPositioning::Center,
             help_width: 420,
             help_max_bindings: 40,
+            mode_cards: TooltipOverlayModeCardsConfig::default(),
             help: TooltipOverlayHelpConfig::default(),
             events: TooltipOverlayEvents::default(),
         }
@@ -1747,6 +1775,10 @@ impl Config {
         if self.tooltip_overlay.duration_ms == 0 {
             warn_config_normalized("tooltip_overlay.duration_ms is 0; using default");
             self.tooltip_overlay.duration_ms = DEFAULT_TOOLTIP_DURATION_MS;
+        }
+        if self.tooltip_overlay.mode_cards.duration_ms == 0 {
+            warn_config_normalized("tooltip_overlay.mode_cards.duration_ms is 0; using default");
+            self.tooltip_overlay.mode_cards.duration_ms = DEFAULT_TOOLTIP_DURATION_MS;
         }
         self.tooltip_overlay.help_width = normalize_i32_range(
             "tooltip_overlay.help_width",
@@ -3091,6 +3123,7 @@ fn runtime_notification_enabled(
         RuntimeNotificationKind::ConfigReload => config.events.reload,
         RuntimeNotificationKind::PanicReset => config.events.panic,
         RuntimeNotificationKind::StepMove => true,
+        RuntimeNotificationKind::ModeCard => config.mode_cards.enabled,
     }
 }
 
@@ -3259,6 +3292,7 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
     }
 
     if action.is_continuous() {
+        maybe_emit_continuous_mode_card(action_handler, &action, is_down);
         action_handler.process_active_keys(action, is_down);
         maybe_emit_surgical_tooltip(action_handler, app_state);
         return None;
@@ -3348,6 +3382,37 @@ fn execute_key_action_command_with_keyboard<B: MouseBackend, K: KeyboardSender>(
     None
 }
 
+fn maybe_emit_continuous_mode_card<B: MouseBackend>(
+    action_handler: &mut ActionHandler<B>,
+    action: &Action,
+    is_down: bool,
+) {
+    if !is_down {
+        return;
+    }
+    if *action == Action::SurgicalMode && action_handler.mouse_master.config.surgical_mode.enabled {
+        action_handler
+            .mouse_master
+            .push_mode_card_notification(ModeCardKind::Surgical);
+        return;
+    }
+    if action_handler.mouse_master.config.scroll_mode.enabled {
+        if let Some(modifier) = Action::from_string(
+            &action_handler
+                .mouse_master
+                .config
+                .scroll_mode
+                .modifier_action,
+        ) {
+            if *action == modifier {
+                action_handler
+                    .mouse_master
+                    .push_mode_card_notification(ModeCardKind::ScrollModifier);
+            }
+        }
+    }
+}
+
 fn maybe_emit_surgical_tooltip<B: MouseBackend>(
     action_handler: &ActionHandler<B>,
     app_state: &AppState,
@@ -3420,11 +3485,21 @@ fn panic_reset() -> JumpOverlayResolution {
     let mut action_handler = ACTION_HANDLER.write().unwrap();
     let mut app_state = APP_STATE.write().unwrap();
     action_handler.mouse_master.hard_reset_runtime();
-    clear_all_runtime_input_state(
+    let resolution = clear_all_runtime_input_state(
         &mut action_handler,
         &mut app_state,
         RuntimeCleanupReason::PanicReset,
-    )
+    );
+    if action_handler
+        .mouse_master
+        .config
+        .system_bindings
+        .panic_reset_sets_idle
+    {
+        action_handler.mouse_master.set_active_mode(false);
+        app_state.set_active_mode(false);
+    }
+    resolution
 }
 
 fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
@@ -3783,6 +3858,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 app_state.help_visible()
             };
             if visible {
+                ACTION_HANDLER
+                    .write()
+                    .unwrap()
+                    .mouse_master
+                    .push_mode_card_notification(ModeCardKind::Help);
                 let view = build_help_overlay_view();
                 help_overlay::show_help_overlay(view);
             } else {
@@ -3831,6 +3911,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             };
 
             if let Some(view) = view {
+                ACTION_HANDLER
+                    .write()
+                    .unwrap()
+                    .mouse_master
+                    .push_mode_card_notification(ModeCardKind::Jump);
                 show_jump_overlay(view);
             }
         }
@@ -3874,6 +3959,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             };
 
             if let Some(view) = view {
+                ACTION_HANDLER
+                    .write()
+                    .unwrap()
+                    .mouse_master
+                    .push_mode_card_notification(ModeCardKind::Grid);
                 show_jump_overlay(view);
             }
         }
@@ -3945,6 +4035,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .write()
                 .unwrap()
                 .enter_ui_hint_querying(activation_key, 0, 0);
+            ACTION_HANDLER
+                .write()
+                .unwrap()
+                .mouse_master
+                .push_mode_card_notification(ModeCardKind::UiHint);
             UI_HINT_OVERLAY.with(|overlay| {
                 let mut overlay = overlay.borrow_mut();
                 overlay.ensure_window();
@@ -4018,9 +4113,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             }
         }
         AppCommand::JumpInput(event, action) => {
-            let (jump_result, view) = {
+            let (jump_result, view, entered_final_adjust) = {
                 let mut app_state = APP_STATE.write().unwrap();
+                let final_adjust_was_active = app_state.final_adjust_active();
                 let jump_result = app_state.handle_jump_input(event, action);
+                let entered_final_adjust =
+                    !final_adjust_was_active && app_state.final_adjust_active();
                 let view = match jump_result {
                     None
                     | Some(JumpSessionUpdate::Consumed)
@@ -4032,7 +4130,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         None
                     }
                 };
-                (jump_result, view)
+                (jump_result, view, entered_final_adjust)
             };
 
             match jump_result {
@@ -4040,6 +4138,13 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 | Some(JumpSessionUpdate::Consumed)
                 | Some(JumpSessionUpdate::Invalid)
                 | Some(JumpSessionUpdate::AwaitingFinalAdjust { .. }) => {
+                    if entered_final_adjust {
+                        ACTION_HANDLER
+                            .write()
+                            .unwrap()
+                            .mouse_master
+                            .push_mode_card_notification(ModeCardKind::FinalAdjust);
+                    }
                     if let Some(view) = view {
                         update_jump_overlay(view);
                     }
@@ -4151,6 +4256,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .write()
                 .unwrap()
                 .enter_bookmark_mode(activation_key);
+            ACTION_HANDLER
+                .write()
+                .unwrap()
+                .mouse_master
+                .push_mode_card_notification(ModeCardKind::Bookmark);
             show_bookmark_tooltip(&config, bookmark_mode_entry_tooltip_body());
         }
         AppCommand::RecallBookmarkSlot(slot) => {

@@ -5,6 +5,7 @@ use crate::monitor::{
 use crate::{
     action,
     app_state::KeyEvent,
+    help_overlay::{render_mode_card, ModeCardStyle},
     keyboard::VirtualKey,
     window_geometry::{foreground_window_snap_points, WindowSnapPoints},
     zoom_overlay::{update_zoom_state, SurgicalZoomConfig, SurgicalZoomState, VirtualScreenBounds},
@@ -71,6 +72,19 @@ pub enum RuntimeNotificationKind {
     ConfigReload,
     PanicReset,
     StepMove,
+    ModeCard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeCardKind {
+    Bookmark,
+    Jump,
+    Grid,
+    UiHint,
+    FinalAdjust,
+    Help,
+    Surgical,
+    ScrollModifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -973,12 +987,97 @@ impl<B: MouseBackend> MouseMaster<B> {
     }
 
     pub fn push_panic_reset_notification(&mut self) {
+        let mut lines = vec![
+            "Released buttons".to_string(),
+            "Cleared held keys".to_string(),
+            "Exited modes".to_string(),
+        ];
+        if self.config.system_bindings.panic_reset_sets_idle {
+            lines.push("Set idle".to_string());
+        }
         self.push_notification(RuntimeNotification {
             kind: RuntimeNotificationKind::PanicReset,
             title: "Panic reset".to_string(),
-            body: "Runtime state restored".to_string(),
+            body: lines.join("\n"),
             duration_ms: self.config.tooltip_overlay.duration_ms,
         });
+    }
+
+    pub fn push_mode_card_notification(&mut self, kind: ModeCardKind) {
+        let cfg = &self.config.tooltip_overlay.mode_cards;
+        if !cfg.enabled || cfg.duration_ms == 0 {
+            return;
+        }
+
+        let enabled = match kind {
+            ModeCardKind::Bookmark => cfg.show_bookmark_mode,
+            ModeCardKind::Jump => cfg.show_jump_mode,
+            ModeCardKind::Grid => cfg.show_grid_mode,
+            ModeCardKind::UiHint => cfg.show_ui_hint_mode,
+            ModeCardKind::FinalAdjust => cfg.show_final_adjust,
+            ModeCardKind::Help | ModeCardKind::Surgical | ModeCardKind::ScrollModifier => true,
+        };
+        if !enabled {
+            return;
+        }
+
+        let (title, lines, style) = match kind {
+            ModeCardKind::Bookmark => (
+                "Bookmark mode",
+                vec![
+                    "1-9: recall/save slots",
+                    "Backspace+1-9: clear",
+                    "Esc: cancel",
+                ],
+                ModeCardStyle::Info,
+            ),
+            ModeCardKind::Jump => (
+                "Jump mode",
+                vec!["Press grid labels to narrow", "Back/Esc: undo or cancel"],
+                ModeCardStyle::Info,
+            ),
+            ModeCardKind::Grid => (
+                "Grid mode",
+                vec![
+                    "Use direction keys to narrow",
+                    "Confirm to move, Esc to cancel",
+                ],
+                ModeCardStyle::Info,
+            ),
+            ModeCardKind::UiHint => (
+                "UI hint mode",
+                vec!["Type a visible hint label", "Esc: cancel"],
+                ModeCardStyle::Info,
+            ),
+            ModeCardKind::FinalAdjust => (
+                "Final adjust",
+                vec!["Nudge with movement keys", "Enter: confirm, Esc: cancel"],
+                ModeCardStyle::Success,
+            ),
+            ModeCardKind::Help => (
+                "Help mode",
+                vec![
+                    "Type to filter bindings",
+                    "Tab/Page: navigate",
+                    "Esc: close",
+                ],
+                ModeCardStyle::Info,
+            ),
+            ModeCardKind::Surgical => (
+                "Surgical mode",
+                vec!["Precision movement active", "Release modifier to exit"],
+                ModeCardStyle::Warning,
+            ),
+            ModeCardKind::ScrollModifier => (
+                "Scroll modifier",
+                vec![
+                    "Movement keys scroll while held",
+                    "Release modifier to exit",
+                ],
+                ModeCardStyle::Info,
+            ),
+        };
+        self.push_notification(render_mode_card(title, &lines, cfg.duration_ms, style));
     }
 
     fn push_mouse_speed_notification(&mut self) {
@@ -1522,6 +1621,14 @@ mod tests {
             .collect()
     }
 
+    fn notification_bodies(mouse: &mut MouseMaster<FakeBackend>) -> Vec<String> {
+        mouse
+            .take_notifications()
+            .into_iter()
+            .map(|notification| notification.body)
+            .collect()
+    }
+
     #[test]
     fn speed_actions_enqueue_runtime_notifications() {
         for (action, expected_kind) in [
@@ -1597,6 +1704,79 @@ mod tests {
 
             assert_eq!(notification_kinds(&mut mouse), vec![expected_kind]);
         }
+    }
+
+    #[test]
+    fn bookmark_mode_entry_emits_mode_card() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.push_mode_card_notification(ModeCardKind::Bookmark);
+
+        let notifications = mouse.take_notifications();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].kind, RuntimeNotificationKind::ModeCard);
+        assert!(notifications[0].title.contains("Bookmark mode"));
+        assert!(notifications[0].body.contains("1-9"));
+    }
+
+    #[test]
+    fn jump_mode_entry_emits_mode_card() {
+        let mut mouse = MouseMaster::new_with_backend(test_config(), FakeBackend::default());
+
+        mouse.push_mode_card_notification(ModeCardKind::Jump);
+
+        let notifications = mouse.take_notifications();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].kind, RuntimeNotificationKind::ModeCard);
+        assert!(notifications[0].title.contains("Jump mode"));
+        assert!(notifications[0].body.contains("grid labels"));
+    }
+
+    #[test]
+    fn panic_reset_tooltip_mentions_idle_when_configured() {
+        let mut config = test_config();
+        config.system_bindings.panic_reset_sets_idle = true;
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        mouse.push_panic_reset_notification();
+
+        let bodies = notification_bodies(&mut mouse);
+        assert!(bodies[0].contains("Set idle"));
+        assert!(bodies[0].contains("Released buttons"));
+        assert!(bodies[0].contains("Cleared held keys"));
+        assert!(bodies[0].contains("Exited modes"));
+    }
+
+    #[test]
+    fn panic_reset_tooltip_omits_idle_when_not_configured() {
+        let mut config = test_config();
+        config.system_bindings.panic_reset_sets_idle = false;
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+
+        mouse.push_panic_reset_notification();
+
+        let bodies = notification_bodies(&mut mouse);
+        assert!(!bodies[0].contains("Set idle"));
+        assert!(bodies[0].contains("Released buttons"));
+    }
+
+    #[test]
+    fn mode_cards_respect_config_toggles() {
+        let mut config = test_config();
+        config.tooltip_overlay.mode_cards.show_bookmark_mode = false;
+        let mut mouse = MouseMaster::new_with_backend(config, FakeBackend::default());
+        mouse.push_mode_card_notification(ModeCardKind::Bookmark);
+        assert!(mouse.take_notifications().is_empty());
+
+        mouse.push_mode_card_notification(ModeCardKind::Jump);
+        assert_eq!(
+            notification_kinds(&mut mouse),
+            vec![RuntimeNotificationKind::ModeCard]
+        );
+
+        mouse.config.tooltip_overlay.mode_cards.enabled = false;
+        mouse.push_mode_card_notification(ModeCardKind::Jump);
+        assert!(mouse.take_notifications().is_empty());
     }
 
     #[test]

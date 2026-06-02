@@ -231,6 +231,37 @@ pub struct TemporaryMessage {
 
 pub type TooltipMessage = TemporaryMessage;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeCardStyle {
+    Info,
+    Success,
+    Warning,
+}
+
+impl ModeCardStyle {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Info => "MODE",
+            Self::Success => "READY",
+            Self::Warning => "NOTICE",
+        }
+    }
+}
+
+pub fn render_mode_card(
+    title: impl Into<String>,
+    instruction_lines: &[&str],
+    duration_ms: u64,
+    style: ModeCardStyle,
+) -> RuntimeNotification {
+    RuntimeNotification {
+        kind: RuntimeNotificationKind::ModeCard,
+        title: format!("{}: {}", style.label(), title.into()),
+        body: instruction_lines.join("\n"),
+        duration_ms,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelpOverlayContent {
     Hidden,
@@ -701,10 +732,14 @@ pub fn format_tooltip_message(
         },
         RuntimeNotificationKind::PanicReset => TooltipMessage {
             title: "Panic reset".to_string(),
-            body: "Runtime state restored".to_string(),
+            body: notification.body.clone(),
         },
         RuntimeNotificationKind::StepMove => TooltipMessage {
             title: "Step move".to_string(),
+            body: notification.body.clone(),
+        },
+        RuntimeNotificationKind::ModeCard => TooltipMessage {
+            title: notification.title.clone(),
             body: notification.body.clone(),
         },
     }

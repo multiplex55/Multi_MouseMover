@@ -358,6 +358,13 @@ Wheel levels are interpreted by the target application. Some apps map level chan
 | `tooltip_overlay.help_positioning` | enum string | `"center"` | Yes | Active | Help overlay placement. |
 | `tooltip_overlay.help_width` | integer pixels | `420` | Yes | Active | Help overlay width before clamping. |
 | `tooltip_overlay.help_max_bindings` | integer | `40` | Yes | Active | Legacy static help cap; interactive help uses pages so filtered bindings remain reachable. |
+| `tooltip_overlay.mode_cards.enabled` | boolean | `true` | Yes | Active | Enables short mode-specific cards for important mode transitions. |
+| `tooltip_overlay.mode_cards.show_bookmark_mode` | boolean | `true` | Yes | Active | Shows the bookmark-mode entry card. |
+| `tooltip_overlay.mode_cards.show_jump_mode` | boolean | `true` | Yes | Active | Shows the jump-mode entry card. |
+| `tooltip_overlay.mode_cards.show_grid_mode` | boolean | `true` | Yes | Active | Shows the grid-mode entry card. |
+| `tooltip_overlay.mode_cards.show_ui_hint_mode` | boolean | `true` | Yes | Active | Shows the UI-hint-mode entry card. |
+| `tooltip_overlay.mode_cards.show_final_adjust` | boolean | `true` | Yes | Active | Shows the final-adjust entry card. |
+| `tooltip_overlay.mode_cards.duration_ms` | integer milliseconds | `900` | Yes | Active | Duration used by mode-card tooltips. |
 | `tooltip_overlay.help.interactive` | boolean | `true` | Yes | Active | Enables stateful help routing for search, sections, and paging. |
 | `tooltip_overlay.help.page_size` | integer | `18` | Yes | Active | Number of binding rows shown per interactive help page. |
 | `tooltip_overlay.help.show_unbound_actions` | boolean | `true` | Yes | Active | Includes known actions without current key bindings. |
