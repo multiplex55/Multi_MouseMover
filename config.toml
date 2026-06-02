@@ -503,6 +503,15 @@ help_positioning = "center"
 help_width = 420
 help_max_bindings = 40
 
+[tooltip_overlay.mode_cards]
+enabled = true
+show_bookmark_mode = true
+show_jump_mode = true
+show_grid_mode = true
+show_ui_hint_mode = true
+show_final_adjust = true
+duration_ms = 900
+
 [tooltip_overlay.help]
 interactive = true
 page_size = 18
