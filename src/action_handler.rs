@@ -988,6 +988,7 @@ impl<B: MouseBackend> MouseMaster<B> {
 
     pub fn push_panic_reset_notification(&mut self) {
         let mut lines = vec![
+            "Runtime state restored".to_string(),
             "Released buttons".to_string(),
             "Cleared held keys".to_string(),
             "Exited modes".to_string(),
