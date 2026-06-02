@@ -732,7 +732,13 @@ pub fn format_tooltip_message(
         },
         RuntimeNotificationKind::PanicReset => TooltipMessage {
             title: "Panic reset".to_string(),
-            body: notification.body.clone(),
+            body: if notification.body.contains("restored") {
+                notification.body.clone()
+            } else if notification.body.is_empty() {
+                "Runtime state restored".to_string()
+            } else {
+                format!("Runtime state restored\n{}", notification.body)
+            },
         },
         RuntimeNotificationKind::StepMove => TooltipMessage {
             title: "Step move".to_string(),
