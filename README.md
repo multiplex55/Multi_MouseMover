@@ -73,7 +73,7 @@ The app starts active. Press `Ctrl+Q` to switch between active and idle mode. In
 
 System bindings bypass the active-mode gate. The configured toggle-active chord can always reactivate control, and `Ctrl+Escape` remains the configured exit key.
 
-Bookmark mode is configurable under `[bookmarks]` in `config.toml` (including slot count, key validation fallbacks, desktop behavior, and coordinate policy). Visual markers are configurable under `[bookmark_markers]`. The bookmark JSON file path is resolved relative to the resolved config file path when a relative `bookmarks.file` value is used.
+Bookmark mode is configurable under `[bookmarks]` in `config.toml` (including slot count, key validation fallbacks, desktop behavior, and coordinate policy). The bookmark JSON file path is resolved relative to the resolved config file path when a relative `bookmarks.file` value is used.
 
 ## Drag Behavior
 
@@ -274,7 +274,7 @@ This project is licensed under the terms of the MIT license. See [LICENSE](LICEN
 
 ## Bookmarks
 
-Bookmarks are in-memory/session-backed by default with optional JSON persistence via `[bookmarks]`. Visual bookmark markers are configured under `[bookmark_markers]` and show the shortest configured slot keybind rather than bookmark names.
+Bookmarks are in-memory/session-backed by default with optional JSON persistence via `[bookmarks]`.
 
 Default flow:
 1. Press `B` to enter bookmark mode.
@@ -282,4 +282,4 @@ Default flow:
 3. Press `Backspace+1..9` while in bookmark mode to clear that slot.
 4. Press `1..9` outside bookmark mode to recall that slot.
 5. Press `Escape` to cancel bookmark mode without changing slots.
-6. Press `V` / `show_bookmarks` to show visual bookmark markers for active slots.
+6. Optional: bind `show_bookmarks` / `bookmark_list` to show a tooltip list of slots.

@@ -1,7 +1,6 @@
 mod action;
 mod action_handler;
 mod app_state;
-mod bookmark_marker_overlay;
 mod bookmarks;
 mod config_audit;
 mod grid_session;
@@ -27,10 +26,6 @@ mod zoom_overlay;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, GridInputUpdate, JumpOverlayResolution, KeyEvent};
-use bookmark_marker_overlay::{
-    build_bookmark_marker_overlay_view, BookmarkMarkerOverlay, BookmarkMarkerPositionSource,
-    BookmarkMarkerShape, BookmarkMarkerSlotStyle, BookmarkMarkersConfig, VirtualScreenRect,
-};
 use bookmarks::{
     normalize_bookmark_name, resolve_bookmarks_path, BookmarkRecord, BookmarkStore,
     MonitorRect as BookmarkMonitorRect, RemoveOutcome, SetOutcome,
@@ -385,14 +380,6 @@ lazy_static! {
 
 thread_local! {
     static UI_HINT_OVERLAY: RefCell<UiHintOverlay> = RefCell::new(UiHintOverlay::new());
-    static BOOKMARK_MARKER_OVERLAY: RefCell<BookmarkMarkerOverlay> = RefCell::new(BookmarkMarkerOverlay::new());
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BookmarkMarkerDisplayReason {
-    Help,
-    ShowBookmarks,
-    BookmarkMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -485,7 +472,6 @@ struct Config {
     tooltip_overlay: TooltipOverlayConfig,
     ui_hints: UiHintsConfig,
     bookmarks: BookmarksConfig,
-    bookmark_markers: BookmarkMarkersConfig,
     mouse_speed: MouseSpeedConfig,
     slow_mouse: SlowMouseConfig,
     surgical_mode: SurgicalModeConfig,
@@ -519,7 +505,6 @@ impl Default for Config {
             tooltip_overlay: TooltipOverlayConfig::default(),
             ui_hints: UiHintsConfig::default(),
             bookmarks: BookmarksConfig::default(),
-            bookmark_markers: BookmarkMarkersConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             slow_mouse: SlowMouseConfig::default(),
             surgical_mode: SurgicalModeConfig::default(),
@@ -630,7 +615,7 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("7", "bookmark_slot_7"),
         ("8", "bookmark_slot_8"),
         ("9", "bookmark_slot_9"),
-        ("V", "show_bookmarks"),
+        ("`", "show_bookmarks"),
     ]
     .into_iter()
     .map(|(key, action)| (key.to_string(), action.to_string()))
@@ -815,52 +800,6 @@ impl Default for BookmarksConfig {
             list_empty_slot_label: "(empty)".to_string(),
             list_unnamed_label: "(unnamed)".to_string(),
             list_tooltip_duration_ms: 1200,
-        }
-    }
-}
-
-impl Default for BookmarkMarkersConfig {
-    fn default() -> Self {
-        let mut slot_styles = HashMap::new();
-        for (slot, color) in [
-            ("1", "#FFD400"),
-            ("2", "#00E676"),
-            ("3", "#40C4FF"),
-            ("4", "#FF4081"),
-            ("5", "#FF9100"),
-            ("6", "#B388FF"),
-            ("7", "#AEEA00"),
-            ("8", "#00E5FF"),
-            ("9", "#FF5252"),
-        ] {
-            slot_styles.insert(
-                slot.to_string(),
-                BookmarkMarkerSlotStyle {
-                    fill_color: Some(color.to_string()),
-                    ..BookmarkMarkerSlotStyle::default()
-                },
-            );
-        }
-        Self {
-            enabled: true,
-            show_with_help: true,
-            show_with_show_bookmarks: true,
-            show_with_bookmark_mode: true,
-            filter_current_virtual_desktop: true,
-            hide_offscreen: true,
-            position_source: BookmarkMarkerPositionSource::SavedCoordinate,
-            shape: BookmarkMarkerShape::Square,
-            size_px: 32,
-            opacity: 0.82,
-            fill_color: "#FFD400".to_string(),
-            text_color: "#000000".to_string(),
-            border_color: "#000000".to_string(),
-            border_width_px: 2,
-            font_scale: 1.0,
-            offset_x: 0,
-            offset_y: 0,
-            center_on_bookmark: true,
-            slot_styles,
         }
     }
 }
@@ -1797,7 +1736,6 @@ impl Config {
         self.normalize_tooltip_overlay_config();
         self.normalize_ui_hints_config();
         self.normalize_bookmarks_config();
-        self.normalize_bookmark_markers_config();
         self.normalize_input_config();
         // Keep the legacy field stable for downstream code and diagnostics after the
         // modern baseline has won normalization.
@@ -1970,98 +1908,6 @@ impl Config {
             warn_config_normalized("bookmarks.clear_modifier_key is invalid; using Backspace");
             self.bookmarks.clear_modifier_key = "Backspace".to_string();
         }
-    }
-
-    fn normalize_bookmark_markers_config(&mut self) {
-        let defaults = BookmarkMarkersConfig::default();
-        self.bookmark_markers.size_px = normalize_i32_range(
-            "bookmark_markers.size_px",
-            self.bookmark_markers.size_px,
-            12,
-            96,
-        );
-        self.bookmark_markers.opacity = normalize_f32_range(
-            "bookmark_markers.opacity",
-            self.bookmark_markers.opacity,
-            0.10,
-            1.00,
-        );
-        self.bookmark_markers.border_width_px = normalize_i32_range(
-            "bookmark_markers.border_width_px",
-            self.bookmark_markers.border_width_px,
-            0,
-            8,
-        );
-        self.bookmark_markers.font_scale = normalize_f32_range(
-            "bookmark_markers.font_scale",
-            self.bookmark_markers.font_scale,
-            0.50,
-            3.00,
-        );
-        self.bookmark_markers.offset_x = normalize_i32_range(
-            "bookmark_markers.offset_x",
-            self.bookmark_markers.offset_x,
-            -200,
-            200,
-        );
-        self.bookmark_markers.offset_y = normalize_i32_range(
-            "bookmark_markers.offset_y",
-            self.bookmark_markers.offset_y,
-            -200,
-            200,
-        );
-        normalize_marker_color(
-            "bookmark_markers.fill_color",
-            &mut self.bookmark_markers.fill_color,
-            &defaults.fill_color,
-        );
-        normalize_marker_color(
-            "bookmark_markers.text_color",
-            &mut self.bookmark_markers.text_color,
-            &defaults.text_color,
-        );
-        normalize_marker_color(
-            "bookmark_markers.border_color",
-            &mut self.bookmark_markers.border_color,
-            &defaults.border_color,
-        );
-
-        let slot_count = self.bookmarks.slot_count.clamp(1, 9);
-        self.bookmark_markers.slot_styles.retain(|slot, style| {
-            let Ok(slot_num) = slot.parse::<u32>() else {
-                warn_config_normalized(&format!(
-                    "bookmark_markers.slot_styles.{slot} is not a valid slot; ignoring"
-                ));
-                return false;
-            };
-            if !(1..=slot_count).contains(&slot_num) {
-                warn_config_normalized(&format!(
-                    "bookmark_markers.slot_styles.{slot} is outside configured bookmark slots; ignoring"
-                ));
-                return false;
-            }
-            normalize_optional_marker_color(
-                &format!("bookmark_markers.slot_styles.{slot}.fill_color"),
-                &mut style.fill_color,
-            );
-            normalize_optional_marker_color(
-                &format!("bookmark_markers.slot_styles.{slot}.text_color"),
-                &mut style.text_color,
-            );
-            normalize_optional_marker_color(
-                &format!("bookmark_markers.slot_styles.{slot}.border_color"),
-                &mut style.border_color,
-            );
-            if let Some(opacity) = style.opacity.as_mut() {
-                *opacity = normalize_f32_range(
-                    &format!("bookmark_markers.slot_styles.{slot}.opacity"),
-                    *opacity,
-                    0.10,
-                    1.00,
-                );
-            }
-            true
-        });
     }
 
     fn normalize_input_config(&mut self) {
@@ -2552,7 +2398,7 @@ impl Config {
             if let Ok(chord) = KeyChord::parse(key) {
                 if let Some(action) = Action::from_string(action_str) {
                     println!("✅ Binding key: {:?} -> {:?}", chord, action);
-                    key_actions.add_chord_binding_with_display(chord, action, key.clone());
+                    key_actions.add_chord_binding(chord, action);
                 } else {
                     println!(
                         "❌ Action '{}' does not exist for key '{}'",
@@ -2760,27 +2606,6 @@ fn normalize_f32_range(name: &str, value: f32, min: f32, max: f32) -> f32 {
         max
     } else {
         value
-    }
-}
-
-fn is_valid_marker_color(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|b| b.is_ascii_hexdigit())
-}
-
-fn normalize_marker_color(name: &str, value: &mut String, fallback: &str) {
-    if !is_valid_marker_color(value) {
-        warn_config_normalized(&format!("{name} must be #RRGGBB; using {fallback}"));
-        *value = fallback.to_string();
-    }
-}
-
-fn normalize_optional_marker_color(name: &str, value: &mut Option<String>) {
-    if let Some(color) = value {
-        if !is_valid_marker_color(color) {
-            warn_config_normalized(&format!("{name} must be #RRGGBB; ignoring override"));
-            *value = None;
-        }
     }
 }
 
@@ -3176,21 +3001,6 @@ fn process_queued_key_events(debug_diagnostics: bool) -> LoopDiagnostics {
             );
         }
 
-        let marker_escape_only = if event.is_down
-            && event.key == VirtualKey::Escape
-            && bookmark_marker_overlay_is_visible()
-        {
-            let app_state = APP_STATE.read().unwrap();
-            !app_state.help_visible() && !app_state.is_bookmark_mode_active()
-        } else {
-            false
-        };
-        if marker_escape_only {
-            hide_bookmark_marker_overlay();
-            diagnostics.queued_key_events_processed += 1;
-            continue;
-        }
-
         APP_STATE.write().unwrap().route_key_event(event, action);
         diagnostics.queued_key_events_processed += 1;
     }
@@ -3425,7 +3235,6 @@ fn clear_all_runtime_input_state<B: MouseBackend>(
     action_handler.clear_runtime_input_state();
     app_state.clear_runtime_input_state();
     help_overlay::hide_help_overlay();
-    hide_bookmark_marker_overlay();
     if matches!(reason, RuntimeCleanupReason::PanicReset) {
         action_handler.mouse_master.push_panic_reset_notification();
     }
@@ -3453,7 +3262,6 @@ fn apply_active_mode_transition<B: MouseBackend>(
 fn clear_help_for_exclusive_mode(app_state: &mut AppState) {
     app_state.hide_help();
     help_overlay::hide_help_overlay();
-    hide_bookmark_marker_overlay();
 }
 
 fn execute_key_action_command<B: MouseBackend>(
@@ -3692,71 +3500,6 @@ fn panic_reset() -> JumpOverlayResolution {
         app_state.set_active_mode(false);
     }
     resolution
-}
-
-fn bookmark_marker_overlay_is_visible() -> bool {
-    BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow().is_visible())
-}
-
-fn bookmark_marker_reason_enabled(config: &Config, reason: BookmarkMarkerDisplayReason) -> bool {
-    config.bookmarks.enabled
-        && config.bookmark_markers.enabled
-        && match reason {
-            BookmarkMarkerDisplayReason::Help => config.bookmark_markers.show_with_help,
-            BookmarkMarkerDisplayReason::ShowBookmarks => {
-                config.bookmark_markers.show_with_show_bookmarks
-            }
-            BookmarkMarkerDisplayReason::BookmarkMode => {
-                config.bookmark_markers.show_with_bookmark_mode
-            }
-        }
-}
-
-fn show_bookmark_marker_overlay(reason: BookmarkMarkerDisplayReason) {
-    let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
-    if !bookmark_marker_reason_enabled(&config, reason) {
-        hide_bookmark_marker_overlay();
-        return;
-    }
-    let current_desktop_id = virtual_desktop::current_virtual_desktop_id();
-    let view = {
-        let runtime_guard = BOOKMARK_RUNTIME.lock().unwrap();
-        let Some(runtime) = runtime_guard.as_ref() else {
-            drop(runtime_guard);
-            hide_bookmark_marker_overlay();
-            return;
-        };
-        let key_bindings = KEY_ACTIONS.read().unwrap();
-        build_bookmark_marker_overlay_view(
-            &config,
-            &runtime.store,
-            &key_bindings,
-            current_desktop_id.as_deref(),
-            VirtualScreenRect::current(),
-            |record| {
-                let Some(hwnd) = record.anchor_hwnd else {
-                    return false;
-                };
-                virtual_desktop::is_window_on_current_virtual_desktop(HWND(
-                    hwnd as *mut core::ffi::c_void,
-                ))
-            },
-        )
-    };
-    BOOKMARK_MARKER_OVERLAY.with(|overlay| {
-        let mut overlay = overlay.borrow_mut();
-        if view.markers.is_empty() {
-            let _ = overlay.hide();
-        } else {
-            overlay.render(&view);
-        }
-    });
-}
-
-fn hide_bookmark_marker_overlay() {
-    BOOKMARK_MARKER_OVERLAY.with(|overlay| {
-        let _ = overlay.borrow_mut().hide();
-    });
 }
 
 fn build_help_overlay_view() -> help_overlay::HelpOverlayView {
@@ -4082,19 +3825,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::ReloadConfig => {
             exit_ui_hint_mode(UiHintExitReason::Reload);
-            let help_was_visible = APP_STATE.read().unwrap().help_visible();
-            let markers_were_visible = bookmark_marker_overlay_is_visible();
             if let Err(err) = reload_config() {
                 eprintln!("[reload] keeping existing config: {err}");
-                hide_bookmark_marker_overlay();
-            } else if help_was_visible {
-                let view = build_help_overlay_view();
-                help_overlay::show_help_overlay(view);
-                show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::Help);
-            } else if markers_were_visible {
-                show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::ShowBookmarks);
             } else {
-                hide_bookmark_marker_overlay();
+                APP_STATE.write().unwrap().hide_help();
+                help_overlay::hide_help_overlay();
             }
         }
         AppCommand::PanicReset => {
@@ -4114,7 +3849,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if !help_config.enabled || !help_config.show_help {
                 APP_STATE.write().unwrap().hide_help();
                 help_overlay::hide_help_overlay();
-                hide_bookmark_marker_overlay();
                 return;
             }
 
@@ -4131,23 +3865,19 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     .push_mode_card_notification(ModeCardKind::Help);
                 let view = build_help_overlay_view();
                 help_overlay::show_help_overlay(view);
-                show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::Help);
             } else {
                 help_overlay::hide_help_overlay();
-                hide_bookmark_marker_overlay();
             }
         }
         AppCommand::HideHelp => {
             APP_STATE.write().unwrap().hide_help();
             help_overlay::hide_help_overlay();
-            hide_bookmark_marker_overlay();
         }
         AppCommand::HelpInput(input) => {
             let hidden = matches!(input, help_overlay::HelpInput::Escape);
             help_overlay::handle_help_input(input);
             if hidden {
                 APP_STATE.write().unwrap().hide_help();
-                hide_bookmark_marker_overlay();
             }
         }
         AppCommand::EnterJumpMode {
@@ -4532,12 +4262,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .mouse_master
                 .push_mode_card_notification(ModeCardKind::Bookmark);
             show_bookmark_tooltip(&config, bookmark_mode_entry_tooltip_body());
-            if config.bookmark_markers.enabled && config.bookmark_markers.show_with_bookmark_mode {
-                show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::BookmarkMode);
-            }
         }
         AppCommand::RecallBookmarkSlot(slot) => {
-            hide_bookmark_marker_overlay();
             let cfg = ACTION_HANDLER
                 .read()
                 .unwrap()
@@ -4706,7 +4432,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 }
             };
             APP_STATE.write().unwrap().exit_bookmark_mode();
-            hide_bookmark_marker_overlay();
             if saved_ok
                 && config.bookmarks.allow_name_updates
                 && (config.bookmarks.prompt_for_name_on_save
@@ -4736,19 +4461,11 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if !config.bookmarks.enabled {
                 return;
             }
-            if config.bookmark_markers.enabled && config.bookmark_markers.show_with_show_bookmarks {
-                if bookmark_marker_overlay_is_visible() {
-                    hide_bookmark_marker_overlay();
-                } else {
-                    show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::ShowBookmarks);
-                }
-            } else {
-                let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
-                let Some(runtime) = guard.as_mut() else {
-                    return;
-                };
-                show_bookmark_tooltip(&config, bookmark_list_tooltip_body(&config, &runtime.store));
-            }
+            let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            show_bookmark_tooltip(&config, bookmark_list_tooltip_body(&config, &runtime.store));
         }
         AppCommand::ClearBookmarkSlot(slot) => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
@@ -4772,7 +4489,6 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 }
             }
             APP_STATE.write().unwrap().exit_bookmark_mode();
-            hide_bookmark_marker_overlay();
         }
         AppCommand::ClearAllBookmarks => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
@@ -4791,11 +4507,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 }
             }
             APP_STATE.write().unwrap().exit_bookmark_mode();
-            hide_bookmark_marker_overlay();
         }
         AppCommand::CancelBookmarkMode => {
             APP_STATE.write().unwrap().exit_bookmark_mode();
-            hide_bookmark_marker_overlay();
         }
         AppCommand::UiHintInput(event) => {
             if !event.is_down {
@@ -9140,54 +8854,5 @@ mod bookmark_runtime_logic_tests {
             &input,
             Duration::from_millis(5000)
         ));
-    }
-    #[test]
-    fn bookmark_marker_config_normalizes_bounds_colors_and_slot_styles() {
-        let mut config = Config::default();
-        config.bookmarks.slot_count = 4;
-        config.bookmark_markers.size_px = 0;
-        config.bookmark_markers.opacity = 5.0;
-        config.bookmark_markers.border_width_px = 99;
-        config.bookmark_markers.font_scale = 0.1;
-        config.bookmark_markers.offset_x = -999;
-        config.bookmark_markers.offset_y = 999;
-        config.bookmark_markers.fill_color = "yellow".to_string();
-        config.bookmark_markers.slot_styles.insert(
-            "bad".to_string(),
-            BookmarkMarkerSlotStyle {
-                fill_color: Some("#000000".to_string()),
-                ..BookmarkMarkerSlotStyle::default()
-            },
-        );
-        config.bookmark_markers.slot_styles.insert(
-            "5".to_string(),
-            BookmarkMarkerSlotStyle {
-                fill_color: Some("#000000".to_string()),
-                ..BookmarkMarkerSlotStyle::default()
-            },
-        );
-        config.bookmark_markers.slot_styles.insert(
-            "2".to_string(),
-            BookmarkMarkerSlotStyle {
-                fill_color: Some("green".to_string()),
-                opacity: Some(5.0),
-                ..BookmarkMarkerSlotStyle::default()
-            },
-        );
-
-        let normalized = config.normalize().unwrap();
-
-        assert_eq!(normalized.bookmark_markers.size_px, 12);
-        assert_eq!(normalized.bookmark_markers.opacity, 1.0);
-        assert_eq!(normalized.bookmark_markers.border_width_px, 8);
-        assert_eq!(normalized.bookmark_markers.font_scale, 0.5);
-        assert_eq!(normalized.bookmark_markers.offset_x, -200);
-        assert_eq!(normalized.bookmark_markers.offset_y, 200);
-        assert_eq!(normalized.bookmark_markers.fill_color, "#FFD400");
-        assert!(!normalized.bookmark_markers.slot_styles.contains_key("bad"));
-        assert!(!normalized.bookmark_markers.slot_styles.contains_key("5"));
-        let slot_2 = normalized.bookmark_markers.slot_styles.get("2").unwrap();
-        assert_eq!(slot_2.fill_color, None);
-        assert_eq!(slot_2.opacity, Some(1.0));
     }
 }
