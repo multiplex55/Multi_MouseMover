@@ -132,7 +132,7 @@ key_bindings = [
   ["7", "bookmark_slot_7"],
   ["8", "bookmark_slot_8"],
   ["9", "bookmark_slot_9"],
-  ["V", "show_bookmarks"],
+  ["`", "show_bookmarks"],
 ]
 ```
 
@@ -582,49 +582,6 @@ list_tooltip_duration_ms = 1200
 ```
 
 `desktop_behavior` currently supports `focus_anchor_window` (invalid values fall back to this). `coordinate_policy` currently supports `clamp_to_virtual_screen` (invalid values fall back to this).
-
-
-### `[bookmark_markers]`
-
-Configures visual bookmark markers. Markers are drawn in a dedicated click-through overlay when help is visible, when `show_bookmarks` is pressed, and while bookmark mode is active. Marker labels intentionally show the shortest configured keybind for the bookmark slot; bookmark names remain storage/list metadata and are not shown in marker bubbles.
-
-```toml
-[bookmark_markers]
-enabled = true
-show_with_help = true
-show_with_show_bookmarks = true
-show_with_bookmark_mode = true
-filter_current_virtual_desktop = true
-hide_offscreen = true
-position_source = "saved_coordinate" # saved_coordinate | resolved_recall_target
-shape = "square"                    # square | circle
-size_px = 32                         # clamped to 12..96
-opacity = 0.82                       # clamped to 0.10..1.00
-fill_color = "#FFD400"
-text_color = "#000000"
-border_color = "#000000"
-border_width_px = 2                  # clamped to 0..8
-font_scale = 1.0                     # clamped to 0.50..3.00
-offset_x = 0                         # clamped to -200..200
-offset_y = 0                         # clamped to -200..200
-center_on_bookmark = true
-
-[bookmark_markers.slot_styles."1"]
-fill_color = "#FFD400"
-
-[bookmark_markers.slot_styles."2"]
-fill_color = "#00E676"
-```
-
-Bookmark visual marker workflow:
-
-- `/` opens the help overlay and shows active bookmark markers.
-- `V` shows visual bookmark markers directly; pressing `V` again hides them.
-- `B` enters bookmark mode; active markers are shown while choosing save/clear slots.
-- Markers show configured keybinds, not bookmark names.
-- With `filter_current_virtual_desktop = true`, markers are shown only for bookmarks saved on the current virtual desktop.
-- Bookmarks whose anchor window is unavailable or not on the current virtual desktop are hidden.
-- Offscreen bookmarks are hidden when `hide_offscreen = true`; marker display does not clamp them.
 
 ### Surgical mode
 
