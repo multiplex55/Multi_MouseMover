@@ -358,11 +358,54 @@ mod tests {
     fn bookmark_names_never_appear_in_marker_labels() {
         let config = config();
         let mut named = record(1, 1, 1);
-        named.name = Some("Secret bookmark name".into());
+        named.name = Some("Secret Name".into());
         let store = store_with([named]);
-        let bindings = bindings(&[1]);
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("1").unwrap(),
+            Action::BookmarkSlot(1),
+            "1",
+        );
 
-        assert_eq!(view(&config, &store, &bindings).markers[0].label, "B1");
+        let marker_view = view(&config, &store, &bindings);
+        let labels = marker_view
+            .markers
+            .iter()
+            .map(|marker| marker.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"1"));
+        assert!(!labels.contains(&"Secret Name"));
+        assert!(labels.iter().all(|label| !label.contains("Secret Name")));
+    }
+
+    #[test]
+    fn rebuilding_marker_view_after_keybinding_change_updates_label() {
+        let config = config();
+        let mut named = record(1, 1, 1);
+        named.name = Some("Secret Name".into());
+        let store = store_with([named]);
+        let mut initial_bindings = KeyBindings::new();
+        initial_bindings.add_chord_binding_with_display(
+            KeyChord::parse("1").unwrap(),
+            Action::BookmarkSlot(1),
+            "1",
+        );
+        let mut updated_bindings = KeyBindings::new();
+        updated_bindings.add_chord_binding_with_display(
+            KeyChord::parse("RightAlt+1").unwrap(),
+            Action::BookmarkSlot(1),
+            "RightAlt+1",
+        );
+
+        assert_eq!(
+            view(&config, &store, &initial_bindings).markers[0].label,
+            "1"
+        );
+        assert_eq!(
+            view(&config, &store, &updated_bindings).markers[0].label,
+            "RightAlt+1"
+        );
     }
 
     #[test]
