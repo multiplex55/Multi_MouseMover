@@ -28,6 +28,10 @@ mod zoom_overlay;
 use action::*;
 use action_handler::*;
 use app_state::{AppCommand, AppState, GridInputUpdate, JumpOverlayResolution, KeyEvent};
+use bookmark_marker_overlay::BookmarkMarkerOverlay;
+use bookmark_markers::{
+    build_bookmark_marker_overlay_view, Rect as BookmarkMarkerVirtualScreenRect,
+};
 use bookmarks::{
     normalize_bookmark_name, resolve_bookmarks_path, BookmarkRecord, BookmarkStore,
     MonitorRect as BookmarkMonitorRect, RemoveOutcome, SetOutcome,
@@ -378,10 +382,61 @@ lazy_static! {
     static ref UI_HINT_QUERY_RX: Mutex<Option<Receiver<UiHintQueryResult>>> = Mutex::new(None);
     static ref UI_HINT_SESSION: Mutex<Option<UiHintSession>> = Mutex::new(None);
     static ref BOOKMARK_RUNTIME: Mutex<Option<BookmarkRuntime>> = Mutex::new(None);
+    static ref BOOKMARK_MARKER_DISPLAY_REASONS: Mutex<BookmarkMarkerDisplayReasons> =
+        Mutex::new(BookmarkMarkerDisplayReasons::default());
 }
 
 thread_local! {
     static UI_HINT_OVERLAY: RefCell<UiHintOverlay> = RefCell::new(UiHintOverlay::new());
+    static BOOKMARK_MARKER_OVERLAY: RefCell<BookmarkMarkerOverlay> = RefCell::new(BookmarkMarkerOverlay::new());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BookmarkMarkerDisplayReason {
+    Help,
+    ShowBookmarks,
+    BookmarkMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct BookmarkMarkerDisplayReasons {
+    help: bool,
+    show_bookmarks: bool,
+    bookmark_mode: bool,
+}
+
+impl BookmarkMarkerDisplayReasons {
+    fn insert(&mut self, reason: BookmarkMarkerDisplayReason) {
+        match reason {
+            BookmarkMarkerDisplayReason::Help => self.help = true,
+            BookmarkMarkerDisplayReason::ShowBookmarks => self.show_bookmarks = true,
+            BookmarkMarkerDisplayReason::BookmarkMode => self.bookmark_mode = true,
+        }
+    }
+
+    fn remove(&mut self, reason: BookmarkMarkerDisplayReason) {
+        match reason {
+            BookmarkMarkerDisplayReason::Help => self.help = false,
+            BookmarkMarkerDisplayReason::ShowBookmarks => self.show_bookmarks = false,
+            BookmarkMarkerDisplayReason::BookmarkMode => self.bookmark_mode = false,
+        }
+    }
+
+    fn contains(self, reason: BookmarkMarkerDisplayReason) -> bool {
+        match reason {
+            BookmarkMarkerDisplayReason::Help => self.help,
+            BookmarkMarkerDisplayReason::ShowBookmarks => self.show_bookmarks,
+            BookmarkMarkerDisplayReason::BookmarkMode => self.bookmark_mode,
+        }
+    }
+
+    fn is_empty(self) -> bool {
+        !self.help && !self.show_bookmarks && !self.bookmark_mode
+    }
+
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3461,6 +3516,7 @@ fn clear_all_runtime_input_state<B: MouseBackend>(
     action_handler.clear_runtime_input_state();
     app_state.clear_runtime_input_state();
     help_overlay::hide_help_overlay();
+    hide_bookmark_marker_overlay();
     if matches!(reason, RuntimeCleanupReason::PanicReset) {
         action_handler.mouse_master.push_panic_reset_notification();
     }
@@ -3488,6 +3544,140 @@ fn apply_active_mode_transition<B: MouseBackend>(
 fn clear_help_for_exclusive_mode(app_state: &mut AppState) {
     app_state.hide_help();
     help_overlay::hide_help_overlay();
+    hide_bookmark_marker_overlay();
+}
+
+fn bookmark_marker_reason_allowed(config: &Config, reason: BookmarkMarkerDisplayReason) -> bool {
+    config.bookmark_markers.enabled
+        && match reason {
+            BookmarkMarkerDisplayReason::Help => config.bookmark_markers.show_with_help,
+            BookmarkMarkerDisplayReason::ShowBookmarks => {
+                config.bookmark_markers.show_with_show_bookmarks
+            }
+            BookmarkMarkerDisplayReason::BookmarkMode => {
+                config.bookmark_markers.show_with_bookmark_mode
+            }
+        }
+}
+
+fn show_bookmarks_uses_marker_overlay(config: &Config) -> bool {
+    bookmark_marker_reason_allowed(config, BookmarkMarkerDisplayReason::ShowBookmarks)
+}
+
+fn current_bookmark_marker_virtual_screen() -> BookmarkMarkerVirtualScreenRect {
+    let region = virtual_screen_region();
+    BookmarkMarkerVirtualScreenRect {
+        left: region.left,
+        top: region.top,
+        width: region.width,
+        height: region.height,
+    }
+}
+
+fn bookmark_marker_overlay_active_reasons() -> BookmarkMarkerDisplayReasons {
+    *BOOKMARK_MARKER_DISPLAY_REASONS.lock().unwrap()
+}
+
+fn restore_bookmark_marker_overlay_reasons(reasons: BookmarkMarkerDisplayReasons) {
+    *BOOKMARK_MARKER_DISPLAY_REASONS.lock().unwrap() = reasons;
+}
+
+fn show_bookmark_marker_overlay(reason: BookmarkMarkerDisplayReason) {
+    let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+    if !bookmark_marker_reason_allowed(&config, reason) {
+        hide_bookmark_marker_overlay_reason(reason);
+        return;
+    }
+    BOOKMARK_MARKER_DISPLAY_REASONS
+        .lock()
+        .unwrap()
+        .insert(reason);
+    refresh_bookmark_marker_overlay_if_visible();
+}
+
+fn hide_bookmark_marker_overlay_reason(reason: BookmarkMarkerDisplayReason) {
+    let should_hide = {
+        let mut reasons = BOOKMARK_MARKER_DISPLAY_REASONS.lock().unwrap();
+        reasons.remove(reason);
+        reasons.is_empty()
+    };
+    if should_hide {
+        BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+    } else {
+        refresh_bookmark_marker_overlay_if_visible();
+    }
+}
+
+fn hide_bookmark_marker_overlay() {
+    BOOKMARK_MARKER_DISPLAY_REASONS.lock().unwrap().clear();
+    BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+}
+
+fn bookmark_marker_overlay_is_visible() -> bool {
+    BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow().is_visible())
+}
+
+fn refresh_bookmark_marker_overlay_if_visible() {
+    let active_reasons = bookmark_marker_overlay_active_reasons();
+    if active_reasons.is_empty() {
+        BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+        return;
+    }
+
+    let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+    let mut allowed_reasons = active_reasons;
+    for reason in [
+        BookmarkMarkerDisplayReason::Help,
+        BookmarkMarkerDisplayReason::ShowBookmarks,
+        BookmarkMarkerDisplayReason::BookmarkMode,
+    ] {
+        if allowed_reasons.contains(reason) && !bookmark_marker_reason_allowed(&config, reason) {
+            allowed_reasons.remove(reason);
+        }
+    }
+    restore_bookmark_marker_overlay_reasons(allowed_reasons);
+
+    if allowed_reasons.is_empty() || !config.bookmark_markers.enabled {
+        BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+        return;
+    }
+
+    let store = {
+        let guard = BOOKMARK_RUNTIME.lock().unwrap();
+        let Some(runtime) = guard.as_ref() else {
+            BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+            return;
+        };
+        runtime.store.clone()
+    };
+    let current_desktop_id = virtual_desktop::current_virtual_desktop_id();
+    let virtual_screen = current_bookmark_marker_virtual_screen();
+    let key_bindings = KEY_ACTIONS.read().unwrap();
+    let view = build_bookmark_marker_overlay_view(
+        &config,
+        &store,
+        &key_bindings,
+        current_desktop_id.as_deref(),
+        virtual_screen,
+        |record| virtual_desktop::is_anchor_window_on_current_virtual_desktop(record.anchor_hwnd),
+    );
+    drop(key_bindings);
+
+    BOOKMARK_MARKER_OVERLAY.with(|overlay| {
+        let mut overlay = overlay.borrow_mut();
+        if view.markers.is_empty() {
+            overlay.hide();
+        } else if overlay.is_visible() {
+            let _ = overlay.refresh(view);
+        } else {
+            let _ = overlay.show(view);
+        }
+    });
+}
+
+fn exit_bookmark_mode_runtime() {
+    APP_STATE.write().unwrap().exit_bookmark_mode();
+    hide_bookmark_marker_overlay_reason(BookmarkMarkerDisplayReason::BookmarkMode);
 }
 
 fn execute_key_action_command<B: MouseBackend>(
@@ -4076,11 +4266,31 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
         }
         AppCommand::ReloadConfig => {
             exit_ui_hint_mode(UiHintExitReason::Reload);
+            let help_was_visible = APP_STATE.read().unwrap().help_visible();
+            let marker_was_visible = bookmark_marker_overlay_is_visible();
+            let mut marker_reasons = bookmark_marker_overlay_active_reasons();
             if let Err(err) = reload_config() {
                 eprintln!("[reload] keeping existing config: {err}");
+                hide_bookmark_marker_overlay();
             } else {
-                APP_STATE.write().unwrap().hide_help();
-                help_overlay::hide_help_overlay();
+                if help_was_visible {
+                    {
+                        let mut app_state = APP_STATE.write().unwrap();
+                        if !app_state.help_visible() {
+                            app_state.toggle_help();
+                        }
+                    }
+                    help_overlay::show_help_overlay(build_help_overlay_view());
+                    show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::Help);
+                } else if marker_was_visible {
+                    marker_reasons.remove(BookmarkMarkerDisplayReason::BookmarkMode);
+                    restore_bookmark_marker_overlay_reasons(marker_reasons);
+                    refresh_bookmark_marker_overlay_if_visible();
+                } else {
+                    APP_STATE.write().unwrap().hide_help();
+                    help_overlay::hide_help_overlay();
+                    hide_bookmark_marker_overlay();
+                }
             }
         }
         AppCommand::PanicReset => {
@@ -4100,6 +4310,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
             if !help_config.enabled || !help_config.show_help {
                 APP_STATE.write().unwrap().hide_help();
                 help_overlay::hide_help_overlay();
+                hide_bookmark_marker_overlay_reason(BookmarkMarkerDisplayReason::Help);
                 return;
             }
 
@@ -4116,19 +4327,23 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     .push_mode_card_notification(ModeCardKind::Help);
                 let view = build_help_overlay_view();
                 help_overlay::show_help_overlay(view);
+                show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::Help);
             } else {
                 help_overlay::hide_help_overlay();
+                hide_bookmark_marker_overlay_reason(BookmarkMarkerDisplayReason::Help);
             }
         }
         AppCommand::HideHelp => {
             APP_STATE.write().unwrap().hide_help();
             help_overlay::hide_help_overlay();
+            hide_bookmark_marker_overlay_reason(BookmarkMarkerDisplayReason::Help);
         }
         AppCommand::HelpInput(input) => {
             let hidden = matches!(input, help_overlay::HelpInput::Escape);
             help_overlay::handle_help_input(input);
             if hidden {
                 APP_STATE.write().unwrap().hide_help();
+                hide_bookmark_marker_overlay_reason(BookmarkMarkerDisplayReason::Help);
             }
         }
         AppCommand::EnterJumpMode {
@@ -4513,6 +4728,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .mouse_master
                 .push_mode_card_notification(ModeCardKind::Bookmark);
             show_bookmark_tooltip(&config, bookmark_mode_entry_tooltip_body());
+            show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::BookmarkMode);
         }
         AppCommand::RecallBookmarkSlot(slot) => {
             let cfg = ACTION_HANDLER
@@ -4523,18 +4739,23 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .bookmarks
                 .clone();
             if !cfg.enabled {
+                exit_bookmark_mode_runtime();
                 return;
             }
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
             let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
             let Some(runtime) = guard.as_mut() else {
+                drop(guard);
+                exit_bookmark_mode_runtime();
                 return;
             };
             let Some(record) = runtime.store.get_slot(slot).cloned() else {
                 show_bookmark_tooltip(&config, format!("Bookmark {slot} is empty"));
-                APP_STATE.write().unwrap().exit_bookmark_mode();
+                drop(guard);
+                exit_bookmark_mode_runtime();
                 return;
             };
+            drop(guard);
 
             let mut desktop_ok = true;
             let mut desktop_warn: Option<String> = None;
@@ -4575,7 +4796,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                         desktop_warn.unwrap_or_else(|| "desktop step failed".to_string())
                     ),
                 );
-                APP_STATE.write().unwrap().exit_bookmark_mode();
+                exit_bookmark_mode_runtime();
                 return;
             }
             let (x, y) = resolve_recall_target(&record, &cfg);
@@ -4591,11 +4812,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 &config,
                 format!("Recalled bookmark {slot} -> ({x}, {y}){suffix}"),
             );
-            APP_STATE.write().unwrap().exit_bookmark_mode();
+            exit_bookmark_mode_runtime();
         }
         AppCommand::SetBookmarkSlot(slot) => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
             if !config.bookmarks.enabled {
+                exit_bookmark_mode_runtime();
                 return;
             }
             let (x, y) = match ACTION_HANDLER
@@ -4608,6 +4830,7 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 Ok(v) => v,
                 Err(e) => {
                     show_bookmark_tooltip(&config, format!("Bookmark {slot} failed: {e}"));
+                    exit_bookmark_mode_runtime();
                     return;
                 }
             };
@@ -4630,6 +4853,8 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                 .unwrap_or(0);
             let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
             let Some(runtime) = guard.as_mut() else {
+                drop(guard);
+                exit_bookmark_mode_runtime();
                 return;
             };
             let created = runtime
@@ -4682,7 +4907,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     false
                 }
             };
-            APP_STATE.write().unwrap().exit_bookmark_mode();
+            drop(guard);
+            exit_bookmark_mode_runtime();
+            refresh_bookmark_marker_overlay_if_visible();
             if saved_ok
                 && config.bookmarks.allow_name_updates
                 && (config.bookmarks.prompt_for_name_on_save
@@ -4706,10 +4933,22 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     let _ = runtime.store.save(&runtime.bookmark_path);
                 }
             }
+            drop(runtime_guard);
+            refresh_bookmark_marker_overlay_if_visible();
         }
         AppCommand::ShowBookmarks => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
             if !config.bookmarks.enabled {
+                return;
+            }
+            if show_bookmarks_uses_marker_overlay(&config) {
+                if bookmark_marker_overlay_active_reasons()
+                    .contains(BookmarkMarkerDisplayReason::ShowBookmarks)
+                {
+                    hide_bookmark_marker_overlay_reason(BookmarkMarkerDisplayReason::ShowBookmarks);
+                } else {
+                    show_bookmark_marker_overlay(BookmarkMarkerDisplayReason::ShowBookmarks);
+                }
                 return;
             }
             let mut guard = BOOKMARK_RUNTIME.lock().unwrap();
@@ -4739,7 +4978,9 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     show_bookmark_tooltip(&config, format!("Bookmark {slot} already empty"))
                 }
             }
-            APP_STATE.write().unwrap().exit_bookmark_mode();
+            drop(guard);
+            refresh_bookmark_marker_overlay_if_visible();
+            exit_bookmark_mode_runtime();
         }
         AppCommand::ClearAllBookmarks => {
             let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
@@ -4757,10 +4998,12 @@ fn execute_app_command(command: AppCommand, debug_diagnostics: bool) {
                     show_bookmark_tooltip(&config, format!("Clear all bookmarks failed: {e}"))
                 }
             }
-            APP_STATE.write().unwrap().exit_bookmark_mode();
+            drop(guard);
+            refresh_bookmark_marker_overlay_if_visible();
+            exit_bookmark_mode_runtime();
         }
         AppCommand::CancelBookmarkMode => {
-            APP_STATE.write().unwrap().exit_bookmark_mode();
+            exit_bookmark_mode_runtime();
         }
         AppCommand::UiHintInput(event) => {
             if !event.is_down {
@@ -5297,6 +5540,7 @@ fn main() {
             slot.borrow_mut().take();
         });
         hide_jump_overlay();
+        hide_bookmark_marker_overlay();
         std::process::exit(1);
     }));
 
@@ -9207,6 +9451,83 @@ mod bookmark_runtime_logic_tests {
         let store = BookmarkStore::new(3);
         let body = bookmark_list_tooltip_body(&config, &store);
         assert_eq!(body, "No bookmarks");
+    }
+
+    #[test]
+    fn bookmark_marker_reasons_do_not_mask_each_other() {
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+        reasons.insert(BookmarkMarkerDisplayReason::Help);
+        reasons.insert(BookmarkMarkerDisplayReason::BookmarkMode);
+
+        reasons.remove(BookmarkMarkerDisplayReason::Help);
+
+        assert!(!reasons.contains(BookmarkMarkerDisplayReason::Help));
+        assert!(reasons.contains(BookmarkMarkerDisplayReason::BookmarkMode));
+        assert!(!reasons.is_empty());
+    }
+
+    #[test]
+    fn show_help_marker_reason_respects_config() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = true;
+        config.bookmark_markers.show_with_help = true;
+        assert!(bookmark_marker_reason_allowed(
+            &config,
+            BookmarkMarkerDisplayReason::Help
+        ));
+
+        config.bookmark_markers.show_with_help = false;
+        assert!(!bookmark_marker_reason_allowed(
+            &config,
+            BookmarkMarkerDisplayReason::Help
+        ));
+    }
+
+    #[test]
+    fn escape_clears_help_marker_reason_without_clearing_others() {
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+        reasons.insert(BookmarkMarkerDisplayReason::Help);
+        reasons.insert(BookmarkMarkerDisplayReason::ShowBookmarks);
+
+        reasons.remove(BookmarkMarkerDisplayReason::Help);
+
+        assert!(!reasons.contains(BookmarkMarkerDisplayReason::Help));
+        assert!(reasons.contains(BookmarkMarkerDisplayReason::ShowBookmarks));
+    }
+
+    #[test]
+    fn show_bookmarks_uses_markers_when_enabled() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = true;
+        config.bookmark_markers.show_with_show_bookmarks = true;
+
+        assert!(show_bookmarks_uses_marker_overlay(&config));
+    }
+
+    #[test]
+    fn show_bookmarks_falls_back_to_tooltip_when_markers_disabled() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = false;
+        config.bookmark_markers.show_with_show_bookmarks = true;
+
+        assert!(!show_bookmarks_uses_marker_overlay(&config));
+    }
+
+    #[test]
+    fn bookmark_mode_marker_reason_respects_config() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = true;
+        config.bookmark_markers.show_with_bookmark_mode = true;
+        assert!(bookmark_marker_reason_allowed(
+            &config,
+            BookmarkMarkerDisplayReason::BookmarkMode
+        ));
+
+        config.bookmark_markers.show_with_bookmark_mode = false;
+        assert!(!bookmark_marker_reason_allowed(
+            &config,
+            BookmarkMarkerDisplayReason::BookmarkMode
+        ));
     }
 
     #[test]
