@@ -813,7 +813,7 @@ pub struct KeyBindingEntry {
 }
 
 /// Struct for managing keybindings
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KeyBindings {
     bindings: Vec<KeyBindingEntry>,
 }

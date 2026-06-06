@@ -3617,10 +3617,67 @@ fn bookmark_marker_overlay_is_visible() -> bool {
     BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow().is_visible())
 }
 
+trait BookmarkMarkerOverlayFacade {
+    fn show(
+        &mut self,
+        view: bookmark_markers::BookmarkMarkerOverlayView,
+    ) -> windows::core::Result<()>;
+    fn hide(&mut self);
+    fn is_visible(&self) -> bool;
+    fn refresh(
+        &mut self,
+        view: bookmark_markers::BookmarkMarkerOverlayView,
+    ) -> windows::core::Result<()>;
+}
+
+impl BookmarkMarkerOverlayFacade for BookmarkMarkerOverlay {
+    fn show(
+        &mut self,
+        view: bookmark_markers::BookmarkMarkerOverlayView,
+    ) -> windows::core::Result<()> {
+        BookmarkMarkerOverlay::show(self, view)
+    }
+
+    fn hide(&mut self) {
+        BookmarkMarkerOverlay::hide(self);
+    }
+
+    fn is_visible(&self) -> bool {
+        BookmarkMarkerOverlay::is_visible(self)
+    }
+
+    fn refresh(
+        &mut self,
+        view: bookmark_markers::BookmarkMarkerOverlayView,
+    ) -> windows::core::Result<()> {
+        BookmarkMarkerOverlay::refresh(self, view)
+    }
+}
+
 fn refresh_bookmark_marker_overlay_if_visible() {
+    let current_desktop_id = virtual_desktop::current_virtual_desktop_id();
+    let virtual_screen = current_bookmark_marker_virtual_screen();
+    BOOKMARK_MARKER_OVERLAY.with(|overlay| {
+        refresh_bookmark_marker_overlay_if_visible_with(
+            &mut *overlay.borrow_mut(),
+            current_desktop_id.as_deref(),
+            virtual_screen,
+            |record| {
+                virtual_desktop::is_anchor_window_on_current_virtual_desktop(record.anchor_hwnd)
+            },
+        );
+    });
+}
+
+fn refresh_bookmark_marker_overlay_if_visible_with(
+    overlay: &mut impl BookmarkMarkerOverlayFacade,
+    current_desktop_id: Option<&str>,
+    virtual_screen: BookmarkMarkerVirtualScreenRect,
+    desktop_checker: impl Fn(&BookmarkRecord) -> bool,
+) {
     let active_reasons = bookmark_marker_overlay_active_reasons();
     if active_reasons.is_empty() {
-        BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+        overlay.hide();
         return;
     }
 
@@ -3638,41 +3695,36 @@ fn refresh_bookmark_marker_overlay_if_visible() {
     restore_bookmark_marker_overlay_reasons(allowed_reasons);
 
     if allowed_reasons.is_empty() || !config.bookmark_markers.enabled {
-        BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+        overlay.hide();
         return;
     }
 
     let store = {
         let guard = BOOKMARK_RUNTIME.lock().unwrap();
         let Some(runtime) = guard.as_ref() else {
-            BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
+            overlay.hide();
             return;
         };
         runtime.store.clone()
     };
-    let current_desktop_id = virtual_desktop::current_virtual_desktop_id();
-    let virtual_screen = current_bookmark_marker_virtual_screen();
     let key_bindings = KEY_ACTIONS.read().unwrap();
     let view = build_bookmark_marker_overlay_view(
         &config,
         &store,
         &key_bindings,
-        current_desktop_id.as_deref(),
+        current_desktop_id,
         virtual_screen,
-        |record| virtual_desktop::is_anchor_window_on_current_virtual_desktop(record.anchor_hwnd),
+        desktop_checker,
     );
     drop(key_bindings);
 
-    BOOKMARK_MARKER_OVERLAY.with(|overlay| {
-        let mut overlay = overlay.borrow_mut();
-        if view.markers.is_empty() {
-            overlay.hide();
-        } else if overlay.is_visible() {
-            let _ = overlay.refresh(view);
-        } else {
-            let _ = overlay.show(view);
-        }
-    });
+    if view.markers.is_empty() {
+        overlay.hide();
+    } else if overlay.is_visible() {
+        let _ = overlay.refresh(view);
+    } else {
+        let _ = overlay.show(view);
+    }
 }
 
 fn exit_bookmark_mode_runtime() {
@@ -9437,6 +9489,141 @@ mod bookmark_runtime_logic_tests {
     }
 
     #[test]
+    fn bookmark_list_tooltip_fallback_includes_secret_name_when_markers_disabled() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = false;
+        let mut store = BookmarkStore::new(9);
+        let mut r = rec(12, 34);
+        r.name = Some("Secret Name".into());
+        store.set_slot(1, r);
+
+        assert!(!show_bookmarks_uses_marker_overlay(&config));
+        assert!(bookmark_list_tooltip_body(&config, &store).contains("Secret Name"));
+    }
+
+    #[test]
+    fn refresh_bookmark_marker_overlay_if_visible_rebuilds_label_after_keybinding_change() {
+        static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+        struct FakeBookmarkMarkerOverlay {
+            visible: bool,
+            last_view: Option<bookmark_markers::BookmarkMarkerOverlayView>,
+        }
+
+        impl BookmarkMarkerOverlayFacade for FakeBookmarkMarkerOverlay {
+            fn show(
+                &mut self,
+                view: bookmark_markers::BookmarkMarkerOverlayView,
+            ) -> windows::core::Result<()> {
+                self.visible = true;
+                self.last_view = Some(view);
+                Ok(())
+            }
+
+            fn hide(&mut self) {
+                self.visible = false;
+                self.last_view = None;
+            }
+
+            fn is_visible(&self) -> bool {
+                self.visible
+            }
+
+            fn refresh(
+                &mut self,
+                view: bookmark_markers::BookmarkMarkerOverlayView,
+            ) -> windows::core::Result<()> {
+                self.last_view = Some(view);
+                Ok(())
+            }
+        }
+
+        let _guard = TEST_LOCK.lock().unwrap();
+        let original_config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
+        let original_runtime = BOOKMARK_RUNTIME.lock().unwrap().clone();
+        let original_reasons = bookmark_marker_overlay_active_reasons();
+        let original_key_actions = KEY_ACTIONS.read().unwrap().clone();
+
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = true;
+        config.bookmark_markers.show_with_show_bookmarks = true;
+        config.bookmark_markers.filter_current_virtual_desktop = false;
+        config.bookmark_markers.hide_offscreen = false;
+        ACTION_HANDLER.write().unwrap().mouse_master.config = config;
+
+        let mut store = BookmarkStore::new(9);
+        let mut r = rec(12, 34);
+        r.name = Some("Secret Name".into());
+        store.set_slot(1, r);
+        *BOOKMARK_RUNTIME.lock().unwrap() = Some(BookmarkRuntime {
+            bookmark_path: PathBuf::from("test-bookmarks.json"),
+            store,
+        });
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+        reasons.insert(BookmarkMarkerDisplayReason::ShowBookmarks);
+        restore_bookmark_marker_overlay_reasons(reasons);
+
+        {
+            let mut key_actions = KEY_ACTIONS.write().unwrap();
+            key_actions.clear();
+            key_actions.add_chord_binding_with_display(
+                KeyChord::parse("1").unwrap(),
+                Action::BookmarkSlot(1),
+                "1",
+            );
+        }
+
+        let mut overlay = FakeBookmarkMarkerOverlay {
+            visible: true,
+            last_view: None,
+        };
+        let screen = BookmarkMarkerVirtualScreenRect {
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+        };
+        refresh_bookmark_marker_overlay_if_visible_with(
+            &mut overlay,
+            Some("desktop-a"),
+            screen,
+            |_| true,
+        );
+        assert_eq!(overlay.last_view.as_ref().unwrap().markers[0].label, "1");
+
+        {
+            let mut key_actions = KEY_ACTIONS.write().unwrap();
+            key_actions.clear();
+            key_actions.add_chord_binding_with_display(
+                KeyChord::parse("RightAlt+1").unwrap(),
+                Action::BookmarkSlot(1),
+                "RightAlt+1",
+            );
+        }
+        refresh_bookmark_marker_overlay_if_visible_with(
+            &mut overlay,
+            Some("desktop-a"),
+            screen,
+            |_| true,
+        );
+        let labels = overlay
+            .last_view
+            .as_ref()
+            .unwrap()
+            .markers
+            .iter()
+            .map(|marker| marker.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"RightAlt+1"));
+        assert!(labels.iter().all(|label| !label.contains("Secret Name")));
+
+        ACTION_HANDLER.write().unwrap().mouse_master.config = original_config;
+        *BOOKMARK_RUNTIME.lock().unwrap() = original_runtime;
+        restore_bookmark_marker_overlay_reasons(original_reasons);
+        *KEY_ACTIONS.write().unwrap() = original_key_actions;
+    }
+
+    #[test]
     fn bookmark_list_tooltip_marks_empty_slots() {
         let config = Config::default();
         let store = BookmarkStore::new(3);
@@ -9509,6 +9696,15 @@ mod bookmark_runtime_logic_tests {
         let mut config = Config::default();
         config.bookmark_markers.enabled = false;
         config.bookmark_markers.show_with_show_bookmarks = true;
+
+        assert!(!show_bookmarks_uses_marker_overlay(&config));
+    }
+
+    #[test]
+    fn show_bookmarks_falls_back_to_tooltip_when_show_bookmarks_marker_flag_is_false() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = true;
+        config.bookmark_markers.show_with_show_bookmarks = false;
 
         assert!(!show_bookmarks_uses_marker_overlay(&config));
     }
