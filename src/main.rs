@@ -1,6 +1,7 @@
 mod action;
 mod action_handler;
 mod app_state;
+pub mod bookmark_marker_overlay;
 mod bookmark_markers;
 mod bookmarks;
 mod config_audit;
