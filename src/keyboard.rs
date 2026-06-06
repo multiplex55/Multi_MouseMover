@@ -804,10 +804,18 @@ pub fn preserved_shortcut_risk_for_chord(chord: &KeyChord) -> Option<&'static st
     None
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyBindingEntry {
+    pub chord: KeyChord,
+    pub action: Action,
+    pub display: String,
+    pub order: usize,
+}
+
 /// Struct for managing keybindings
 #[derive(Debug)]
 pub struct KeyBindings {
-    bindings: Vec<(KeyChord, Action)>,
+    bindings: Vec<KeyBindingEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -837,15 +845,37 @@ impl KeyBindings {
     }
 
     pub fn add_chord_binding(&mut self, chord: KeyChord, action: Action) {
-        if let Some((_, existing_action)) = self
-            .bindings
-            .iter_mut()
-            .find(|(existing_chord, _)| *existing_chord == chord)
-        {
-            *existing_action = action;
+        self.add_chord_binding_with_display(chord, action, chord.display_label());
+    }
+
+    pub fn add_chord_binding_with_display(
+        &mut self,
+        chord: KeyChord,
+        action: Action,
+        display: impl Into<String>,
+    ) {
+        let order = self.next_binding_order();
+        let display = display.into();
+        if let Some(existing) = self.bindings.iter_mut().find(|entry| entry.chord == chord) {
+            existing.action = action;
+            existing.display = display;
+            existing.order = order;
         } else {
-            self.bindings.push((chord, action));
+            self.bindings.push(KeyBindingEntry {
+                chord,
+                action,
+                display,
+                order,
+            });
         }
+    }
+
+    fn next_binding_order(&self) -> usize {
+        self.bindings
+            .iter()
+            .map(|entry| entry.order)
+            .max()
+            .map_or(0, |order| order + 1)
     }
 
     pub fn clear(&mut self) {
@@ -858,7 +888,7 @@ impl KeyBindings {
         let chord = KeyChord::from_key(key);
         self.bindings
             .iter()
-            .find_map(|(bound_chord, action)| (*bound_chord == chord).then_some(action))
+            .find_map(|entry| (entry.chord == chord).then_some(&entry.action))
     }
 
     pub fn resolve_for_key_down_event(
@@ -896,11 +926,11 @@ impl KeyBindings {
         let mut candidates: Vec<_> = self
             .bindings
             .iter()
-            .enumerate()
-            .filter(|(_, (chord, _))| matcher(chord))
-            .map(|(idx, (chord, action))| (idx, *chord, action.clone()))
+            .filter(|entry| matcher(&entry.chord))
+            .map(|entry| (entry.order, entry.chord, entry.action.clone()))
             .collect();
-        candidates.sort_by_key(|(idx, chord, _)| (std::cmp::Reverse(chord.specificity()), *idx));
+        candidates
+            .sort_by_key(|(order, chord, _)| (std::cmp::Reverse(chord.specificity()), *order));
         candidates
             .into_iter()
             .map(|(_, chord, action)| BindingCandidate { chord, action })
@@ -926,17 +956,31 @@ impl KeyBindings {
     }
 
     pub fn bound_chords(&self) -> impl Iterator<Item = KeyChord> + '_ {
-        self.bindings.iter().map(|(chord, _)| *chord)
+        self.bindings.iter().map(|entry| entry.chord)
     }
 
     pub fn entries(&self) -> impl Iterator<Item = (KeyChord, &Action)> + '_ {
-        self.bindings.iter().map(|(chord, action)| (*chord, action))
+        self.bindings
+            .iter()
+            .map(|entry| (entry.chord, &entry.action))
+    }
+
+    pub fn shortest_display_for_action(&self, action: &Action) -> Option<String> {
+        self.bindings
+            .iter()
+            .filter(|entry| &entry.action == action)
+            .min_by_key(|entry| (entry.display.chars().count(), entry.order))
+            .map(|entry| entry.display.clone())
+    }
+
+    pub fn display_for_bookmark_slot(&self, slot: u8) -> Option<String> {
+        self.shortest_display_for_action(&Action::BookmarkSlot(slot))
     }
 
     pub fn owned_modifiers(&self) -> OwnedModifierKeys {
         let mut owned = OwnedModifierKeys::default();
-        for (chord, _) in &self.bindings {
-            match chord.modifiers.alt {
+        for entry in &self.bindings {
+            match entry.chord.modifiers.alt {
                 crate::key_chord::ModifierSideRequirement::NotRequired => {}
                 crate::key_chord::ModifierSideRequirement::Any => {
                     owned.insert(VirtualKey::Alt);
@@ -948,7 +992,7 @@ impl KeyBindings {
                     owned.insert(VirtualKey::RightAlt);
                 }
             }
-            match chord.modifiers.ctrl {
+            match entry.chord.modifiers.ctrl {
                 crate::key_chord::ModifierSideRequirement::NotRequired => {}
                 crate::key_chord::ModifierSideRequirement::Any => {
                     owned.insert(VirtualKey::Ctrl);
@@ -960,7 +1004,7 @@ impl KeyBindings {
                     owned.insert(VirtualKey::RightCtrl);
                 }
             }
-            match chord.modifiers.shift {
+            match entry.chord.modifiers.shift {
                 crate::key_chord::ModifierSideRequirement::NotRequired => {}
                 crate::key_chord::ModifierSideRequirement::Any => {
                     owned.insert(VirtualKey::Shift);
@@ -975,7 +1019,7 @@ impl KeyBindings {
             // There is currently no generic Win virtual key variant in `VirtualKey`.
             // We still track Win in chord matching via the event's `win_down` flag,
             // but owned-modifier swallowing only applies to representable key events.
-            let _ = chord.modifiers.win;
+            let _ = entry.chord.modifiers.win;
         }
         owned
     }
@@ -1016,6 +1060,20 @@ mod tests {
         event.alt_down = true;
         event.right_alt_down = true;
         event
+    }
+
+    fn binding_entry(
+        chord: KeyChord,
+        action: Action,
+        display: &str,
+        order: usize,
+    ) -> KeyBindingEntry {
+        KeyBindingEntry {
+            chord,
+            action,
+            display: display.to_string(),
+            order,
+        }
     }
 
     #[test]
@@ -1374,7 +1432,10 @@ mod tests {
     fn deterministic_tie_break_uses_insertion_order() {
         let chord = KeyChord::parse("W").unwrap();
         let bindings = KeyBindings {
-            bindings: vec![(chord, Action::MoveUp), (chord, Action::MoveDown)],
+            bindings: vec![
+                binding_entry(chord, Action::MoveUp, "W", 0),
+                binding_entry(chord, Action::MoveDown, "W", 1),
+            ],
         };
 
         let event = KeyEvent::new(VirtualKey::W, true);
@@ -1386,6 +1447,124 @@ mod tests {
                 Some(Action::MoveUp)
             );
         }
+    }
+
+    #[test]
+    fn bookmark_slot_with_configured_one_displays_one() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("1").unwrap(),
+            Action::BookmarkSlot(1),
+            "1",
+        );
+
+        assert_eq!(bindings.display_for_bookmark_slot(1), Some("1".to_string()));
+    }
+
+    #[test]
+    fn bookmark_slot_with_only_rightalt_one_displays_rightalt_one() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("RightAlt+1").unwrap(),
+            Action::BookmarkSlot(1),
+            "RightAlt+1",
+        );
+
+        assert_eq!(
+            bindings.display_for_bookmark_slot(1),
+            Some("RightAlt+1".to_string())
+        );
+    }
+
+    #[test]
+    fn multiple_bindings_for_bookmark_slot_choose_shortest_configured_display() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("RightAlt+1").unwrap(),
+            Action::BookmarkSlot(1),
+            "RightAlt+1",
+        );
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("1").unwrap(),
+            Action::BookmarkSlot(1),
+            "1",
+        );
+
+        assert_eq!(bindings.display_for_bookmark_slot(1), Some("1".to_string()));
+    }
+
+    #[test]
+    fn equal_length_bookmark_bindings_choose_earlier_config_order() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("Alt+1").unwrap(),
+            Action::BookmarkSlot(1),
+            "Alt+1",
+        );
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("Ctrl+1").unwrap(),
+            Action::BookmarkSlot(1),
+            "Ctl+1",
+        );
+
+        assert_eq!(
+            bindings.display_for_bookmark_slot(1),
+            Some("Alt+1".to_string())
+        );
+    }
+
+    #[test]
+    fn numpad_one_and_one_remain_distinct_display_strings() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("Numpad1").unwrap(),
+            Action::BookmarkSlot(1),
+            "Numpad1",
+        );
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("1").unwrap(),
+            Action::BookmarkSlot(2),
+            "1",
+        );
+
+        assert_eq!(
+            bindings.display_for_bookmark_slot(1),
+            Some("Numpad1".to_string())
+        );
+        assert_eq!(bindings.display_for_bookmark_slot(2), Some("1".to_string()));
+    }
+
+    #[test]
+    fn duplicate_chord_replaces_action_display_and_order() {
+        let mut bindings = KeyBindings::new();
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("Alt+1").unwrap(),
+            Action::BookmarkSlot(1),
+            "first",
+        );
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("Ctrl+1").unwrap(),
+            Action::BookmarkSlot(2),
+            "tie-a",
+        );
+        bindings.add_chord_binding_with_display(
+            KeyChord::parse("Alt+1").unwrap(),
+            Action::BookmarkSlot(2),
+            "tie-b",
+        );
+
+        assert_eq!(bindings.display_for_bookmark_slot(1), None);
+        assert_eq!(
+            bindings.display_for_bookmark_slot(2),
+            Some("tie-a".to_string())
+        );
+        let mut event = KeyEvent::new(VirtualKey::Num1, true);
+        event.alt_down = true;
+        event.left_alt_down = true;
+        assert_eq!(
+            bindings.get_action_for_event(&event, true),
+            Some(Action::BookmarkSlot(2))
+        );
     }
 
     #[test]
@@ -1491,7 +1670,10 @@ mod tests {
     fn bug_binding_resolution_tie_break_stays_first_inserted_across_repeated_resolves() {
         let chord = KeyChord::parse("RightAlt+E").unwrap();
         let bindings = KeyBindings {
-            bindings: vec![(chord, Action::MoveUp), (chord, Action::MoveDown)],
+            bindings: vec![
+                binding_entry(chord, Action::MoveUp, "RightAlt+E", 0),
+                binding_entry(chord, Action::MoveDown, "RightAlt+E", 1),
+            ],
         };
         let mut event = KeyEvent::new(VirtualKey::E, true);
         event.alt_down = true;
