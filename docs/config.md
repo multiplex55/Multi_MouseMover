@@ -132,7 +132,7 @@ key_bindings = [
   ["7", "bookmark_slot_7"],
   ["8", "bookmark_slot_8"],
   ["9", "bookmark_slot_9"],
-  ["`", "show_bookmarks"],
+  ["V", "show_bookmarks"],
 ]
 ```
 
@@ -272,6 +272,28 @@ Wheel levels are interpreted by the target application. Some apps map level chan
 | `scroll_mode.exclusive_with_jump_mode` | boolean | `true` | Yes | Active | Reserved/experimental parse-only toggle; not currently enforced in runtime mode arbitration. |
 | `scroll_mode.exclusive_with_grid_mode` | boolean | `true` | Yes | Active | Reserved/experimental parse-only toggle; not currently enforced in runtime mode arbitration. |
 | `scroll_mode.exclusive_with_ui_hint_mode` | boolean | `true` | Yes | Active | Reserved exclusivity toggle for UI hint mode transitions. |
+| `bookmark_markers.enabled` | boolean | `true` | Yes | Active | Enables visual bookmark marker overlays. |
+| `bookmark_markers.show_with_help` | boolean | `true` | Yes | Active | Allows marker display while help is visible. |
+| `bookmark_markers.show_with_show_bookmarks` | boolean | `true` | Yes | Active | Makes `show_bookmarks` display markers by default. |
+| `bookmark_markers.show_with_bookmark_mode` | boolean | `true` | Yes | Active | Allows marker display while bookmark mode is active. |
+| `bookmark_markers.filter_current_virtual_desktop` | boolean | `true` | Yes | Active | Hides markers outside the current virtual desktop. |
+| `bookmark_markers.hide_offscreen` | boolean | `true` | Yes | Active | Hides markers whose resolved positions are offscreen. |
+| `bookmark_markers.position_source` | enum string | `"saved_coordinate"` | Yes | Active | Marker coordinate source: `saved_coordinate` or `resolved_recall_target`. |
+| `bookmark_markers.shape` | enum string | `"square"` | Yes | Active | Marker shape: `square` or `circle`. |
+| `bookmark_markers.size_px` | integer pixels | `32` | Yes | Active | Marker size, clamped to `12..=96`. |
+| `bookmark_markers.opacity` | float | `0.82` | Yes | Active | Global marker opacity, clamped to `0.10..=1.00`. |
+| `bookmark_markers.fill_color` | `#RRGGBB` string | `"#FFD400"` | Yes | Active | Global fill color; invalid colors fall back to default. |
+| `bookmark_markers.text_color` | `#RRGGBB` string | `"#000000"` | Yes | Active | Global text color; invalid colors fall back to default. |
+| `bookmark_markers.border_color` | `#RRGGBB` string | `"#000000"` | Yes | Active | Global border color; invalid colors fall back to default. |
+| `bookmark_markers.border_width_px` | integer pixels | `2` | Yes | Active | Border width, clamped to `0..=8`. |
+| `bookmark_markers.font_scale` | float | `1.0` | Yes | Active | Slot-label font scale, clamped to `0.50..=3.00`. |
+| `bookmark_markers.offset_x` | integer pixels | `0` | Yes | Active | Horizontal marker offset, clamped to `-200..=200`. |
+| `bookmark_markers.offset_y` | integer pixels | `0` | Yes | Active | Vertical marker offset, clamped to `-200..=200`. |
+| `bookmark_markers.center_on_bookmark` | boolean | `true` | Yes | Active | Centers markers over bookmark positions before offsets are applied. |
+| `bookmark_markers.slot_styles.*.fill_color` | `#RRGGBB` string | slot palette | Yes | Active | Optional per-slot fill override for configured slots. |
+| `bookmark_markers.slot_styles.*.text_color` | `#RRGGBB` string | `"#000000"` | Yes | Active | Optional per-slot text-color override. |
+| `bookmark_markers.slot_styles.*.border_color` | `#RRGGBB` string | `"#000000"` | Yes | Active | Optional per-slot border-color override. |
+| `bookmark_markers.slot_styles.*.opacity` | float | `0.82` | Yes | Active | Optional per-slot opacity override, clamped to `0.10..=1.00`. |
 | `jump.mode` | enum string | `"precision"` | Yes | Active | `single` uses coarse only; `precision` can use coarse, fine, and precise stages. |
 | `jump.cursor_between_stages` | enum string | `"none"` | Yes | Active | One of `none`, `move_to_region_center`, `preview_only`, `warp_and_continue`. |
 | `jump.start_region` | enum string | `"current_monitor"` | Yes | Active | One of `virtual_screen`, `current_monitor`, `active_window_monitor`, `active_window_bounds`. |
@@ -581,7 +603,77 @@ list_unnamed_label = "(unnamed)"
 list_tooltip_duration_ms = 1200
 ```
 
-`desktop_behavior` currently supports `focus_anchor_window` (invalid values fall back to this). `coordinate_policy` currently supports `clamp_to_virtual_screen` (invalid values fall back to this).
+`desktop_behavior` supports `current_only`, `switch_desktop`, and `focus_anchor_window`. `coordinate_policy` supports `exact`, `clamp_to_nearest_monitor`, and `clamp_to_virtual_screen`.
+
+### `[bookmark_markers]`
+
+Configures the visual bookmark markers that can appear with help, the `show_bookmarks` action, and bookmark mode. The legacy text bookmark list remains available as the fallback when marker display is disabled or unavailable.
+
+```toml
+[bookmark_markers]
+enabled = true
+show_with_help = true
+show_with_show_bookmarks = true
+show_with_bookmark_mode = true
+filter_current_virtual_desktop = true
+hide_offscreen = true
+position_source = "saved_coordinate"
+shape = "square"
+size_px = 32
+opacity = 0.82
+fill_color = "#FFD400"
+text_color = "#000000"
+border_color = "#000000"
+border_width_px = 2
+font_scale = 1.0
+offset_x = 0
+offset_y = 0
+center_on_bookmark = true
+
+[bookmark_markers.slot_styles."1"]
+fill_color = "#FFD400"
+
+[bookmark_markers.slot_styles."2"]
+fill_color = "#FF8A00"
+
+[bookmark_markers.slot_styles."3"]
+fill_color = "#FF453A"
+
+[bookmark_markers.slot_styles."4"]
+fill_color = "#BF5AF2"
+
+[bookmark_markers.slot_styles."5"]
+fill_color = "#0A84FF"
+
+[bookmark_markers.slot_styles."6"]
+fill_color = "#30D158"
+
+[bookmark_markers.slot_styles."7"]
+fill_color = "#64D2FF"
+
+[bookmark_markers.slot_styles."8"]
+fill_color = "#FF2D55"
+
+[bookmark_markers.slot_styles."9"]
+fill_color = "#FFFFFF"
+```
+
+Allowed enum values:
+
+- `shape`: `square`, `circle`.
+- `position_source`: `saved_coordinate`, `resolved_recall_target`.
+
+Validation and normalization:
+
+- `size_px` is clamped to `12..=96`.
+- `opacity` and per-slot `opacity` are clamped to `0.10..=1.00`.
+- `border_width_px` is clamped to `0..=8`.
+- `font_scale` is clamped to `0.50..=3.00`.
+- `offset_x` and `offset_y` are clamped to `-200..=200`.
+- Global and per-slot colors must be strict `#RRGGBB`; invalid color fields fall back field-by-field to defaults.
+- `slot_styles` keys must be quoted bookmark slot numbers in `1..=bookmarks.slot_count`; invalid or out-of-range slot tables are ignored with a config warning.
+
+Per-slot overrides may set any subset of `fill_color`, `text_color`, `border_color`, and `opacity`. Missing fields inherit marker defaults.
 
 ### Surgical mode
 

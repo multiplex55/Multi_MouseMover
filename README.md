@@ -51,7 +51,7 @@ Action bindings run only while active mode is enabled. The checked-in and runtim
 | `0` | UI Hints mode |
 | `B` | Enter bookmark mode |
 | `1..9` | Save bookmark slot 1..9 (in bookmark mode) / recall slot 1..9 (outside bookmark mode) |
-| `` ` `` | Show bookmark list |
+| `V` | Show bookmark markers / bookmark list fallback |
 | `Backspace+1..9` | Clear bookmark slot 1..9 (in bookmark mode) |
 | `Escape` | Cancel bookmark mode or active exclusive overlays/modes |
 | `C` | Screen select |
@@ -73,7 +73,7 @@ The app starts active. Press `Ctrl+Q` to switch between active and idle mode. In
 
 System bindings bypass the active-mode gate. The configured toggle-active chord can always reactivate control, and `Ctrl+Escape` remains the configured exit key.
 
-Bookmark mode is configurable under `[bookmarks]` in `config.toml` (including slot count, key validation fallbacks, desktop behavior, and coordinate policy). The bookmark JSON file path is resolved relative to the resolved config file path when a relative `bookmarks.file` value is used.
+Bookmark mode is configurable under `[bookmarks]` in `config.toml` (including slot count, key validation fallbacks, desktop behavior, and coordinate policy). Visual bookmark markers are configured under `[bookmark_markers]`; by default the `show_bookmarks` binding (`V`) shows marker overlays, with the older text-list tooltip retained as the fallback when marker display is disabled or unavailable. The bookmark JSON file path is resolved relative to the resolved config file path when a relative `bookmarks.file` value is used.
 
 ## Drag Behavior
 
@@ -282,4 +282,4 @@ Default flow:
 3. Press `Backspace+1..9` while in bookmark mode to clear that slot.
 4. Press `1..9` outside bookmark mode to recall that slot.
 5. Press `Escape` to cancel bookmark mode without changing slots.
-6. Optional: bind `show_bookmarks` / `bookmark_list` to show a tooltip list of slots.
+6. Press `V` (`show_bookmarks` / `bookmark_list`) to show visual bookmark markers by default. If `[bookmark_markers].enabled = false` or marker display is otherwise unavailable, the old text-list tooltip behavior remains the fallback.

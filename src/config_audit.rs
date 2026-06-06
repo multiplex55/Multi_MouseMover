@@ -973,6 +973,28 @@ fn is_known_active_path(path: &str) -> bool {
         "bookmarks.list_empty_slot_label",
         "bookmarks.list_unnamed_label",
         "bookmarks.list_tooltip_duration_ms",
+        "bookmark_markers.enabled",
+        "bookmark_markers.show_with_help",
+        "bookmark_markers.show_with_show_bookmarks",
+        "bookmark_markers.show_with_bookmark_mode",
+        "bookmark_markers.filter_current_virtual_desktop",
+        "bookmark_markers.hide_offscreen",
+        "bookmark_markers.position_source",
+        "bookmark_markers.shape",
+        "bookmark_markers.size_px",
+        "bookmark_markers.opacity",
+        "bookmark_markers.fill_color",
+        "bookmark_markers.text_color",
+        "bookmark_markers.border_color",
+        "bookmark_markers.border_width_px",
+        "bookmark_markers.font_scale",
+        "bookmark_markers.offset_x",
+        "bookmark_markers.offset_y",
+        "bookmark_markers.center_on_bookmark",
+        "bookmark_markers.slot_styles.*.fill_color",
+        "bookmark_markers.slot_styles.*.text_color",
+        "bookmark_markers.slot_styles.*.border_color",
+        "bookmark_markers.slot_styles.*.opacity",
         "jump.mode",
         "jump.cursor_between_stages",
         "jump.start_region",
@@ -1124,6 +1146,66 @@ mod tests {
                     kind, report.keybind_report.issues
                 )
             })
+    }
+
+    #[test]
+    fn audit_warns_unknown_bookmark_markers_keys() {
+        let report = audit_config_toml(
+            r##"
+            [bookmark_markers]
+            enabled = true
+            unknown = true
+
+            [bookmark_markers.slot_styles."1"]
+            fill_color = "#FFD400"
+            unknown = "ignored"
+            "##,
+        );
+
+        warning_for(&report, "bookmark_markers.unknown");
+        warning_for(&report, "bookmark_markers.slot_styles.1.unknown");
+    }
+
+    #[test]
+    fn audit_accepts_documented_bookmark_markers_keys() {
+        let report = audit_config_toml(
+            r##"
+            [bookmark_markers]
+            enabled = true
+            show_with_help = true
+            show_with_show_bookmarks = true
+            show_with_bookmark_mode = true
+            filter_current_virtual_desktop = true
+            hide_offscreen = true
+            position_source = "saved_coordinate"
+            shape = "square"
+            size_px = 32
+            opacity = 0.82
+            fill_color = "#FFD400"
+            text_color = "#000000"
+            border_color = "#000000"
+            border_width_px = 2
+            font_scale = 1.0
+            offset_x = 0
+            offset_y = 0
+            center_on_bookmark = true
+
+            [bookmark_markers.slot_styles."1"]
+            fill_color = "#FFD400"
+            text_color = "#000000"
+            border_color = "#000000"
+            opacity = 0.82
+            "##,
+        );
+
+        assert!(
+            report
+                .warnings
+                .iter()
+                .all(|warning| !warning.path.starts_with("bookmark_markers")),
+            "unexpected bookmark_markers warnings: {:?}",
+            report.warnings
+        );
     }
 
     #[test]

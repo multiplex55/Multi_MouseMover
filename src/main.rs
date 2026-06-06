@@ -472,6 +472,7 @@ struct Config {
     tooltip_overlay: TooltipOverlayConfig,
     ui_hints: UiHintsConfig,
     bookmarks: BookmarksConfig,
+    bookmark_markers: BookmarkMarkersConfig,
     mouse_speed: MouseSpeedConfig,
     slow_mouse: SlowMouseConfig,
     surgical_mode: SurgicalModeConfig,
@@ -505,6 +506,7 @@ impl Default for Config {
             tooltip_overlay: TooltipOverlayConfig::default(),
             ui_hints: UiHintsConfig::default(),
             bookmarks: BookmarksConfig::default(),
+            bookmark_markers: BookmarkMarkersConfig::default(),
             mouse_speed: MouseSpeedConfig::default(),
             slow_mouse: SlowMouseConfig::default(),
             surgical_mode: SurgicalModeConfig::default(),
@@ -615,7 +617,7 @@ fn default_key_bindings() -> Vec<(String, String)> {
         ("7", "bookmark_slot_7"),
         ("8", "bookmark_slot_8"),
         ("9", "bookmark_slot_9"),
-        ("`", "show_bookmarks"),
+        ("V", "show_bookmarks"),
     ]
     .into_iter()
     .map(|(key, action)| (key.to_string(), action.to_string()))
@@ -802,6 +804,117 @@ impl Default for BookmarksConfig {
             list_tooltip_duration_ms: 1200,
         }
     }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BookmarkMarkerShape {
+    #[default]
+    Square,
+    Circle,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BookmarkMarkerPositionSource {
+    #[default]
+    SavedCoordinate,
+    ResolvedRecallTarget,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct BookmarkMarkerSlotStyle {
+    pub fill_color: String,
+    pub text_color: String,
+    pub border_color: String,
+    pub opacity: f32,
+}
+
+impl Default for BookmarkMarkerSlotStyle {
+    fn default() -> Self {
+        Self {
+            fill_color: "#FFD400".to_string(),
+            text_color: "#000000".to_string(),
+            border_color: "#000000".to_string(),
+            opacity: 0.82,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct BookmarkMarkersConfig {
+    pub enabled: bool,
+    pub show_with_help: bool,
+    pub show_with_show_bookmarks: bool,
+    pub show_with_bookmark_mode: bool,
+    pub filter_current_virtual_desktop: bool,
+    pub hide_offscreen: bool,
+    pub position_source: BookmarkMarkerPositionSource,
+    pub shape: BookmarkMarkerShape,
+    pub size_px: i32,
+    pub opacity: f32,
+    pub fill_color: String,
+    pub text_color: String,
+    pub border_color: String,
+    pub border_width_px: i32,
+    pub font_scale: f32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub center_on_bookmark: bool,
+    pub slot_styles: HashMap<String, BookmarkMarkerSlotStyle>,
+}
+
+impl Default for BookmarkMarkersConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_with_help: true,
+            show_with_show_bookmarks: true,
+            show_with_bookmark_mode: true,
+            filter_current_virtual_desktop: true,
+            hide_offscreen: true,
+            position_source: BookmarkMarkerPositionSource::SavedCoordinate,
+            shape: BookmarkMarkerShape::Square,
+            size_px: 32,
+            opacity: 0.82,
+            fill_color: "#FFD400".to_string(),
+            text_color: "#000000".to_string(),
+            border_color: "#000000".to_string(),
+            border_width_px: 2,
+            font_scale: 1.0,
+            offset_x: 0,
+            offset_y: 0,
+            center_on_bookmark: true,
+            slot_styles: default_bookmark_marker_slot_styles(),
+        }
+    }
+}
+
+fn default_bookmark_marker_slot_styles() -> HashMap<String, BookmarkMarkerSlotStyle> {
+    [
+        ("1", "#FFD400"),
+        ("2", "#FF8A00"),
+        ("3", "#FF453A"),
+        ("4", "#BF5AF2"),
+        ("5", "#0A84FF"),
+        ("6", "#30D158"),
+        ("7", "#64D2FF"),
+        ("8", "#FF2D55"),
+        ("9", "#FFFFFF"),
+    ]
+    .into_iter()
+    .map(|(slot, fill)| {
+        (
+            slot.to_string(),
+            BookmarkMarkerSlotStyle {
+                fill_color: fill.to_string(),
+                ..BookmarkMarkerSlotStyle::default()
+            },
+        )
+    })
+    .collect()
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -1736,6 +1849,7 @@ impl Config {
         self.normalize_tooltip_overlay_config();
         self.normalize_ui_hints_config();
         self.normalize_bookmarks_config();
+        self.normalize_bookmark_markers_config();
         self.normalize_input_config();
         // Keep the legacy field stable for downstream code and diagnostics after the
         // modern baseline has won normalization.
@@ -1908,6 +2022,102 @@ impl Config {
             warn_config_normalized("bookmarks.clear_modifier_key is invalid; using Backspace");
             self.bookmarks.clear_modifier_key = "Backspace".to_string();
         }
+    }
+
+    fn normalize_bookmark_markers_config(&mut self) {
+        let defaults = BookmarkMarkersConfig::default();
+        self.bookmark_markers.size_px = normalize_i32_range(
+            "bookmark_markers.size_px",
+            self.bookmark_markers.size_px,
+            12,
+            96,
+        );
+        self.bookmark_markers.opacity = normalize_f32_range(
+            "bookmark_markers.opacity",
+            self.bookmark_markers.opacity,
+            0.10,
+            1.00,
+        );
+        self.bookmark_markers.border_width_px = normalize_i32_range(
+            "bookmark_markers.border_width_px",
+            self.bookmark_markers.border_width_px,
+            0,
+            8,
+        );
+        self.bookmark_markers.font_scale = normalize_f32_range(
+            "bookmark_markers.font_scale",
+            self.bookmark_markers.font_scale,
+            0.50,
+            3.00,
+        );
+        self.bookmark_markers.offset_x = normalize_i32_range(
+            "bookmark_markers.offset_x",
+            self.bookmark_markers.offset_x,
+            -200,
+            200,
+        );
+        self.bookmark_markers.offset_y = normalize_i32_range(
+            "bookmark_markers.offset_y",
+            self.bookmark_markers.offset_y,
+            -200,
+            200,
+        );
+
+        normalize_hex_color_field(
+            "bookmark_markers.fill_color",
+            &mut self.bookmark_markers.fill_color,
+            &defaults.fill_color,
+        );
+        normalize_hex_color_field(
+            "bookmark_markers.text_color",
+            &mut self.bookmark_markers.text_color,
+            &defaults.text_color,
+        );
+        normalize_hex_color_field(
+            "bookmark_markers.border_color",
+            &mut self.bookmark_markers.border_color,
+            &defaults.border_color,
+        );
+
+        let default_slot_style = BookmarkMarkerSlotStyle::default();
+        let slot_count = self.bookmarks.slot_count;
+        self.bookmark_markers.slot_styles.retain(|slot, style| {
+            let Ok(slot_number) = slot.parse::<u32>() else {
+                warn_config_normalized(&format!(
+                    "bookmark_markers.slot_styles.{slot} is not a valid bookmark slot; ignoring"
+                ));
+                return false;
+            };
+            if !(1..=slot_count).contains(&slot_number) {
+                warn_config_normalized(&format!(
+                    "bookmark_markers.slot_styles.{slot} is outside configured bookmark slots 1..={slot_count}; ignoring"
+                ));
+                return false;
+            }
+
+            normalize_hex_color_field(
+                &format!("bookmark_markers.slot_styles.{slot}.fill_color"),
+                &mut style.fill_color,
+                &default_slot_style.fill_color,
+            );
+            normalize_hex_color_field(
+                &format!("bookmark_markers.slot_styles.{slot}.text_color"),
+                &mut style.text_color,
+                &default_slot_style.text_color,
+            );
+            normalize_hex_color_field(
+                &format!("bookmark_markers.slot_styles.{slot}.border_color"),
+                &mut style.border_color,
+                &default_slot_style.border_color,
+            );
+            style.opacity = normalize_f32_range(
+                &format!("bookmark_markers.slot_styles.{slot}.opacity"),
+                style.opacity,
+                0.10,
+                1.00,
+            );
+            true
+        });
     }
 
     fn normalize_input_config(&mut self) {
@@ -2607,6 +2817,20 @@ fn normalize_f32_range(name: &str, value: f32, min: f32, max: f32) -> f32 {
     } else {
         value
     }
+}
+
+fn normalize_hex_color_field(name: &str, value: &mut String, default_value: &str) {
+    if !is_strict_hex_color(value) {
+        warn_config_normalized(&format!(
+            "{name} is not a strict #RRGGBB color; using default"
+        ));
+        *value = default_value.to_string();
+    }
+}
+
+fn is_strict_hex_color(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn normalize_mouse_speed_settings(name: &str, settings: &mut MouseSpeedConfig) {
@@ -8537,6 +8761,154 @@ desktop_switch_wait_ms = 999999
     fn invalid_bookmark_policy_reports_config_error() {
         let err = parse_config_error("[bookmarks]\ndesktop_behavior = \"bad\"\n");
         assert!(err.contains("unknown variant"));
+    }
+
+    #[test]
+    fn bookmark_marker_shape_parses_valid_values() {
+        let square = parse_config("[bookmark_markers]\nshape = \"square\"\n");
+        let circle = parse_config("[bookmark_markers]\nshape = \"circle\"\n");
+
+        assert_eq!(square.bookmark_markers.shape, BookmarkMarkerShape::Square);
+        assert_eq!(circle.bookmark_markers.shape, BookmarkMarkerShape::Circle);
+    }
+
+    #[test]
+    fn bookmark_marker_position_source_parses_valid_values() {
+        let saved = parse_config("[bookmark_markers]\nposition_source = \"saved_coordinate\"\n");
+        let resolved =
+            parse_config("[bookmark_markers]\nposition_source = \"resolved_recall_target\"\n");
+
+        assert_eq!(
+            saved.bookmark_markers.position_source,
+            BookmarkMarkerPositionSource::SavedCoordinate
+        );
+        assert_eq!(
+            resolved.bookmark_markers.position_source,
+            BookmarkMarkerPositionSource::ResolvedRecallTarget
+        );
+    }
+
+    #[test]
+    fn bookmark_marker_normalization_clamps_ranges() {
+        let low = parse_config(
+            r#"
+            [bookmark_markers]
+            size_px = 1
+            opacity = 0.01
+            border_width_px = -1
+            font_scale = 0.1
+            offset_x = -999
+            offset_y = -999
+            "#,
+        );
+        let high = parse_config(
+            r#"
+            [bookmark_markers]
+            size_px = 999
+            opacity = 9.9
+            border_width_px = 99
+            font_scale = 9.9
+            offset_x = 999
+            offset_y = 999
+            "#,
+        );
+
+        assert_eq!(low.bookmark_markers.size_px, 12);
+        assert_eq!(low.bookmark_markers.opacity, 0.10);
+        assert_eq!(low.bookmark_markers.border_width_px, 0);
+        assert_eq!(low.bookmark_markers.font_scale, 0.50);
+        assert_eq!(low.bookmark_markers.offset_x, -200);
+        assert_eq!(low.bookmark_markers.offset_y, -200);
+        assert_eq!(high.bookmark_markers.size_px, 96);
+        assert_eq!(high.bookmark_markers.opacity, 1.00);
+        assert_eq!(high.bookmark_markers.border_width_px, 8);
+        assert_eq!(high.bookmark_markers.font_scale, 3.00);
+        assert_eq!(high.bookmark_markers.offset_x, 200);
+        assert_eq!(high.bookmark_markers.offset_y, 200);
+    }
+
+    #[test]
+    fn bookmark_marker_invalid_global_colors_fallback() {
+        let config = parse_config(
+            r##"
+            [bookmark_markers]
+            fill_color = "FFD400"
+            text_color = "#00000G"
+            border_color = "#1234567"
+            "##,
+        );
+
+        assert_eq!(config.bookmark_markers.fill_color, "#FFD400");
+        assert_eq!(config.bookmark_markers.text_color, "#000000");
+        assert_eq!(config.bookmark_markers.border_color, "#000000");
+    }
+
+    #[test]
+    fn bookmark_marker_invalid_per_slot_colors_fallback_field_by_field() {
+        let config = parse_config(
+            r##"
+            [bookmark_markers.slot_styles."1"]
+            fill_color = "#112233"
+            text_color = "bad"
+            border_color = "#445566"
+            opacity = 2.0
+            "##,
+        );
+        let slot = config.bookmark_markers.slot_styles.get("1").unwrap();
+
+        assert_eq!(slot.fill_color, "#112233");
+        assert_eq!(slot.text_color, "#000000");
+        assert_eq!(slot.border_color, "#445566");
+        assert_eq!(slot.opacity, 1.0);
+    }
+
+    #[test]
+    fn bookmark_marker_invalid_slot_style_keys_are_ignored() {
+        let config = parse_config(
+            r##"
+            [bookmarks]
+            slot_count = 2
+
+            [bookmark_markers.slot_styles."2"]
+            fill_color = "#112233"
+
+            [bookmark_markers.slot_styles."3"]
+            fill_color = "#445566"
+
+            [bookmark_markers.slot_styles.bad]
+            fill_color = "#778899"
+            "##,
+        );
+
+        assert!(config.bookmark_markers.slot_styles.contains_key("2"));
+        assert!(!config.bookmark_markers.slot_styles.contains_key("3"));
+        assert!(!config.bookmark_markers.slot_styles.contains_key("bad"));
+    }
+
+    #[test]
+    fn default_normalized_config_includes_bookmark_marker_defaults() {
+        let config = Config::default().normalize().unwrap();
+        let defaults = BookmarkMarkersConfig::default();
+
+        assert_eq!(config.bookmark_markers, defaults);
+        assert_eq!(config.bookmark_markers.slot_styles.len(), 9);
+        assert_eq!(
+            config
+                .bookmark_markers
+                .slot_styles
+                .get("1")
+                .unwrap()
+                .fill_color,
+            "#FFD400"
+        );
+    }
+
+    #[test]
+    fn default_key_bindings_use_v_for_show_bookmarks() {
+        let bindings = default_key_bindings();
+
+        assert!(bindings.contains(&("V".to_string(), "show_bookmarks".to_string())));
+        assert!(!bindings.contains(&("`".to_string(), "show_bookmarks".to_string())));
     }
 
     #[test]
