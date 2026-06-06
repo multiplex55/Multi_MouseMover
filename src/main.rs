@@ -3863,6 +3863,31 @@ fn bookmark_tooltip_events_enabled(config: &Config) -> bool {
     config.bookmarks.show_tooltips && config.tooltip_overlay.events.bookmarks
 }
 
+#[allow(dead_code)]
+fn bookmark_marker_passes_virtual_desktop_filter<F>(
+    record: &BookmarkRecord,
+    strict_filtering: bool,
+    current_desktop_id: Option<&str>,
+    mut desktop_checker: F,
+) -> bool
+where
+    F: FnMut(Option<isize>) -> bool,
+{
+    if !strict_filtering {
+        return true;
+    }
+    let Some(record_desktop_id) = record.virtual_desktop_id.as_deref() else {
+        return false;
+    };
+    let Some(current_desktop_id) = current_desktop_id else {
+        return false;
+    };
+    if record_desktop_id != current_desktop_id {
+        return false;
+    }
+    desktop_checker(record.anchor_hwnd)
+}
+
 fn bookmark_list_tooltip_body(config: &Config, store: &BookmarkStore) -> String {
     let mut lines = Vec::new();
     for slot in 1..=(config.bookmarks.slot_count as u8) {
@@ -8763,6 +8788,28 @@ desktop_switch_wait_ms = 999999
         assert!(err.contains("unknown variant"));
     }
 
+    fn bookmark_marker_record() -> BookmarkRecord {
+        BookmarkRecord {
+            slot: 1,
+            name: None,
+            x: 10,
+            y: 20,
+            monitor_device_name: "monitor".into(),
+            monitor_rect: BookmarkMonitorRect {
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 100,
+            },
+            virtual_desktop_id: Some("desktop-1".into()),
+            anchor_hwnd: Some(100),
+            anchor_process_id: None,
+            anchor_window_title: None,
+            created_at_unix_ms: 0,
+            updated_at_unix_ms: 0,
+        }
+    }
+
     #[test]
     fn bookmark_marker_shape_parses_valid_values() {
         let square = parse_config("[bookmark_markers]\nshape = \"square\"\n");
@@ -8860,6 +8907,67 @@ desktop_switch_wait_ms = 999999
         assert_eq!(slot.text_color, "#000000");
         assert_eq!(slot.border_color, "#445566");
         assert_eq!(slot.opacity, 1.0);
+    }
+
+    #[test]
+    fn bookmark_marker_strict_filter_hides_missing_desktop_metadata() {
+        let mut record = BookmarkRecord {
+            virtual_desktop_id: None,
+            anchor_hwnd: Some(100),
+            ..bookmark_marker_record()
+        };
+        assert!(!bookmark_marker_passes_virtual_desktop_filter(
+            &record,
+            true,
+            Some("desktop-1"),
+            |_| true
+        ));
+
+        record.virtual_desktop_id = Some("desktop-1".into());
+        assert!(!bookmark_marker_passes_virtual_desktop_filter(
+            &record,
+            true,
+            None,
+            |_| true
+        ));
+    }
+
+    #[test]
+    fn bookmark_marker_strict_filter_hides_mismatch_and_shows_match() {
+        let record = BookmarkRecord {
+            virtual_desktop_id: Some("desktop-1".into()),
+            anchor_hwnd: Some(100),
+            ..bookmark_marker_record()
+        };
+
+        assert!(!bookmark_marker_passes_virtual_desktop_filter(
+            &record,
+            true,
+            Some("desktop-2"),
+            |_| true
+        ));
+        assert!(bookmark_marker_passes_virtual_desktop_filter(
+            &record,
+            true,
+            Some("desktop-1"),
+            |_| true
+        ));
+    }
+
+    #[test]
+    fn bookmark_marker_strict_filter_hides_when_desktop_checker_fails() {
+        let record = BookmarkRecord {
+            virtual_desktop_id: Some("desktop-1".into()),
+            anchor_hwnd: Some(100),
+            ..bookmark_marker_record()
+        };
+
+        assert!(!bookmark_marker_passes_virtual_desktop_filter(
+            &record,
+            true,
+            Some("desktop-1"),
+            |_| false
+        ));
     }
 
     #[test]
