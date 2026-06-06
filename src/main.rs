@@ -2608,7 +2608,7 @@ impl Config {
             if let Ok(chord) = KeyChord::parse(key) {
                 if let Some(action) = Action::from_string(action_str) {
                     println!("✅ Binding key: {:?} -> {:?}", chord, action);
-                    key_actions.add_chord_binding(chord, action);
+                    key_actions.add_chord_binding_with_display(chord, action, key.clone());
                 } else {
                     println!(
                         "❌ Action '{}' does not exist for key '{}'",
