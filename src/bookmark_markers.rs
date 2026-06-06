@@ -513,6 +513,32 @@ mod tests {
     }
 
     #[test]
+    fn offscreen_marker_is_retained_when_hide_offscreen_is_false() {
+        let mut config = config();
+        config.bookmark_markers.hide_offscreen = false;
+        let store = store_with([record(1, 500, 50)]);
+        let bindings = bindings(&[1]);
+
+        let marker_view = view(&config, &store, &bindings);
+
+        assert_eq!(marker_view.markers.len(), 1);
+        assert_eq!(marker_view.markers[0].x, 500);
+    }
+
+    #[test]
+    fn negative_virtual_screen_origins_keep_inside_points_visible() {
+        let mut config = config();
+        config.bookmark_markers.hide_offscreen = true;
+        let store = store_with([record(1, -75, 25)]);
+        let bindings = bindings(&[1]);
+
+        let marker_view = view(&config, &store, &bindings);
+
+        assert_eq!(marker_view.markers.len(), 1);
+        assert_eq!(marker_view.markers[0].x, -75);
+    }
+
+    #[test]
     fn global_default_style_is_applied() {
         let mut config = config();
         config.bookmark_markers.fill_color = "#112233".into();

@@ -3564,6 +3564,37 @@ fn show_bookmarks_uses_marker_overlay(config: &Config) -> bool {
     bookmark_marker_reason_allowed(config, BookmarkMarkerDisplayReason::ShowBookmarks)
 }
 
+fn set_bookmark_marker_reason_for_config(
+    reasons: &mut BookmarkMarkerDisplayReasons,
+    config: &Config,
+    reason: BookmarkMarkerDisplayReason,
+    visible: bool,
+) -> bool {
+    if visible && bookmark_marker_reason_allowed(config, reason) {
+        reasons.insert(reason);
+    } else {
+        reasons.remove(reason);
+    }
+    !reasons.is_empty()
+}
+
+#[cfg(test)]
+fn toggle_bookmark_marker_reason_for_config(
+    reasons: &mut BookmarkMarkerDisplayReasons,
+    config: &Config,
+    reason: BookmarkMarkerDisplayReason,
+) -> bool {
+    let visible = !reasons.contains(reason);
+    set_bookmark_marker_reason_for_config(reasons, config, reason, visible)
+}
+
+#[cfg(test)]
+fn bookmark_marker_refresh_needed_after_runtime_change(
+    reasons: BookmarkMarkerDisplayReasons,
+) -> bool {
+    !reasons.is_empty()
+}
+
 fn current_bookmark_marker_virtual_screen() -> BookmarkMarkerVirtualScreenRect {
     let region = virtual_screen_region();
     BookmarkMarkerVirtualScreenRect {
@@ -3588,18 +3619,18 @@ fn show_bookmark_marker_overlay(reason: BookmarkMarkerDisplayReason) {
         hide_bookmark_marker_overlay_reason(reason);
         return;
     }
-    BOOKMARK_MARKER_DISPLAY_REASONS
-        .lock()
-        .unwrap()
-        .insert(reason);
+    {
+        let mut reasons = BOOKMARK_MARKER_DISPLAY_REASONS.lock().unwrap();
+        set_bookmark_marker_reason_for_config(&mut reasons, &config, reason, true);
+    }
     refresh_bookmark_marker_overlay_if_visible();
 }
 
 fn hide_bookmark_marker_overlay_reason(reason: BookmarkMarkerDisplayReason) {
+    let config = ACTION_HANDLER.read().unwrap().mouse_master.config.clone();
     let should_hide = {
         let mut reasons = BOOKMARK_MARKER_DISPLAY_REASONS.lock().unwrap();
-        reasons.remove(reason);
-        reasons.is_empty()
+        !set_bookmark_marker_reason_for_config(&mut reasons, &config, reason, false)
     };
     if should_hide {
         BOOKMARK_MARKER_OVERLAY.with(|overlay| overlay.borrow_mut().hide());
@@ -9292,6 +9323,55 @@ desktop_switch_wait_ms = 999999
     }
 
     #[test]
+    fn bookmark_marker_valid_slot_style_keys_survive_normalization_without_warnings() {
+        let _guard = CONFIG_WARNING_TEST_MUTEX.lock().unwrap();
+        let _ = take_config_warnings();
+
+        let config = parse_config(
+            r##"
+            [bookmarks]
+            slot_count = 3
+
+            [bookmark_markers.slot_styles."1"]
+            fill_color = "#112233"
+
+            [bookmark_markers.slot_styles."3"]
+            text_color = "#445566"
+            border_color = "#778899"
+            opacity = 0.5
+            "##,
+        );
+        let warnings = take_config_warnings();
+
+        assert!(config.bookmark_markers.slot_styles.contains_key("1"));
+        assert!(config.bookmark_markers.slot_styles.contains_key("3"));
+        assert_eq!(
+            config
+                .bookmark_markers
+                .slot_styles
+                .get("1")
+                .unwrap()
+                .fill_color,
+            "#112233"
+        );
+        assert_eq!(
+            config
+                .bookmark_markers
+                .slot_styles
+                .get("3")
+                .unwrap()
+                .text_color,
+            "#445566"
+        );
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("bookmark_markers.slot_styles")),
+            "unexpected slot style warnings: {warnings:?}"
+        );
+    }
+
+    #[test]
     fn default_normalized_config_includes_bookmark_marker_defaults() {
         let config = Config::default().normalize().unwrap();
         let defaults = BookmarkMarkersConfig::default();
@@ -9651,6 +9731,122 @@ mod bookmark_runtime_logic_tests {
         assert!(!reasons.contains(BookmarkMarkerDisplayReason::Help));
         assert!(reasons.contains(BookmarkMarkerDisplayReason::BookmarkMode));
         assert!(!reasons.is_empty());
+    }
+
+    #[test]
+    fn marker_visibility_helper_allows_help_and_show_bookmarks_to_coexist() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = true;
+        config.bookmark_markers.show_with_help = true;
+        config.bookmark_markers.show_with_show_bookmarks = true;
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+
+        assert!(set_bookmark_marker_reason_for_config(
+            &mut reasons,
+            &config,
+            BookmarkMarkerDisplayReason::Help,
+            true
+        ));
+        assert!(set_bookmark_marker_reason_for_config(
+            &mut reasons,
+            &config,
+            BookmarkMarkerDisplayReason::ShowBookmarks,
+            true
+        ));
+
+        assert!(reasons.contains(BookmarkMarkerDisplayReason::Help));
+        assert!(reasons.contains(BookmarkMarkerDisplayReason::ShowBookmarks));
+    }
+
+    #[test]
+    fn clearing_one_marker_visibility_reason_keeps_other_reason_visible() {
+        let config = Config::default();
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+        reasons.insert(BookmarkMarkerDisplayReason::Help);
+        reasons.insert(BookmarkMarkerDisplayReason::ShowBookmarks);
+
+        assert!(set_bookmark_marker_reason_for_config(
+            &mut reasons,
+            &config,
+            BookmarkMarkerDisplayReason::Help,
+            false
+        ));
+
+        assert!(!reasons.contains(BookmarkMarkerDisplayReason::Help));
+        assert!(reasons.contains(BookmarkMarkerDisplayReason::ShowBookmarks));
+    }
+
+    #[test]
+    fn show_bookmarks_marker_reason_toggles_independently() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = true;
+        config.bookmark_markers.show_with_show_bookmarks = true;
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+
+        assert!(toggle_bookmark_marker_reason_for_config(
+            &mut reasons,
+            &config,
+            BookmarkMarkerDisplayReason::ShowBookmarks
+        ));
+        assert!(reasons.contains(BookmarkMarkerDisplayReason::ShowBookmarks));
+
+        assert!(!toggle_bookmark_marker_reason_for_config(
+            &mut reasons,
+            &config,
+            BookmarkMarkerDisplayReason::ShowBookmarks
+        ));
+        assert!(!reasons.contains(BookmarkMarkerDisplayReason::ShowBookmarks));
+    }
+
+    #[test]
+    fn bookmark_mode_marker_reason_adds_and_removes() {
+        let mut config = Config::default();
+        config.bookmark_markers.enabled = true;
+        config.bookmark_markers.show_with_bookmark_mode = true;
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+
+        assert!(set_bookmark_marker_reason_for_config(
+            &mut reasons,
+            &config,
+            BookmarkMarkerDisplayReason::BookmarkMode,
+            true
+        ));
+        assert!(reasons.contains(BookmarkMarkerDisplayReason::BookmarkMode));
+
+        assert!(!set_bookmark_marker_reason_for_config(
+            &mut reasons,
+            &config,
+            BookmarkMarkerDisplayReason::BookmarkMode,
+            false
+        ));
+        assert!(!reasons.contains(BookmarkMarkerDisplayReason::BookmarkMode));
+    }
+
+    #[test]
+    fn visible_marker_reasons_request_refresh_after_bookmark_mutation() {
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+        assert!(!bookmark_marker_refresh_needed_after_runtime_change(
+            reasons
+        ));
+
+        reasons.insert(BookmarkMarkerDisplayReason::ShowBookmarks);
+
+        assert!(bookmark_marker_refresh_needed_after_runtime_change(reasons));
+    }
+
+    #[test]
+    fn successful_hot_reload_refreshes_visible_marker_reasons() {
+        let mut reasons = BookmarkMarkerDisplayReasons::default();
+        reasons.insert(BookmarkMarkerDisplayReason::ShowBookmarks);
+        reasons.insert(BookmarkMarkerDisplayReason::BookmarkMode);
+        let mut reasons_after_reload = reasons;
+        reasons_after_reload.remove(BookmarkMarkerDisplayReason::BookmarkMode);
+
+        assert!(bookmark_marker_refresh_needed_after_runtime_change(
+            reasons_after_reload
+        ));
+        assert!(reasons_after_reload.contains(BookmarkMarkerDisplayReason::ShowBookmarks));
+        assert!(!reasons_after_reload.contains(BookmarkMarkerDisplayReason::BookmarkMode));
     }
 
     #[test]

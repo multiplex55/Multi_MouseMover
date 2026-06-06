@@ -1209,6 +1209,41 @@ mod tests {
     }
 
     #[test]
+    fn audit_accepts_nested_slot_style_keys_only_for_valid_paths() {
+        let report = audit_config_toml(
+            r##"
+            [bookmark_markers.slot_styles."1"]
+            fill_color = "#FFD400"
+            text_color = "#000000"
+            border_color = "#000000"
+            opacity = 0.82
+
+            [bookmark_markers.slot_styles."2".extra]
+            fill_color = "#FFFFFF"
+
+            [bookmark_markers.slot_styles."3"]
+            unknown = true
+
+            [bookmark_markers.slot_styles_extra."1"]
+            fill_color = "#FFFFFF"
+            "##,
+        );
+
+        assert!(
+            report.warnings.iter().all(|warning| warning.path
+                != "bookmark_markers.slot_styles.1.fill_color"
+                && warning.path != "bookmark_markers.slot_styles.1.text_color"
+                && warning.path != "bookmark_markers.slot_styles.1.border_color"
+                && warning.path != "bookmark_markers.slot_styles.1.opacity"),
+            "valid slot-style paths were warned: {:?}",
+            report.warnings
+        );
+        warning_for(&report, "bookmark_markers.slot_styles.2.extra.fill_color");
+        warning_for(&report, "bookmark_markers.slot_styles.3.unknown");
+        warning_for(&report, "bookmark_markers.slot_styles_extra.1.fill_color");
+    }
+
+    #[test]
     fn audit_warns_when_help_will_hide_bindings() {
         let report = audit_config_toml(
             r#"
