@@ -118,7 +118,7 @@ key_bindings = [
     ["7", "bookmark_slot_7"],
     ["8", "bookmark_slot_8"],
     ["9", "bookmark_slot_9"],
-    ["`", "show_bookmarks"],
+    ["V", "show_bookmarks"],
 
 ]
 
@@ -631,6 +631,53 @@ list_include_empty_slots = true
 list_empty_slot_label = "(empty)"
 list_unnamed_label = "(unnamed)"
 list_tooltip_duration_ms = 1200
+
+[bookmark_markers]
+enabled = true
+show_with_help = true
+show_with_show_bookmarks = true
+show_with_bookmark_mode = true
+filter_current_virtual_desktop = true
+hide_offscreen = true
+position_source = "saved_coordinate"
+shape = "square"
+size_px = 32
+opacity = 0.82
+fill_color = "#FFD400"
+text_color = "#000000"
+border_color = "#000000"
+border_width_px = 2
+font_scale = 1.0
+offset_x = 0
+offset_y = 0
+center_on_bookmark = true
+
+[bookmark_markers.slot_styles."1"]
+fill_color = "#FFD400"
+
+[bookmark_markers.slot_styles."2"]
+fill_color = "#00E676"
+
+[bookmark_markers.slot_styles."3"]
+fill_color = "#40C4FF"
+
+[bookmark_markers.slot_styles."4"]
+fill_color = "#FF4081"
+
+[bookmark_markers.slot_styles."5"]
+fill_color = "#FF9100"
+
+[bookmark_markers.slot_styles."6"]
+fill_color = "#B388FF"
+
+[bookmark_markers.slot_styles."7"]
+fill_color = "#AEEA00"
+
+[bookmark_markers.slot_styles."8"]
+fill_color = "#00E5FF"
+
+[bookmark_markers.slot_styles."9"]
+fill_color = "#FF5252"
 
 [surgical_mode]
 enabled = true
